@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "evoforest-architecture"
+name = "evoforest-reimplementation"
 version = "0.1.0"
-description = "A clean-room software architecture recreation of the EvoForest paper."
+description = "A clean-room reimplementation of the EvoForest paper architecture."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

@@ -1,4 +1,4 @@
-# EvoForest Architecture
+# EvoForest Reimplementation
 
 This is a clean-room repository that recreates the software architecture described in
 the EvoForest paper. It is not a reproduction of the authors' private evolved graph,

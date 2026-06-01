@@ -18,7 +18,7 @@ from evoforest_arch.mutations import MutationDocument, MutationEngine, MutationS
 from evoforest_arch.task_context import build_task_context
 
 
-DEFAULT_TASK_CONTEXT_PREFIX = "Clean-room EvoForest architecture recreation"
+DEFAULT_TASK_CONTEXT_PREFIX = "Clean-room EvoForest reimplementation"
 
 
 @dataclass

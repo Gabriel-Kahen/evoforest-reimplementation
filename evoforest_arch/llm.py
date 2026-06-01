@@ -128,7 +128,7 @@ class HTTPJSONLLMClient:
 @dataclass
 class PromptBuilder:
     task_context: str = (
-        "Clean-room EvoForest architecture recreation for supervised time-series "
+        "Clean-room EvoForest reimplementation for supervised time-series "
         "experiments. The executable mutation layer accepts registry-backed primitives, "
         "optional trusted source-backed alternatives, and structured mutation documents."
     )
