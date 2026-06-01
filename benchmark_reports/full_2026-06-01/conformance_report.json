@@ -1,0 +1,721 @@
+{
+  "benchmark": "conformance",
+  "evaluation": {
+    "auc": 0.9930555555555556,
+    "cache": {
+      "entries": 29,
+      "hits": 111,
+      "key": "ancestor_conditioned_subpath",
+      "misses": 29,
+      "shared_across_configurations": true
+    },
+    "config": {
+      "activation": "identity",
+      "ridge_g": "huber",
+      "ridge_w": "uniform",
+      "segment_stats": "basic",
+      "shape_stats": "spectral",
+      "trend_stats": "linear"
+    },
+    "configuration_search_capped": true,
+    "global_ridge_auc": 0.9984567901234568,
+    "n_configs_evaluated": 16,
+    "n_configs_total": 48,
+    "n_features": 21,
+    "ridge_g": {
+      "alternative": "huber",
+      "description": "Huber-style residual downweighting.",
+      "irls": [
+        {
+          "final_alpha": 31.622776601683793,
+          "fold": 0,
+          "iterations": [
+            {
+              "alpha": 31.622776601683793,
+              "residual_std": 0.2370658186113104,
+              "step": 1,
+              "weight_max": 1.0,
+              "weight_mean": 1.0,
+              "weight_min": 1.0,
+              "weight_std": 0.0
+            },
+            {
+              "alpha": 31.622776601683793,
+              "residual_std": 0.2370658186113104,
+              "step": 2,
+              "weight_max": 1.0,
+              "weight_mean": 1.0,
+              "weight_min": 1.0,
+              "weight_std": 0.0
+            }
+          ],
+          "steps_used": 2
+        },
+        {
+          "final_alpha": 10.0,
+          "fold": 1,
+          "iterations": [
+            {
+              "alpha": 10.0,
+              "residual_std": 0.22959607534097481,
+              "step": 1,
+              "weight_max": 1.0,
+              "weight_mean": 1.0,
+              "weight_min": 1.0,
+              "weight_std": 0.0
+            },
+            {
+              "alpha": 10.0,
+              "residual_std": 0.22959607534097481,
+              "step": 2,
+              "weight_max": 1.0,
+              "weight_mean": 1.0,
+              "weight_min": 1.0,
+              "weight_std": 0.0
+            }
+          ],
+          "steps_used": 2
+        },
+        {
+          "final_alpha": 10.0,
+          "fold": 2,
+          "iterations": [
+            {
+              "alpha": 10.0,
+              "residual_std": 0.23429620098437406,
+              "step": 1,
+              "weight_max": 1.0,
+              "weight_mean": 1.0,
+              "weight_min": 1.0,
+              "weight_std": 0.0
+            },
+            {
+              "alpha": 10.0,
+              "residual_std": 0.23429620098437406,
+              "step": 2,
+              "weight_max": 1.0,
+              "weight_mean": 1.0,
+              "weight_min": 1.0,
+              "weight_std": 0.0
+            }
+          ],
+          "steps_used": 2
+        }
+      ],
+      "irls_steps_requested": 2,
+      "irls_steps_used_per_fold": [
+        2,
+        2,
+        2
+      ],
+      "rule": "huber"
+    },
+    "ridge_w": {
+      "alternative": "uniform",
+      "max": 1.0,
+      "mean": 1.0,
+      "min": 1.0,
+      "std": 0.0
+    },
+    "shap_reconstruction_error": 2.220446049250313e-16
+  },
+  "evolution": {
+    "auc": 0.9760802469135802,
+    "cache": {
+      "entries": 19,
+      "hits": 29,
+      "key": "ancestor_conditioned_subpath",
+      "misses": 19,
+      "shared_across_configurations": true
+    },
+    "config": {
+      "activation": "sigmoid_gate",
+      "ridge_g": "identity",
+      "ridge_w": "boundary_energy",
+      "segment_stats": "basic",
+      "shape_stats": "spectral",
+      "trend_stats": "linear"
+    },
+    "configuration_search_capped": true,
+    "global_ridge_auc": 0.9969135802469136,
+    "n_configs_evaluated": 4,
+    "n_configs_total": 48,
+    "n_features": 21,
+    "ridge_g": {
+      "alternative": "identity",
+      "description": "No residual reweighting.",
+      "irls": [
+        {
+          "final_alpha": 0.0031622776601683794,
+          "fold": 0,
+          "iterations": [],
+          "steps_used": 0
+        },
+        {
+          "final_alpha": 0.0001,
+          "fold": 1,
+          "iterations": [],
+          "steps_used": 0
+        },
+        {
+          "final_alpha": 0.01,
+          "fold": 2,
+          "iterations": [],
+          "steps_used": 0
+        }
+      ],
+      "irls_steps_requested": 2,
+      "irls_steps_used_per_fold": [
+        0,
+        0,
+        0
+      ],
+      "rule": "identity"
+    },
+    "ridge_w": {
+      "alternative": "boundary_energy",
+      "max": 1.3389269727836857,
+      "mean": 1.0,
+      "min": 0.4470845153157063,
+      "std": 0.2835252944557492
+    },
+    "shap_reconstruction_error": 1.1102230246251565e-15
+  },
+  "graph": {
+    "alternatives": 15,
+    "alternatives_by_kind": {
+      "callable": 3,
+      "fitting": 4,
+      "input": 0,
+      "intermediate": 5,
+      "output": 3
+    },
+    "configuration_nodes": [
+      "activation",
+      "ridge_g",
+      "ridge_w",
+      "segment_stats",
+      "shape_stats",
+      "trend_stats"
+    ],
+    "fitting_nodes": [
+      "ridge_w",
+      "ridge_g"
+    ],
+    "globals": {
+      "gate_scale": {
+        "description": "Shared scale for callable gate families.",
+        "name": "gate_scale",
+        "shape": [
+          1
+        ],
+        "trainable": true,
+        "value": [
+          1.0
+        ]
+      },
+      "projection_vector": {
+        "description": "Low-dimensional global vector used by projection outputs.",
+        "name": "projection_vector",
+        "shape": [
+          16
+        ],
+        "trainable": true,
+        "value": [
+          0.2,
+          0.25333333333333335,
+          0.3066666666666667,
+          0.36,
+          0.41333333333333333,
+          0.4666666666666667,
+          0.52,
+          0.5733333333333334,
+          0.6266666666666667,
+          0.68,
+          0.7333333333333334,
+          0.7866666666666666,
+          0.8400000000000001,
+          0.8933333333333333,
+          0.9466666666666668,
+          1.0
+        ]
+      },
+      "residual_huber_scale": {
+        "description": "Shared threshold for residual-based Ridge reweighting.",
+        "name": "residual_huber_scale",
+        "shape": [
+          1
+        ],
+        "trainable": true,
+        "value": [
+          1.0
+        ]
+      }
+    },
+    "name": "evoforest_seed",
+    "node_kinds": {
+      "callable": 1,
+      "fitting": 2,
+      "input": 2,
+      "intermediate": 3,
+      "output": 1
+    },
+    "nodes": 9,
+    "output_nodes": [
+      "output"
+    ],
+    "total_configurations": 48
+  },
+  "quick": false,
+  "requirements": [
+    {
+      "description": "Shared DAG exposes input, intermediate, callable, output, and fitting node types.",
+      "evidence": {
+        "node_kinds": {
+          "callable": 1,
+          "fitting": 2,
+          "input": 2,
+          "intermediate": 3,
+          "output": 1
+        },
+        "nodes": 9
+      },
+      "id": "dag_nodes",
+      "passed": true
+    },
+    {
+      "description": "Output alternatives are stacked as features and excluded from configuration selection.",
+      "evidence": {
+        "n_features": 21,
+        "n_output_alternatives": 3,
+        "output_in_config_space": false
+      },
+      "id": "output_semantics",
+      "passed": true
+    },
+    {
+      "description": "Evaluator scores capped graph configurations and reports best-config ROC-AUC.",
+      "evidence": {
+        "auc": 0.9930555555555556,
+        "capped": true,
+        "evaluated": 16,
+        "total": 48
+      },
+      "id": "configuration_search",
+      "passed": true
+    },
+    {
+      "description": "Configuration search shares an ancestor-conditioned cache across configurations.",
+      "evidence": {
+        "entries": 29,
+        "hits": 111,
+        "key": "ancestor_conditioned_subpath",
+        "misses": 29,
+        "shared_across_configurations": true
+      },
+      "id": "ancestor_cache",
+      "passed": true
+    },
+    {
+      "description": "ridge_w and ridge_g fitting nodes alter sample and residual weighting.",
+      "evidence": {
+        "ridge_g": {
+          "alternative": "huber",
+          "description": "Huber-style residual downweighting.",
+          "irls": [
+            {
+              "final_alpha": 31.622776601683793,
+              "fold": 0,
+              "iterations": [
+                {
+                  "alpha": 31.622776601683793,
+                  "residual_std": 0.2370658186113104,
+                  "step": 1,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                },
+                {
+                  "alpha": 31.622776601683793,
+                  "residual_std": 0.2370658186113104,
+                  "step": 2,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                }
+              ],
+              "steps_used": 2
+            },
+            {
+              "final_alpha": 10.0,
+              "fold": 1,
+              "iterations": [
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.22959607534097481,
+                  "step": 1,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                },
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.22959607534097481,
+                  "step": 2,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                }
+              ],
+              "steps_used": 2
+            },
+            {
+              "final_alpha": 10.0,
+              "fold": 2,
+              "iterations": [
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.23429620098437406,
+                  "step": 1,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                },
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.23429620098437406,
+                  "step": 2,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                }
+              ],
+              "steps_used": 2
+            }
+          ],
+          "irls_steps_requested": 2,
+          "irls_steps_used_per_fold": [
+            2,
+            2,
+            2
+          ],
+          "rule": "huber"
+        },
+        "ridge_w": {
+          "alternative": "uniform",
+          "max": 1.0,
+          "mean": 1.0,
+          "min": 1.0,
+          "std": 0.0
+        }
+      },
+      "id": "fitting_nodes",
+      "passed": true
+    },
+    {
+      "description": "Persistent trainable globals are present and referenced by graph alternatives.",
+      "evidence": {
+        "referenced_globals": [
+          "gate_scale",
+          "projection_vector",
+          "residual_huber_scale"
+        ],
+        "trainable_globals": [
+          "gate_scale",
+          "projection_vector",
+          "residual_huber_scale"
+        ]
+      },
+      "id": "global_parameters",
+      "passed": true
+    },
+    {
+      "description": "Optional global refinement runs before frozen Ridge structural scoring.",
+      "evidence": {
+        "accepted_updates": 0,
+        "backend": "numpy_coordinate",
+        "enabled": true,
+        "fallback_reason": "",
+        "final_loss": 0.056878406904416506,
+        "initial_loss": 0.056878406904416506,
+        "requested_backend": "numpy",
+        "steps": 1,
+        "trainable_globals": [
+          "gate_scale",
+          "projection_vector",
+          "residual_huber_scale"
+        ]
+      },
+      "id": "two_phase_evaluation",
+      "passed": true
+    },
+    {
+      "description": "Evaluator emits diagnostic global Ridge and exact linear contribution reconstruction metrics.",
+      "evidence": {
+        "linear_shap": {
+          "basis": "standardized linear Ridge contribution z_j * coefficient_j",
+          "cv_reconstruction_error": 2.220446049250313e-16,
+          "global_reconstruction_error": 2.220446049250313e-16,
+          "mean_abs_contribution_total": 0.7288811873813736,
+          "top_feature": "output.raw_concat.mean_delta"
+        },
+        "scoring_context": {
+          "best_config_auc": 0.9930555555555556,
+          "config_auc_range": [
+            0.9205246913580247,
+            0.9930555555555556
+          ],
+          "effective_rank": 7.948003402466314,
+          "fold_auc_std": 0.0,
+          "global_ridge_auc": 0.9984567901234568,
+          "mean_max_corr": 0.984558659976133,
+          "n_configs": 16,
+          "n_configs_total": 48,
+          "n_features_best_config": 21,
+          "n_features_global": 336,
+          "scoring": "configuration-based (best config AUC = evoforest score)",
+          "shap_reconstruction_error": 2.220446049250313e-16
+        }
+      },
+      "id": "ridge_diagnostics",
+      "passed": true
+    },
+    {
+      "description": "Stateful evaluation updates alternative age and rolling statistics.",
+      "evidence": {
+        "n_alternative_stats": 15,
+        "sample": [
+          {
+            "age": 1,
+            "alternative": "basic",
+            "best_config_auc": 0.9930555555555556,
+            "kind": "intermediate",
+            "last_abs_residual_corr": 0.051277847047258594,
+            "last_config_auc": 0.9930555555555556,
+            "last_feature_count": 21,
+            "last_importance": 1.0000000000000002,
+            "last_mean_abs_shap": 0.034708627970541604,
+            "last_participation_age": 1,
+            "last_redundancy": 0.9845586599761331,
+            "last_selected": true,
+            "last_shap_importance": 1.0000000000000002,
+            "last_weight_stability": 6.56422770775372,
+            "max_feature_auc": 0.8078703703703703,
+            "mean_abs_residual_corr": 0.051277847047258594,
+            "mean_abs_shap": 0.034708627970541604,
+            "mean_config_auc": 0.9930555555555556,
+            "mean_feature_count": 21.0,
+            "mean_importance": 1.0000000000000002,
+            "mean_redundancy": 0.9845586599761331,
+            "mean_shap_importance": 1.0000000000000002,
+            "mean_weight_stability": 6.56422770775372,
+            "name": "segment_stats.basic",
+            "node": "segment_stats",
+            "output_count": 0,
+            "participation_count": 1,
+            "selected_count": 1
+          },
+          {
+            "age": 1,
+            "alternative": "spectral",
+            "best_config_auc": 0.9930555555555556,
+            "kind": "intermediate",
+            "last_abs_residual_corr": 0.051277847047258594,
+            "last_config_auc": 0.9930555555555556,
+            "last_feature_count": 21,
+            "last_importance": 1.0000000000000002,
+            "last_mean_abs_shap": 0.034708627970541604,
+            "last_participation_age": 1,
+            "last_redundancy": 0.9845586599761331,
+            "last_selected": true,
+            "last_shap_importance": 1.0000000000000002,
+            "last_weight_stability": 6.56422770775372,
+            "max_feature_auc": 0.8078703703703703,
+            "mean_abs_residual_corr": 0.051277847047258594,
+            "mean_abs_shap": 0.034708627970541604,
+            "mean_config_auc": 0.9930555555555556,
+            "mean_feature_count": 21.0,
+            "mean_importance": 1.0000000000000002,
+            "mean_redundancy": 0.9845586599761331,
+            "mean_shap_importance": 1.0000000000000002,
+            "mean_weight_stability": 6.56422770775372,
+            "name": "shape_stats.spectral",
+            "node": "shape_stats",
+            "output_count": 0,
+            "participation_count": 1,
+            "selected_count": 1
+          },
+          {
+            "age": 1,
+            "alternative": "linear",
+            "best_config_auc": 0.9930555555555556,
+            "kind": "intermediate",
+            "last_abs_residual_corr": 0.051277847047258594,
+            "last_config_auc": 0.9930555555555556,
+            "last_feature_count": 21,
+            "last_importance": 1.0000000000000002,
+            "last_mean_abs_shap": 0.034708627970541604,
+            "last_participation_age": 1,
+            "last_redundancy": 0.9845586599761331,
+            "last_selected": true,
+            "last_shap_importance": 1.0000000000000002,
+            "last_weight_stability": 6.56422770775372,
+            "max_feature_auc": 0.8078703703703703,
+            "mean_abs_residual_corr": 0.051277847047258594,
+            "mean_abs_shap": 0.034708627970541604,
+            "mean_config_auc": 0.9930555555555556,
+            "mean_feature_count": 21.0,
+            "mean_importance": 1.0000000000000002,
+            "mean_redundancy": 0.9845586599761331,
+            "mean_shap_importance": 1.0000000000000002,
+            "mean_weight_stability": 6.56422770775372,
+            "name": "trend_stats.linear",
+            "node": "trend_stats",
+            "output_count": 0,
+            "participation_count": 1,
+            "selected_count": 1
+          }
+        ]
+      },
+      "id": "alternative_history",
+      "passed": true
+    },
+    {
+      "description": "Mutation documents round-trip through the YAML-style contract.",
+      "evidence": {
+        "add": [
+          {
+            "alternative_id": "spectral_conformance",
+            "description": "Conformance mutation alternative.",
+            "global_refs": [],
+            "kind": "add_alternative",
+            "parents": [
+              "series"
+            ],
+            "primitive": "spectral_basic",
+            "source": "",
+            "target_node": "shape_stats"
+          }
+        ],
+        "globals": [],
+        "hypotheses": [
+          "Exercise the YAML mutation contract."
+        ],
+        "nodes": [],
+        "rationale": "Conformance report round-trip.",
+        "remove": []
+      },
+      "id": "mutation_yaml",
+      "passed": true
+    },
+    {
+      "description": "Mutation application runs graph maintenance and reports cleanup actions.",
+      "evidence": {
+        "collapsed_duplicates": [],
+        "removed_alternatives": [],
+        "removed_globals": [],
+        "removed_nodes": []
+      },
+      "id": "maintenance",
+      "passed": true
+    },
+    {
+      "description": "Evolution events expose failure/salvage fields for rejected candidate handling.",
+      "evidence": {
+        "event_salvaged": [],
+        "has_salvage_method": true
+      },
+      "id": "failed_feedback_salvage_surface",
+      "passed": true
+    },
+    {
+      "description": "Evolution writes events, checkpoint, archive, task context, mutation YAML, and memorandum artifacts.",
+      "evidence": {
+        "archive_rows": 1,
+        "checkpoint_keys": [
+          "diagnostics_toon",
+          "feedback",
+          "graph",
+          "island",
+          "result",
+          "step"
+        ],
+        "run_dir": "benchmark_reports/full_2026-06-01/artifacts/conformance_evolution"
+      },
+      "id": "artifacts",
+      "passed": true
+    },
+    {
+      "description": "Memorandum uses paper-style sectioned, hypothesis-free experiment logging.",
+      "evidence": {
+        "sections_present": [
+          "[OUTCOME HISTORY]",
+          "[STATE]",
+          "[WHAT WORKS]",
+          "[WHAT FAILED]",
+          "[ERROR LOG]"
+        ]
+      },
+      "id": "memorandum",
+      "passed": true
+    },
+    {
+      "description": "Task context captures tensor inventory and scorer mechanics for prompt grounding.",
+      "evidence": {
+        "contains_scorer_mechanics": true,
+        "contains_tensor_inventory": true
+      },
+      "id": "task_context",
+      "passed": true
+    },
+    {
+      "description": "LLM-backed scientist/engineer agents preserve the two-stage prompt and temperature contract.",
+      "evidence": {
+        "engineer_temperature": 0.0,
+        "island_2_temperature": 0.6,
+        "scientist_island_temperatures": [
+          0.35,
+          0.5,
+          0.6,
+          0.75
+        ]
+      },
+      "id": "llm_two_stage",
+      "passed": true
+    },
+    {
+      "description": "Trusted source-backed mutations are explicit opt-in behavior.",
+      "evidence": {
+        "allow_source_false": false,
+        "allow_source_true": true
+      },
+      "id": "source_mutation_gate",
+      "passed": true
+    },
+    {
+      "description": "Graph maintenance exposes duplicate collapse, unreachable pruning, and unused-global cleanup.",
+      "evidence": {
+        "maintenance_methods": [
+          "_collapse_duplicate_alternatives",
+          "_prune_unreachable_nodes",
+          "_prune_unused_globals"
+        ]
+      },
+      "id": "graph_maintenance_api",
+      "passed": true
+    }
+  ],
+  "scope": "These benchmarks validate architecture-level behavior of this clean-room reimplementation. They do not claim to reproduce the authors' private evolved graph, private code-generation stack, competition pipeline, or reported ROC-AUC.",
+  "seed": 17,
+  "summary": {
+    "all_passed": true,
+    "passed": 18,
+    "total": 18
+  }
+}

@@ -1,0 +1,75 @@
+{
+  "benchmark": "all",
+  "quick": false,
+  "scope": "These benchmarks validate architecture-level behavior of this clean-room reimplementation. They do not claim to reproduce the authors' private evolved graph, private code-generation stack, competition pipeline, or reported ROC-AUC.",
+  "seed": 17,
+  "suites": [
+    {
+      "json": "benchmark_reports/full_2026-06-01/conformance_report.json",
+      "markdown": "benchmark_reports/full_2026-06-01/conformance_report.md",
+      "seed": 17,
+      "suite": "conformance_report",
+      "summary": {
+        "all_passed": true,
+        "passed": 18,
+        "total": 18
+      }
+    },
+    {
+      "json": "benchmark_reports/full_2026-06-01/synthetic_suite.json",
+      "markdown": "benchmark_reports/full_2026-06-01/synthetic_suite.md",
+      "seed": 23,
+      "suite": "synthetic_suite",
+      "summary": {
+        "all_passed": true,
+        "passed": 5,
+        "total": 5
+      }
+    },
+    {
+      "json": "benchmark_reports/full_2026-06-01/ablation_suite.json",
+      "markdown": "benchmark_reports/full_2026-06-01/ablation_suite.md",
+      "seed": 29,
+      "suite": "ablation_suite",
+      "summary": {
+        "all_passed": true,
+        "full_auc": 0.9969135802469136,
+        "passed": 7,
+        "total": 7
+      }
+    },
+    {
+      "json": "benchmark_reports/full_2026-06-01/search_dynamics.json",
+      "markdown": "benchmark_reports/full_2026-06-01/search_dynamics.md",
+      "seed": 31,
+      "suite": "search_dynamics",
+      "summary": {
+        "accepted_mutations": 8,
+        "delta_auc": 0.0,
+        "failed_mutations": 0,
+        "final_auc": 0.9708504801097394,
+        "global_best_versions": 9,
+        "initial_auc": 0.9708504801097394,
+        "passed": true,
+        "run_dir": "benchmark_reports/full_2026-06-01/artifacts/search_dynamics_run",
+        "salvaged_alternatives": 0,
+        "steps": 8
+      }
+    },
+    {
+      "json": "benchmark_reports/full_2026-06-01/runtime_scaling.json",
+      "markdown": "benchmark_reports/full_2026-06-01/runtime_scaling.md",
+      "seed": 37,
+      "suite": "runtime_scaling",
+      "summary": {
+        "passed": true,
+        "repeats": 3,
+        "scenarios": 11
+      }
+    }
+  ],
+  "summary": {
+    "all_passed": true,
+    "suites": 5
+  }
+}

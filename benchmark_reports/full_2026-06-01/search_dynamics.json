@@ -1,0 +1,404 @@
+{
+  "archive": [
+    {
+      "auc": 0.9708504801097394,
+      "config": {
+        "activation": "identity",
+        "ridge_g": "identity",
+        "ridge_w": "uniform",
+        "segment_stats": "basic",
+        "shape_stats": "cusum",
+        "trend_stats": "linear"
+      },
+      "island": null,
+      "mode": "single",
+      "path": "global_best_v0000_step_0000_single.json",
+      "step": 0,
+      "version": 0
+    },
+    {
+      "auc": 0.9708504801097394,
+      "config": {
+        "activation": "identity",
+        "ridge_g": "identity",
+        "ridge_w": "uniform",
+        "segment_stats": "basic",
+        "shape_stats": "cusum",
+        "trend_stats": "linear"
+      },
+      "island": null,
+      "mode": "single",
+      "path": "global_best_v0001_step_0001_single.json",
+      "step": 1,
+      "version": 1
+    },
+    {
+      "auc": 0.9708504801097394,
+      "config": {
+        "activation": "identity",
+        "ridge_g": "identity",
+        "ridge_w": "uniform",
+        "segment_stats": "basic",
+        "shape_stats": "cusum",
+        "trend_stats": "linear"
+      },
+      "island": null,
+      "mode": "single",
+      "path": "global_best_v0002_step_0002_single.json",
+      "step": 2,
+      "version": 2
+    },
+    {
+      "auc": 0.9708504801097394,
+      "config": {
+        "activation": "identity",
+        "ridge_g": "identity",
+        "ridge_w": "uniform",
+        "segment_stats": "basic",
+        "shape_stats": "cusum",
+        "trend_stats": "linear"
+      },
+      "island": null,
+      "mode": "single",
+      "path": "global_best_v0003_step_0003_single.json",
+      "step": 3,
+      "version": 3
+    },
+    {
+      "auc": 0.9708504801097394,
+      "config": {
+        "activation": "identity",
+        "ridge_g": "identity",
+        "ridge_w": "uniform",
+        "segment_stats": "basic",
+        "shape_stats": "cusum",
+        "trend_stats": "linear"
+      },
+      "island": null,
+      "mode": "single",
+      "path": "global_best_v0004_step_0004_single.json",
+      "step": 4,
+      "version": 4
+    },
+    {
+      "auc": 0.9708504801097394,
+      "config": {
+        "activation": "identity",
+        "ridge_g": "identity",
+        "ridge_w": "uniform",
+        "segment_stats": "basic",
+        "shape_stats": "cusum",
+        "trend_stats": "linear"
+      },
+      "island": null,
+      "mode": "single",
+      "path": "global_best_v0005_step_0005_single.json",
+      "step": 5,
+      "version": 5
+    },
+    {
+      "auc": 0.9708504801097394,
+      "config": {
+        "activation": "identity",
+        "ridge_g": "identity",
+        "ridge_w": "uniform",
+        "segment_stats": "basic",
+        "shape_stats": "cusum",
+        "trend_stats": "linear"
+      },
+      "island": null,
+      "mode": "single",
+      "path": "global_best_v0006_step_0006_single.json",
+      "step": 6,
+      "version": 6
+    },
+    {
+      "auc": 0.9708504801097394,
+      "config": {
+        "activation": "identity",
+        "ridge_g": "identity",
+        "ridge_w": "uniform",
+        "segment_stats": "basic",
+        "shape_stats": "cusum",
+        "trend_stats": "linear"
+      },
+      "island": null,
+      "mode": "single",
+      "path": "global_best_v0007_step_0007_single.json",
+      "step": 7,
+      "version": 7
+    },
+    {
+      "auc": 0.9708504801097394,
+      "config": {
+        "activation": "identity",
+        "ridge_g": "identity",
+        "ridge_w": "uniform",
+        "segment_stats": "basic",
+        "shape_stats": "cusum",
+        "trend_stats": "linear"
+      },
+      "island": null,
+      "mode": "single",
+      "path": "global_best_v0008_step_0008_single.json",
+      "step": 8,
+      "version": 8
+    }
+  ],
+  "benchmark": "search_dynamics",
+  "events": [
+    {
+      "accepted": true,
+      "added": [
+        "segment_stats.robust_mutation_1"
+      ],
+      "best_score": 0.9708504801097394,
+      "config": {
+        "activation": "identity",
+        "ridge_g": "identity",
+        "ridge_w": "uniform",
+        "segment_stats": "basic",
+        "shape_stats": "cusum",
+        "trend_stats": "linear"
+      },
+      "delta_to_best": 0.0,
+      "failed": false,
+      "removed": [],
+      "salvaged": [],
+      "score": 0.9708504801097394,
+      "step": 1
+    },
+    {
+      "accepted": true,
+      "added": [
+        "segment_stats.robust_mutation_2"
+      ],
+      "best_score": 0.9708504801097394,
+      "config": {
+        "activation": "identity",
+        "ridge_g": "identity",
+        "ridge_w": "uniform",
+        "segment_stats": "basic",
+        "shape_stats": "cusum",
+        "trend_stats": "linear"
+      },
+      "delta_to_best": 0.0,
+      "failed": false,
+      "removed": [],
+      "salvaged": [],
+      "score": 0.9708504801097394,
+      "step": 2
+    },
+    {
+      "accepted": true,
+      "added": [
+        "segment_stats.robust_mutation_3"
+      ],
+      "best_score": 0.9708504801097394,
+      "config": {
+        "activation": "identity",
+        "ridge_g": "identity",
+        "ridge_w": "uniform",
+        "segment_stats": "basic",
+        "shape_stats": "cusum",
+        "trend_stats": "linear"
+      },
+      "delta_to_best": 0.0,
+      "failed": false,
+      "removed": [],
+      "salvaged": [],
+      "score": 0.9708504801097394,
+      "step": 3
+    },
+    {
+      "accepted": true,
+      "added": [
+        "segment_stats.robust_mutation_4"
+      ],
+      "best_score": 0.9708504801097394,
+      "config": {
+        "activation": "identity",
+        "ridge_g": "identity",
+        "ridge_w": "uniform",
+        "segment_stats": "basic",
+        "shape_stats": "cusum",
+        "trend_stats": "linear"
+      },
+      "delta_to_best": 0.0,
+      "failed": false,
+      "removed": [],
+      "salvaged": [],
+      "score": 0.9708504801097394,
+      "step": 4
+    },
+    {
+      "accepted": true,
+      "added": [
+        "segment_stats.robust_mutation_5"
+      ],
+      "best_score": 0.9708504801097394,
+      "config": {
+        "activation": "identity",
+        "ridge_g": "identity",
+        "ridge_w": "uniform",
+        "segment_stats": "basic",
+        "shape_stats": "cusum",
+        "trend_stats": "linear"
+      },
+      "delta_to_best": 0.0,
+      "failed": false,
+      "removed": [],
+      "salvaged": [],
+      "score": 0.9708504801097394,
+      "step": 5
+    },
+    {
+      "accepted": true,
+      "added": [
+        "segment_stats.robust_mutation_6"
+      ],
+      "best_score": 0.9708504801097394,
+      "config": {
+        "activation": "identity",
+        "ridge_g": "identity",
+        "ridge_w": "uniform",
+        "segment_stats": "basic",
+        "shape_stats": "cusum",
+        "trend_stats": "linear"
+      },
+      "delta_to_best": 0.0,
+      "failed": false,
+      "removed": [],
+      "salvaged": [],
+      "score": 0.9708504801097394,
+      "step": 6
+    },
+    {
+      "accepted": true,
+      "added": [
+        "segment_stats.robust_mutation_7"
+      ],
+      "best_score": 0.9708504801097394,
+      "config": {
+        "activation": "identity",
+        "ridge_g": "identity",
+        "ridge_w": "uniform",
+        "segment_stats": "basic",
+        "shape_stats": "cusum",
+        "trend_stats": "linear"
+      },
+      "delta_to_best": 0.0,
+      "failed": false,
+      "removed": [],
+      "salvaged": [],
+      "score": 0.9708504801097394,
+      "step": 7
+    },
+    {
+      "accepted": true,
+      "added": [
+        "segment_stats.robust_mutation_8"
+      ],
+      "best_score": 0.9708504801097394,
+      "config": {
+        "activation": "identity",
+        "ridge_g": "identity",
+        "ridge_w": "uniform",
+        "segment_stats": "basic",
+        "shape_stats": "cusum",
+        "trend_stats": "linear"
+      },
+      "delta_to_best": 0.0,
+      "failed": false,
+      "removed": [],
+      "salvaged": [],
+      "score": 0.9708504801097394,
+      "step": 8
+    }
+  ],
+  "final_evaluation": {
+    "auc": 0.9708504801097394,
+    "cache": {
+      "entries": 39,
+      "hits": 133,
+      "key": "ancestor_conditioned_subpath",
+      "misses": 39,
+      "shared_across_configurations": true
+    },
+    "config": {
+      "activation": "identity",
+      "ridge_g": "identity",
+      "ridge_w": "uniform",
+      "segment_stats": "basic",
+      "shape_stats": "cusum",
+      "trend_stats": "linear"
+    },
+    "configuration_search_capped": true,
+    "global_ridge_auc": 0.9845679012345679,
+    "n_configs_evaluated": 16,
+    "n_configs_total": 72,
+    "n_features": 21,
+    "ridge_g": {
+      "alternative": "identity",
+      "description": "No residual reweighting.",
+      "irls": [
+        {
+          "final_alpha": 10.0,
+          "fold": 0,
+          "iterations": [],
+          "steps_used": 0
+        },
+        {
+          "final_alpha": 10.0,
+          "fold": 1,
+          "iterations": [],
+          "steps_used": 0
+        },
+        {
+          "final_alpha": 31.622776601683793,
+          "fold": 2,
+          "iterations": [],
+          "steps_used": 0
+        }
+      ],
+      "irls_steps_requested": 2,
+      "irls_steps_used_per_fold": [
+        0,
+        0,
+        0
+      ],
+      "rule": "identity"
+    },
+    "ridge_w": {
+      "alternative": "uniform",
+      "max": 1.0,
+      "mean": 1.0,
+      "min": 1.0,
+      "std": 0.0
+    },
+    "shap_reconstruction_error": 2.220446049250313e-16
+  },
+  "graph_complexity": {
+    "alternatives": 16,
+    "n_configs_evaluated": 16,
+    "n_configs_total": 72,
+    "n_features_best_config": 21,
+    "nodes": 9,
+    "output_alternatives": 3
+  },
+  "quick": false,
+  "scope": "These benchmarks validate architecture-level behavior of this clean-room reimplementation. They do not claim to reproduce the authors' private evolved graph, private code-generation stack, competition pipeline, or reported ROC-AUC.",
+  "seed": 31,
+  "summary": {
+    "accepted_mutations": 8,
+    "delta_auc": 0.0,
+    "failed_mutations": 0,
+    "final_auc": 0.9708504801097394,
+    "global_best_versions": 9,
+    "initial_auc": 0.9708504801097394,
+    "passed": true,
+    "run_dir": "benchmark_reports/full_2026-06-01/artifacts/search_dynamics_run",
+    "salvaged_alternatives": 0,
+    "steps": 8
+  }
+}

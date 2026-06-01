@@ -1,0 +1,1237 @@
+{
+  "benchmark": "runtime_scaling",
+  "quick": false,
+  "scenarios": [
+    {
+      "auc": 0.9956597222222222,
+      "cache_hits": 6,
+      "cache_misses": 9,
+      "evaluation": {
+        "auc": 0.9956597222222222,
+        "cache": {
+          "entries": 9,
+          "hits": 6,
+          "key": "ancestor_conditioned_subpath",
+          "misses": 9,
+          "shared_across_configurations": true
+        },
+        "config": {
+          "activation": "identity",
+          "ridge_g": "identity",
+          "ridge_w": "uniform",
+          "segment_stats": "basic",
+          "shape_stats": "cusum",
+          "trend_stats": "linear"
+        },
+        "configuration_search_capped": true,
+        "global_ridge_auc": 0.9982638888888888,
+        "n_configs_evaluated": 1,
+        "n_configs_total": 48,
+        "n_features": 21,
+        "ridge_g": {
+          "alternative": "identity",
+          "description": "No residual reweighting.",
+          "irls": [
+            {
+              "final_alpha": 10.0,
+              "fold": 0,
+              "iterations": [],
+              "steps_used": 0
+            },
+            {
+              "final_alpha": 10.0,
+              "fold": 1,
+              "iterations": [],
+              "steps_used": 0
+            },
+            {
+              "final_alpha": 10.0,
+              "fold": 2,
+              "iterations": [],
+              "steps_used": 0
+            }
+          ],
+          "irls_steps_requested": 2,
+          "irls_steps_used_per_fold": [
+            0,
+            0,
+            0
+          ],
+          "rule": "identity"
+        },
+        "ridge_w": {
+          "alternative": "uniform",
+          "max": 1.0,
+          "mean": 1.0,
+          "min": 1.0,
+          "std": 0.0
+        },
+        "shap_reconstruction_error": 2.220446049250313e-16
+      },
+      "family": "configuration_cap",
+      "seconds": [
+        0.011142458009999245,
+        0.011292375042103231,
+        0.011490708973724395
+      ],
+      "seconds_median": 0.011292375042103231,
+      "setting": "max_configurations=1"
+    },
+    {
+      "auc": 0.9956597222222222,
+      "cache_hits": 59,
+      "cache_misses": 23,
+      "evaluation": {
+        "auc": 0.9956597222222222,
+        "cache": {
+          "entries": 23,
+          "hits": 59,
+          "key": "ancestor_conditioned_subpath",
+          "misses": 23,
+          "shared_across_configurations": true
+        },
+        "config": {
+          "activation": "identity",
+          "ridge_g": "identity",
+          "ridge_w": "uniform",
+          "segment_stats": "basic",
+          "shape_stats": "cusum",
+          "trend_stats": "linear"
+        },
+        "configuration_search_capped": true,
+        "global_ridge_auc": 0.9982638888888888,
+        "n_configs_evaluated": 8,
+        "n_configs_total": 48,
+        "n_features": 21,
+        "ridge_g": {
+          "alternative": "identity",
+          "description": "No residual reweighting.",
+          "irls": [
+            {
+              "final_alpha": 10.0,
+              "fold": 0,
+              "iterations": [],
+              "steps_used": 0
+            },
+            {
+              "final_alpha": 10.0,
+              "fold": 1,
+              "iterations": [],
+              "steps_used": 0
+            },
+            {
+              "final_alpha": 10.0,
+              "fold": 2,
+              "iterations": [],
+              "steps_used": 0
+            }
+          ],
+          "irls_steps_requested": 2,
+          "irls_steps_used_per_fold": [
+            0,
+            0,
+            0
+          ],
+          "rule": "identity"
+        },
+        "ridge_w": {
+          "alternative": "uniform",
+          "max": 1.0,
+          "mean": 1.0,
+          "min": 1.0,
+          "std": 0.0
+        },
+        "shap_reconstruction_error": 2.220446049250313e-16
+      },
+      "family": "configuration_cap",
+      "seconds": [
+        0.1056713750003837,
+        0.11448625003686175,
+        0.12799725000513718
+      ],
+      "seconds_median": 0.11448625003686175,
+      "setting": "max_configurations=8"
+    },
+    {
+      "auc": 0.9991319444444444,
+      "cache_hits": 111,
+      "cache_misses": 29,
+      "evaluation": {
+        "auc": 0.9991319444444444,
+        "cache": {
+          "entries": 29,
+          "hits": 111,
+          "key": "ancestor_conditioned_subpath",
+          "misses": 29,
+          "shared_across_configurations": true
+        },
+        "config": {
+          "activation": "identity",
+          "ridge_g": "huber",
+          "ridge_w": "boundary_energy",
+          "segment_stats": "basic",
+          "shape_stats": "spectral",
+          "trend_stats": "linear"
+        },
+        "configuration_search_capped": true,
+        "global_ridge_auc": 0.9991319444444444,
+        "n_configs_evaluated": 16,
+        "n_configs_total": 48,
+        "n_features": 21,
+        "ridge_g": {
+          "alternative": "huber",
+          "description": "Huber-style residual downweighting.",
+          "irls": [
+            {
+              "final_alpha": 10.0,
+              "fold": 0,
+              "iterations": [
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.2063209131364906,
+                  "step": 1,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                },
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.2063209131364906,
+                  "step": 2,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                }
+              ],
+              "steps_used": 2
+            },
+            {
+              "final_alpha": 31.622776601683793,
+              "fold": 1,
+              "iterations": [
+                {
+                  "alpha": 31.622776601683793,
+                  "residual_std": 0.21690792587203603,
+                  "step": 1,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                },
+                {
+                  "alpha": 31.622776601683793,
+                  "residual_std": 0.21690792587203597,
+                  "step": 2,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                }
+              ],
+              "steps_used": 2
+            },
+            {
+              "final_alpha": 10.0,
+              "fold": 2,
+              "iterations": [
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.21101797198126995,
+                  "step": 1,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                },
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.21101797198126995,
+                  "step": 2,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                }
+              ],
+              "steps_used": 2
+            }
+          ],
+          "irls_steps_requested": 2,
+          "irls_steps_used_per_fold": [
+            2,
+            2,
+            2
+          ],
+          "rule": "huber"
+        },
+        "ridge_w": {
+          "alternative": "boundary_energy",
+          "max": 1.3949098049815642,
+          "mean": 0.9999999999999999,
+          "min": 0.4753577389716895,
+          "std": 0.28078917118152424
+        },
+        "shap_reconstruction_error": 4.440892098500626e-16
+      },
+      "family": "configuration_cap",
+      "seconds": [
+        0.2709752920200117,
+        0.249324708012864,
+        0.2906593329971656
+      ],
+      "seconds_median": 0.2709752920200117,
+      "setting": "max_configurations=16"
+    },
+    {
+      "auc": 0.9991319444444444,
+      "cache_hits": 200,
+      "cache_misses": 32,
+      "evaluation": {
+        "auc": 0.9991319444444444,
+        "cache": {
+          "entries": 32,
+          "hits": 200,
+          "key": "ancestor_conditioned_subpath",
+          "misses": 32,
+          "shared_across_configurations": true
+        },
+        "config": {
+          "activation": "identity",
+          "ridge_g": "huber",
+          "ridge_w": "boundary_energy",
+          "segment_stats": "basic",
+          "shape_stats": "spectral",
+          "trend_stats": "linear"
+        },
+        "configuration_search_capped": true,
+        "global_ridge_auc": 0.9991319444444444,
+        "n_configs_evaluated": 32,
+        "n_configs_total": 48,
+        "n_features": 21,
+        "ridge_g": {
+          "alternative": "huber",
+          "description": "Huber-style residual downweighting.",
+          "irls": [
+            {
+              "final_alpha": 10.0,
+              "fold": 0,
+              "iterations": [
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.2063209131364906,
+                  "step": 1,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                },
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.2063209131364906,
+                  "step": 2,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                }
+              ],
+              "steps_used": 2
+            },
+            {
+              "final_alpha": 31.622776601683793,
+              "fold": 1,
+              "iterations": [
+                {
+                  "alpha": 31.622776601683793,
+                  "residual_std": 0.21690792587203603,
+                  "step": 1,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                },
+                {
+                  "alpha": 31.622776601683793,
+                  "residual_std": 0.21690792587203597,
+                  "step": 2,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                }
+              ],
+              "steps_used": 2
+            },
+            {
+              "final_alpha": 10.0,
+              "fold": 2,
+              "iterations": [
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.21101797198126995,
+                  "step": 1,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                },
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.21101797198126995,
+                  "step": 2,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                }
+              ],
+              "steps_used": 2
+            }
+          ],
+          "irls_steps_requested": 2,
+          "irls_steps_used_per_fold": [
+            2,
+            2,
+            2
+          ],
+          "rule": "huber"
+        },
+        "ridge_w": {
+          "alternative": "boundary_energy",
+          "max": 1.3949098049815642,
+          "mean": 0.9999999999999999,
+          "min": 0.4753577389716895,
+          "std": 0.28078917118152424
+        },
+        "shap_reconstruction_error": 4.440892098500626e-16
+      },
+      "family": "configuration_cap",
+      "seconds": [
+        0.7605353340040892,
+        0.6565776250208728,
+        0.5752255000406876
+      ],
+      "seconds_median": 0.6565776250208728,
+      "setting": "max_configurations=32"
+    },
+    {
+      "auc": 0.9618055555555556,
+      "cache_hits": 111,
+      "cache_misses": 29,
+      "evaluation": {
+        "auc": 0.9618055555555556,
+        "cache": {
+          "entries": 29,
+          "hits": 111,
+          "key": "ancestor_conditioned_subpath",
+          "misses": 29,
+          "shared_across_configurations": true
+        },
+        "config": {
+          "activation": "clipped_linear",
+          "ridge_g": "identity",
+          "ridge_w": "boundary_energy",
+          "segment_stats": "basic",
+          "shape_stats": "cusum",
+          "trend_stats": "linear"
+        },
+        "configuration_search_capped": true,
+        "global_ridge_auc": 0.9930555555555556,
+        "n_configs_evaluated": 16,
+        "n_configs_total": 48,
+        "n_features": 21,
+        "ridge_g": {
+          "alternative": "identity",
+          "description": "No residual reweighting.",
+          "irls": [
+            {
+              "final_alpha": 10.0,
+              "fold": 0,
+              "iterations": [],
+              "steps_used": 0
+            },
+            {
+              "final_alpha": 3.1622776601683795,
+              "fold": 1,
+              "iterations": [],
+              "steps_used": 0
+            },
+            {
+              "final_alpha": 3.1622776601683795,
+              "fold": 2,
+              "iterations": [],
+              "steps_used": 0
+            }
+          ],
+          "irls_steps_requested": 2,
+          "irls_steps_used_per_fold": [
+            0,
+            0,
+            0
+          ],
+          "rule": "identity"
+        },
+        "ridge_w": {
+          "alternative": "boundary_energy",
+          "max": 1.3711518667915221,
+          "mean": 1.0,
+          "min": 0.46991722016809895,
+          "std": 0.2951850376377577
+        },
+        "shap_reconstruction_error": 4.440892098500626e-16
+      },
+      "family": "dataset_scale",
+      "seconds": [
+        0.29681754199555144,
+        0.29072099999757484,
+        0.2706093750311993
+      ],
+      "seconds_median": 0.29072099999757484,
+      "setting": "n_series=48, length=64"
+    },
+    {
+      "auc": 0.9991319444444444,
+      "cache_hits": 111,
+      "cache_misses": 29,
+      "evaluation": {
+        "auc": 0.9991319444444444,
+        "cache": {
+          "entries": 29,
+          "hits": 111,
+          "key": "ancestor_conditioned_subpath",
+          "misses": 29,
+          "shared_across_configurations": true
+        },
+        "config": {
+          "activation": "identity",
+          "ridge_g": "huber",
+          "ridge_w": "boundary_energy",
+          "segment_stats": "basic",
+          "shape_stats": "spectral",
+          "trend_stats": "linear"
+        },
+        "configuration_search_capped": true,
+        "global_ridge_auc": 0.9991319444444444,
+        "n_configs_evaluated": 16,
+        "n_configs_total": 48,
+        "n_features": 21,
+        "ridge_g": {
+          "alternative": "huber",
+          "description": "Huber-style residual downweighting.",
+          "irls": [
+            {
+              "final_alpha": 10.0,
+              "fold": 0,
+              "iterations": [
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.2063209131364906,
+                  "step": 1,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                },
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.2063209131364906,
+                  "step": 2,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                }
+              ],
+              "steps_used": 2
+            },
+            {
+              "final_alpha": 31.622776601683793,
+              "fold": 1,
+              "iterations": [
+                {
+                  "alpha": 31.622776601683793,
+                  "residual_std": 0.21690792587203603,
+                  "step": 1,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                },
+                {
+                  "alpha": 31.622776601683793,
+                  "residual_std": 0.21690792587203597,
+                  "step": 2,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                }
+              ],
+              "steps_used": 2
+            },
+            {
+              "final_alpha": 10.0,
+              "fold": 2,
+              "iterations": [
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.21101797198126995,
+                  "step": 1,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                },
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.21101797198126995,
+                  "step": 2,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                }
+              ],
+              "steps_used": 2
+            }
+          ],
+          "irls_steps_requested": 2,
+          "irls_steps_used_per_fold": [
+            2,
+            2,
+            2
+          ],
+          "rule": "huber"
+        },
+        "ridge_w": {
+          "alternative": "boundary_energy",
+          "max": 1.3949098049815642,
+          "mean": 0.9999999999999999,
+          "min": 0.4753577389716895,
+          "std": 0.28078917118152424
+        },
+        "shap_reconstruction_error": 4.440892098500626e-16
+      },
+      "family": "dataset_scale",
+      "seconds": [
+        0.4272732089739293,
+        0.4040067090536468,
+        0.3633259999915026
+      ],
+      "seconds_median": 0.4040067090536468,
+      "setting": "n_series=96, length=96"
+    },
+    {
+      "auc": 0.9992283950617284,
+      "cache_hits": 111,
+      "cache_misses": 29,
+      "evaluation": {
+        "auc": 0.9992283950617284,
+        "cache": {
+          "entries": 29,
+          "hits": 111,
+          "key": "ancestor_conditioned_subpath",
+          "misses": 29,
+          "shared_across_configurations": true
+        },
+        "config": {
+          "activation": "identity",
+          "ridge_g": "identity",
+          "ridge_w": "uniform",
+          "segment_stats": "basic",
+          "shape_stats": "cusum",
+          "trend_stats": "linear"
+        },
+        "configuration_search_capped": true,
+        "global_ridge_auc": 1.0,
+        "n_configs_evaluated": 16,
+        "n_configs_total": 48,
+        "n_features": 21,
+        "ridge_g": {
+          "alternative": "identity",
+          "description": "No residual reweighting.",
+          "irls": [
+            {
+              "final_alpha": 1.0,
+              "fold": 0,
+              "iterations": [],
+              "steps_used": 0
+            },
+            {
+              "final_alpha": 10.0,
+              "fold": 1,
+              "iterations": [],
+              "steps_used": 0
+            },
+            {
+              "final_alpha": 1.0,
+              "fold": 2,
+              "iterations": [],
+              "steps_used": 0
+            }
+          ],
+          "irls_steps_requested": 2,
+          "irls_steps_used_per_fold": [
+            0,
+            0,
+            0
+          ],
+          "rule": "identity"
+        },
+        "ridge_w": {
+          "alternative": "uniform",
+          "max": 1.0,
+          "mean": 1.0,
+          "min": 1.0,
+          "std": 0.0
+        },
+        "shap_reconstruction_error": 4.440892098500626e-16
+      },
+      "family": "dataset_scale",
+      "seconds": [
+        0.416043457982596,
+        0.3276914579910226,
+        0.32899104204261675
+      ],
+      "seconds_median": 0.32899104204261675,
+      "setting": "n_series=144, length=128"
+    },
+    {
+      "auc": 0.9991319444444444,
+      "cache_hits": 111,
+      "cache_misses": 29,
+      "evaluation": {
+        "auc": 0.9991319444444444,
+        "cache": {
+          "entries": 29,
+          "hits": 111,
+          "key": "ancestor_conditioned_subpath",
+          "misses": 29,
+          "shared_across_configurations": true
+        },
+        "config": {
+          "activation": "identity",
+          "ridge_g": "huber",
+          "ridge_w": "boundary_energy",
+          "segment_stats": "basic",
+          "shape_stats": "spectral",
+          "trend_stats": "linear"
+        },
+        "configuration_search_capped": true,
+        "global_ridge_auc": 0.9991319444444444,
+        "n_configs_evaluated": 16,
+        "n_configs_total": 48,
+        "n_features": 21,
+        "ridge_g": {
+          "alternative": "huber",
+          "description": "Huber-style residual downweighting.",
+          "irls": [
+            {
+              "final_alpha": 10.0,
+              "fold": 0,
+              "iterations": [
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.2063209131364906,
+                  "step": 1,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                },
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.2063209131364906,
+                  "step": 2,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                }
+              ],
+              "steps_used": 2
+            },
+            {
+              "final_alpha": 31.622776601683793,
+              "fold": 1,
+              "iterations": [
+                {
+                  "alpha": 31.622776601683793,
+                  "residual_std": 0.21690792587203603,
+                  "step": 1,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                },
+                {
+                  "alpha": 31.622776601683793,
+                  "residual_std": 0.21690792587203597,
+                  "step": 2,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                }
+              ],
+              "steps_used": 2
+            },
+            {
+              "final_alpha": 10.0,
+              "fold": 2,
+              "iterations": [
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.21101797198126995,
+                  "step": 1,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                },
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.21101797198126995,
+                  "step": 2,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                }
+              ],
+              "steps_used": 2
+            }
+          ],
+          "irls_steps_requested": 2,
+          "irls_steps_used_per_fold": [
+            2,
+            2,
+            2
+          ],
+          "rule": "huber"
+        },
+        "ridge_w": {
+          "alternative": "boundary_energy",
+          "max": 1.3949098049815642,
+          "mean": 0.9999999999999999,
+          "min": 0.4753577389716895,
+          "std": 0.28078917118152424
+        },
+        "shap_reconstruction_error": 4.440892098500626e-16
+      },
+      "family": "output_feature_growth",
+      "seconds": [
+        0.23441216704668477,
+        0.23903395800152794,
+        0.24172766698757187
+      ],
+      "seconds_median": 0.23903395800152794,
+      "setting": "extra_output_alternatives=0"
+    },
+    {
+      "auc": 0.9991319444444444,
+      "cache_hits": 207,
+      "cache_misses": 45,
+      "evaluation": {
+        "auc": 0.9991319444444444,
+        "cache": {
+          "entries": 45,
+          "hits": 207,
+          "key": "ancestor_conditioned_subpath",
+          "misses": 45,
+          "shared_across_configurations": true
+        },
+        "config": {
+          "activation": "identity",
+          "ridge_g": "huber",
+          "ridge_w": "boundary_energy",
+          "segment_stats": "basic",
+          "shape_stats": "spectral",
+          "trend_stats": "linear"
+        },
+        "configuration_search_capped": true,
+        "global_ridge_auc": 0.9991319444444444,
+        "n_configs_evaluated": 16,
+        "n_configs_total": 48,
+        "n_features": 25,
+        "ridge_g": {
+          "alternative": "huber",
+          "description": "Huber-style residual downweighting.",
+          "irls": [
+            {
+              "final_alpha": 10.0,
+              "fold": 0,
+              "iterations": [
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.2063657535279264,
+                  "step": 1,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                },
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.2063657535279264,
+                  "step": 2,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                }
+              ],
+              "steps_used": 2
+            },
+            {
+              "final_alpha": 10.0,
+              "fold": 1,
+              "iterations": [
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.20614249078872643,
+                  "step": 1,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                },
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.2061424907887264,
+                  "step": 2,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                }
+              ],
+              "steps_used": 2
+            },
+            {
+              "final_alpha": 10.0,
+              "fold": 2,
+              "iterations": [
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.21104741972894311,
+                  "step": 1,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                },
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.21104741972894317,
+                  "step": 2,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                }
+              ],
+              "steps_used": 2
+            }
+          ],
+          "irls_steps_requested": 2,
+          "irls_steps_used_per_fold": [
+            2,
+            2,
+            2
+          ],
+          "rule": "huber"
+        },
+        "ridge_w": {
+          "alternative": "boundary_energy",
+          "max": 1.3949098049815642,
+          "mean": 0.9999999999999999,
+          "min": 0.4753577389716895,
+          "std": 0.28078917118152424
+        },
+        "shap_reconstruction_error": 4.440892098500626e-16
+      },
+      "family": "output_feature_growth",
+      "seconds": [
+        0.2741055419901386,
+        0.2519032920245081,
+        0.24054245895240456
+      ],
+      "seconds_median": 0.2519032920245081,
+      "setting": "extra_output_alternatives=4"
+    },
+    {
+      "auc": 0.9991319444444444,
+      "cache_hits": 303,
+      "cache_misses": 61,
+      "evaluation": {
+        "auc": 0.9991319444444444,
+        "cache": {
+          "entries": 61,
+          "hits": 303,
+          "key": "ancestor_conditioned_subpath",
+          "misses": 61,
+          "shared_across_configurations": true
+        },
+        "config": {
+          "activation": "identity",
+          "ridge_g": "huber",
+          "ridge_w": "boundary_energy",
+          "segment_stats": "basic",
+          "shape_stats": "spectral",
+          "trend_stats": "linear"
+        },
+        "configuration_search_capped": true,
+        "global_ridge_auc": 0.9991319444444444,
+        "n_configs_evaluated": 16,
+        "n_configs_total": 48,
+        "n_features": 29,
+        "ridge_g": {
+          "alternative": "huber",
+          "description": "Huber-style residual downweighting.",
+          "irls": [
+            {
+              "final_alpha": 10.0,
+              "fold": 0,
+              "iterations": [
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.20638275458826372,
+                  "step": 1,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                },
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.20638275458826372,
+                  "step": 2,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                }
+              ],
+              "steps_used": 2
+            },
+            {
+              "final_alpha": 10.0,
+              "fold": 1,
+              "iterations": [
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.20617796314913683,
+                  "step": 1,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                },
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.20617796314913683,
+                  "step": 2,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                }
+              ],
+              "steps_used": 2
+            },
+            {
+              "final_alpha": 10.0,
+              "fold": 2,
+              "iterations": [
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.21106877254825754,
+                  "step": 1,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                },
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.21106877254825754,
+                  "step": 2,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                }
+              ],
+              "steps_used": 2
+            }
+          ],
+          "irls_steps_requested": 2,
+          "irls_steps_used_per_fold": [
+            2,
+            2,
+            2
+          ],
+          "rule": "huber"
+        },
+        "ridge_w": {
+          "alternative": "boundary_energy",
+          "max": 1.3949098049815642,
+          "mean": 0.9999999999999999,
+          "min": 0.4753577389716895,
+          "std": 0.28078917118152424
+        },
+        "shap_reconstruction_error": 2.220446049250313e-16
+      },
+      "family": "output_feature_growth",
+      "seconds": [
+        0.3111060840310529,
+        0.2888632499962114,
+        0.26901766599621624
+      ],
+      "seconds_median": 0.2888632499962114,
+      "setting": "extra_output_alternatives=8"
+    },
+    {
+      "auc": 0.9991319444444444,
+      "cache_hits": 399,
+      "cache_misses": 77,
+      "evaluation": {
+        "auc": 0.9991319444444444,
+        "cache": {
+          "entries": 77,
+          "hits": 399,
+          "key": "ancestor_conditioned_subpath",
+          "misses": 77,
+          "shared_across_configurations": true
+        },
+        "config": {
+          "activation": "identity",
+          "ridge_g": "huber",
+          "ridge_w": "boundary_energy",
+          "segment_stats": "basic",
+          "shape_stats": "spectral",
+          "trend_stats": "linear"
+        },
+        "configuration_search_capped": true,
+        "global_ridge_auc": 0.9991319444444444,
+        "n_configs_evaluated": 16,
+        "n_configs_total": 48,
+        "n_features": 33,
+        "ridge_g": {
+          "alternative": "huber",
+          "description": "Huber-style residual downweighting.",
+          "irls": [
+            {
+              "final_alpha": 10.0,
+              "fold": 0,
+              "iterations": [
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.20639121973068766,
+                  "step": 1,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                },
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.20639121973068766,
+                  "step": 2,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                }
+              ],
+              "steps_used": 2
+            },
+            {
+              "final_alpha": 10.0,
+              "fold": 1,
+              "iterations": [
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.2061967498353096,
+                  "step": 1,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                },
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.20619674983530964,
+                  "step": 2,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                }
+              ],
+              "steps_used": 2
+            },
+            {
+              "final_alpha": 10.0,
+              "fold": 2,
+              "iterations": [
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.21108107057688416,
+                  "step": 1,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                },
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.2110810705768842,
+                  "step": 2,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                }
+              ],
+              "steps_used": 2
+            }
+          ],
+          "irls_steps_requested": 2,
+          "irls_steps_used_per_fold": [
+            2,
+            2,
+            2
+          ],
+          "rule": "huber"
+        },
+        "ridge_w": {
+          "alternative": "boundary_energy",
+          "max": 1.3949098049815642,
+          "mean": 0.9999999999999999,
+          "min": 0.4753577389716895,
+          "std": 0.28078917118152424
+        },
+        "shap_reconstruction_error": 2.220446049250313e-16
+      },
+      "family": "output_feature_growth",
+      "seconds": [
+        0.28589537501102313,
+        0.3191455419873819,
+        0.29870912502519786
+      ],
+      "seconds_median": 0.29870912502519786,
+      "setting": "extra_output_alternatives=12"
+    }
+  ],
+  "scope": "These benchmarks validate architecture-level behavior of this clean-room reimplementation. They do not claim to reproduce the authors' private evolved graph, private code-generation stack, competition pipeline, or reported ROC-AUC.",
+  "seed": 37,
+  "summary": {
+    "passed": true,
+    "repeats": 3,
+    "scenarios": 11
+  }
+}

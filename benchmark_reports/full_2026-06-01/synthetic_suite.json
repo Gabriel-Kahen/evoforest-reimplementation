@@ -1,0 +1,730 @@
+{
+  "benchmark": "synthetic_suite",
+  "cases": [
+    {
+      "auc": 1.0,
+      "baseline_auc": null,
+      "config": {
+        "activation": "identity",
+        "ridge_g": "identity",
+        "ridge_w": "uniform",
+        "segment_stats": "basic",
+        "shape_stats": "cusum",
+        "trend_stats": "linear"
+      },
+      "delta_vs_baseline": null,
+      "evidence": {
+        "auc": 1.0,
+        "cache": {
+          "entries": 31,
+          "hits": 157,
+          "key": "ancestor_conditioned_subpath",
+          "misses": 31,
+          "shared_across_configurations": true
+        },
+        "config": {
+          "activation": "identity",
+          "ridge_g": "identity",
+          "ridge_w": "uniform",
+          "segment_stats": "basic",
+          "shape_stats": "cusum",
+          "trend_stats": "linear"
+        },
+        "configuration_search_capped": true,
+        "global_ridge": {
+          "alpha": 10.0,
+          "auc": 1.0,
+          "contribution_reconstruction_error": 4.440892098500626e-16,
+          "intercept": 0.5000000000000001,
+          "irls_iterations": [],
+          "irls_steps_used": 0,
+          "mean_abs_contribution": 0.03276062923211055,
+          "prediction_std": 0.4475072758942488,
+          "residual_reweighted": false,
+          "residual_std": 0.19822466997211077,
+          "sample_weight_max": 1.0,
+          "sample_weight_mean": 1.0,
+          "sample_weight_min": 1.0,
+          "sample_weight_std": 0.0
+        },
+        "global_ridge_auc": 1.0,
+        "linear_shap": {
+          "basis": "standardized linear Ridge contribution z_j * coefficient_j",
+          "cv_reconstruction_error": 2.220446049250313e-16,
+          "global_reconstruction_error": 4.440892098500626e-16,
+          "mean_abs_contribution_total": 0.6879732138743215,
+          "top_feature": "output.activated.identity_std_log_ratio"
+        },
+        "n_configs_evaluated": 24,
+        "n_configs_total": 48,
+        "n_features": 21,
+        "ridge_g": {
+          "alternative": "identity",
+          "description": "No residual reweighting.",
+          "irls": [
+            {
+              "final_alpha": 10.0,
+              "fold": 0,
+              "iterations": [],
+              "steps_used": 0
+            },
+            {
+              "final_alpha": 10.0,
+              "fold": 1,
+              "iterations": [],
+              "steps_used": 0
+            },
+            {
+              "final_alpha": 3.1622776601683795,
+              "fold": 2,
+              "iterations": [],
+              "steps_used": 0
+            }
+          ],
+          "irls_steps_requested": 2,
+          "irls_steps_used_per_fold": [
+            0,
+            0,
+            0
+          ],
+          "rule": "identity"
+        },
+        "ridge_w": {
+          "alternative": "uniform",
+          "max": 1.0,
+          "mean": 1.0,
+          "min": 1.0,
+          "std": 0.0
+        },
+        "shap_reconstruction_error": 4.440892098500626e-16
+      },
+      "feature_names": [
+        "output.raw_concat.mean_delta",
+        "output.raw_concat.mean_delta_abs",
+        "output.raw_concat.std_log_ratio",
+        "output.raw_concat.std_log_ratio_abs",
+        "output.raw_concat.pre_slope",
+        "output.raw_concat.post_slope",
+        "output.raw_concat.slope_delta",
+        "output.raw_concat.slope_delta_abs",
+        "output.raw_concat.cusum_peak",
+        "output.raw_concat.boundary_alignment",
+        "output.activated.identity_mean_delta",
+        "output.activated.identity_mean_delta_abs",
+        "output.activated.identity_std_log_ratio",
+        "output.activated.identity_std_log_ratio_abs",
+        "output.activated.identity_pre_slope",
+        "output.activated.identity_post_slope",
+        "output.activated.identity_slope_delta",
+        "output.activated.identity_slope_delta_abs",
+        "output.activated.identity_cusum_peak",
+        "output.activated.identity_boundary_alignment",
+        "output.projection.global_projection"
+      ],
+      "mechanism": "capped configuration search over reusable graph computations",
+      "name": "structural_break_full_search",
+      "passed": true,
+      "threshold_auc": 0.75
+    },
+    {
+      "auc": 1.0,
+      "baseline_auc": 1.0,
+      "config": {
+        "activation": "identity",
+        "ridge_g": "identity",
+        "ridge_w": "boundary_energy",
+        "segment_stats": "basic",
+        "shape_stats": "cusum",
+        "trend_stats": "linear"
+      },
+      "delta_vs_baseline": 0.0,
+      "evidence": {
+        "auc": 1.0,
+        "cache": {
+          "entries": 9,
+          "hits": 6,
+          "key": "ancestor_conditioned_subpath",
+          "misses": 9,
+          "shared_across_configurations": true
+        },
+        "config": {
+          "activation": "identity",
+          "ridge_g": "identity",
+          "ridge_w": "boundary_energy",
+          "segment_stats": "basic",
+          "shape_stats": "cusum",
+          "trend_stats": "linear"
+        },
+        "configuration_search_capped": false,
+        "global_ridge": {
+          "alpha": 10.0,
+          "auc": 1.0,
+          "contribution_reconstruction_error": 2.220446049250313e-16,
+          "intercept": 0.4958381537549496,
+          "irls_iterations": [],
+          "irls_steps_used": 0,
+          "mean_abs_contribution": 0.03229767376708127,
+          "prediction_std": 0.44945785018127526,
+          "residual_reweighted": false,
+          "residual_std": 0.19889934780754936,
+          "sample_weight_max": 1.3619845123011989,
+          "sample_weight_mean": 1.0,
+          "sample_weight_min": 0.45434417296379287,
+          "sample_weight_std": 0.3019683239357181
+        },
+        "global_ridge_auc": 1.0,
+        "linear_shap": {
+          "basis": "standardized linear Ridge contribution z_j * coefficient_j",
+          "cv_reconstruction_error": 2.220446049250313e-16,
+          "global_reconstruction_error": 2.220446049250313e-16,
+          "mean_abs_contribution_total": 0.6782511491087067,
+          "top_feature": "output.raw_concat.std_log_ratio"
+        },
+        "n_configs_evaluated": 1,
+        "n_configs_total": 1,
+        "n_features": 21,
+        "ridge_g": {
+          "alternative": "identity",
+          "description": "No residual reweighting.",
+          "irls": [
+            {
+              "final_alpha": 10.0,
+              "fold": 0,
+              "iterations": [],
+              "steps_used": 0
+            },
+            {
+              "final_alpha": 10.0,
+              "fold": 1,
+              "iterations": [],
+              "steps_used": 0
+            },
+            {
+              "final_alpha": 3.1622776601683795,
+              "fold": 2,
+              "iterations": [],
+              "steps_used": 0
+            }
+          ],
+          "irls_steps_requested": 2,
+          "irls_steps_used_per_fold": [
+            0,
+            0,
+            0
+          ],
+          "rule": "identity"
+        },
+        "ridge_w": {
+          "alternative": "boundary_energy",
+          "max": 1.3619845123011989,
+          "mean": 1.0,
+          "min": 0.45434417296379287,
+          "std": 0.3019683239357181
+        },
+        "shap_reconstruction_error": 2.220446049250313e-16
+      },
+      "feature_names": [
+        "output.raw_concat.mean_delta",
+        "output.raw_concat.mean_delta_abs",
+        "output.raw_concat.std_log_ratio",
+        "output.raw_concat.std_log_ratio_abs",
+        "output.raw_concat.pre_slope",
+        "output.raw_concat.post_slope",
+        "output.raw_concat.slope_delta",
+        "output.raw_concat.slope_delta_abs",
+        "output.raw_concat.cusum_peak",
+        "output.raw_concat.boundary_alignment",
+        "output.activated.identity_mean_delta",
+        "output.activated.identity_mean_delta_abs",
+        "output.activated.identity_std_log_ratio",
+        "output.activated.identity_std_log_ratio_abs",
+        "output.activated.identity_pre_slope",
+        "output.activated.identity_post_slope",
+        "output.activated.identity_slope_delta",
+        "output.activated.identity_slope_delta_abs",
+        "output.activated.identity_cusum_peak",
+        "output.activated.identity_boundary_alignment",
+        "output.projection.global_projection"
+      ],
+      "mechanism": "ridge_w nonuniform sample weights",
+      "name": "sample_weight_boundary_energy",
+      "passed": true,
+      "threshold_auc": 0.65
+    },
+    {
+      "auc": 0.9386145404663924,
+      "baseline_auc": 0.9386145404663924,
+      "config": {
+        "activation": "identity",
+        "ridge_g": "huber",
+        "ridge_w": "uniform",
+        "segment_stats": "basic",
+        "shape_stats": "cusum",
+        "trend_stats": "linear"
+      },
+      "delta_vs_baseline": 0.0,
+      "evidence": {
+        "auc": 0.9386145404663924,
+        "cache": {
+          "entries": 9,
+          "hits": 6,
+          "key": "ancestor_conditioned_subpath",
+          "misses": 9,
+          "shared_across_configurations": true
+        },
+        "config": {
+          "activation": "identity",
+          "ridge_g": "huber",
+          "ridge_w": "uniform",
+          "segment_stats": "basic",
+          "shape_stats": "cusum",
+          "trend_stats": "linear"
+        },
+        "configuration_search_capped": false,
+        "global_ridge": {
+          "alpha": 31.622776601683793,
+          "auc": 0.9598765432098766,
+          "contribution_reconstruction_error": 2.220446049250313e-16,
+          "intercept": 0.5,
+          "irls_iterations": [
+            {
+              "alpha": 31.622776601683793,
+              "residual_std": 0.2956612487931506,
+              "step": 1,
+              "weight_max": 1.0,
+              "weight_mean": 1.0,
+              "weight_min": 1.0,
+              "weight_std": 0.0
+            },
+            {
+              "alpha": 31.622776601683793,
+              "residual_std": 0.2956612487931506,
+              "step": 2,
+              "weight_max": 1.0,
+              "weight_mean": 1.0,
+              "weight_min": 1.0,
+              "weight_std": 0.0
+            }
+          ],
+          "irls_steps_used": 2,
+          "mean_abs_contribution": 0.029130851030463246,
+          "prediction_std": 0.3711652359601808,
+          "residual_reweighted": true,
+          "residual_std": 0.2956612487931506,
+          "sample_weight_max": 1.0,
+          "sample_weight_mean": 1.0,
+          "sample_weight_min": 1.0,
+          "sample_weight_std": 0.0
+        },
+        "global_ridge_auc": 0.9598765432098766,
+        "linear_shap": {
+          "basis": "standardized linear Ridge contribution z_j * coefficient_j",
+          "cv_reconstruction_error": 2.220446049250313e-16,
+          "global_reconstruction_error": 2.220446049250313e-16,
+          "mean_abs_contribution_total": 0.6117478716397281,
+          "top_feature": "output.activated.identity_cusum_peak"
+        },
+        "n_configs_evaluated": 1,
+        "n_configs_total": 1,
+        "n_features": 21,
+        "ridge_g": {
+          "alternative": "huber",
+          "description": "Huber-style residual downweighting.",
+          "irls": [
+            {
+              "final_alpha": 10.0,
+              "fold": 0,
+              "iterations": [
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.2598025957450671,
+                  "step": 1,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                },
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.2598025957450671,
+                  "step": 2,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                }
+              ],
+              "steps_used": 2
+            },
+            {
+              "final_alpha": 31.622776601683793,
+              "fold": 1,
+              "iterations": [
+                {
+                  "alpha": 31.622776601683793,
+                  "residual_std": 0.3054136011095531,
+                  "step": 1,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                },
+                {
+                  "alpha": 31.622776601683793,
+                  "residual_std": 0.3054136011095531,
+                  "step": 2,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                }
+              ],
+              "steps_used": 2
+            },
+            {
+              "final_alpha": 31.622776601683793,
+              "fold": 2,
+              "iterations": [
+                {
+                  "alpha": 31.622776601683793,
+                  "residual_std": 0.29993720492935083,
+                  "step": 1,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                },
+                {
+                  "alpha": 31.622776601683793,
+                  "residual_std": 0.29993720492935083,
+                  "step": 2,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                }
+              ],
+              "steps_used": 2
+            }
+          ],
+          "irls_steps_requested": 2,
+          "irls_steps_used_per_fold": [
+            2,
+            2,
+            2
+          ],
+          "rule": "huber"
+        },
+        "ridge_w": {
+          "alternative": "uniform",
+          "max": 1.0,
+          "mean": 1.0,
+          "min": 1.0,
+          "std": 0.0
+        },
+        "shap_reconstruction_error": 2.220446049250313e-16
+      },
+      "feature_names": [
+        "output.raw_concat.mean_delta",
+        "output.raw_concat.mean_delta_abs",
+        "output.raw_concat.std_log_ratio",
+        "output.raw_concat.std_log_ratio_abs",
+        "output.raw_concat.pre_slope",
+        "output.raw_concat.post_slope",
+        "output.raw_concat.slope_delta",
+        "output.raw_concat.slope_delta_abs",
+        "output.raw_concat.cusum_peak",
+        "output.raw_concat.boundary_alignment",
+        "output.activated.identity_mean_delta",
+        "output.activated.identity_mean_delta_abs",
+        "output.activated.identity_std_log_ratio",
+        "output.activated.identity_std_log_ratio_abs",
+        "output.activated.identity_pre_slope",
+        "output.activated.identity_post_slope",
+        "output.activated.identity_slope_delta",
+        "output.activated.identity_slope_delta_abs",
+        "output.activated.identity_cusum_peak",
+        "output.activated.identity_boundary_alignment",
+        "output.projection.global_projection"
+      ],
+      "mechanism": "ridge_g iterative residual reweighting on heavy-tailed data",
+      "name": "residual_huber_irls",
+      "passed": true,
+      "threshold_auc": 0.6
+    },
+    {
+      "auc": 0.9993141289437586,
+      "baseline_auc": 1.0,
+      "config": {
+        "activation": "sigmoid_gate",
+        "ridge_g": "identity",
+        "ridge_w": "uniform",
+        "segment_stats": "basic",
+        "shape_stats": "cusum",
+        "trend_stats": "linear"
+      },
+      "delta_vs_baseline": -0.000685871056241405,
+      "evidence": {
+        "auc": 0.9993141289437586,
+        "cache": {
+          "entries": 9,
+          "hits": 6,
+          "key": "ancestor_conditioned_subpath",
+          "misses": 9,
+          "shared_across_configurations": true
+        },
+        "config": {
+          "activation": "sigmoid_gate",
+          "ridge_g": "identity",
+          "ridge_w": "uniform",
+          "segment_stats": "basic",
+          "shape_stats": "cusum",
+          "trend_stats": "linear"
+        },
+        "configuration_search_capped": false,
+        "global_ridge": {
+          "alpha": 0.01,
+          "auc": 1.0,
+          "contribution_reconstruction_error": 1.7763568394002505e-15,
+          "intercept": 0.49999999999998923,
+          "irls_iterations": [],
+          "irls_steps_used": 0,
+          "mean_abs_contribution": 0.5736346800872956,
+          "prediction_std": 0.46673349572981176,
+          "residual_reweighted": false,
+          "residual_std": 0.17091979837951748,
+          "sample_weight_max": 1.0,
+          "sample_weight_mean": 1.0,
+          "sample_weight_min": 1.0,
+          "sample_weight_std": 0.0
+        },
+        "global_ridge_auc": 1.0,
+        "linear_shap": {
+          "basis": "standardized linear Ridge contribution z_j * coefficient_j",
+          "cv_reconstruction_error": 2.4424906541753444e-15,
+          "global_reconstruction_error": 1.7763568394002505e-15,
+          "mean_abs_contribution_total": 12.046328281833208,
+          "top_feature": "output.activated.sigmoid_gate_std_log_ratio_abs"
+        },
+        "n_configs_evaluated": 1,
+        "n_configs_total": 1,
+        "n_features": 21,
+        "ridge_g": {
+          "alternative": "identity",
+          "description": "No residual reweighting.",
+          "irls": [
+            {
+              "final_alpha": 0.0031622776601683794,
+              "fold": 0,
+              "iterations": [],
+              "steps_used": 0
+            },
+            {
+              "final_alpha": 0.01,
+              "fold": 1,
+              "iterations": [],
+              "steps_used": 0
+            },
+            {
+              "final_alpha": 0.0031622776601683794,
+              "fold": 2,
+              "iterations": [],
+              "steps_used": 0
+            }
+          ],
+          "irls_steps_requested": 2,
+          "irls_steps_used_per_fold": [
+            0,
+            0,
+            0
+          ],
+          "rule": "identity"
+        },
+        "ridge_w": {
+          "alternative": "uniform",
+          "max": 1.0,
+          "mean": 1.0,
+          "min": 1.0,
+          "std": 0.0
+        },
+        "shap_reconstruction_error": 1.7763568394002505e-15
+      },
+      "feature_names": [
+        "output.raw_concat.mean_delta",
+        "output.raw_concat.mean_delta_abs",
+        "output.raw_concat.std_log_ratio",
+        "output.raw_concat.std_log_ratio_abs",
+        "output.raw_concat.pre_slope",
+        "output.raw_concat.post_slope",
+        "output.raw_concat.slope_delta",
+        "output.raw_concat.slope_delta_abs",
+        "output.raw_concat.cusum_peak",
+        "output.raw_concat.boundary_alignment",
+        "output.activated.sigmoid_gate_mean_delta",
+        "output.activated.sigmoid_gate_mean_delta_abs",
+        "output.activated.sigmoid_gate_std_log_ratio",
+        "output.activated.sigmoid_gate_std_log_ratio_abs",
+        "output.activated.sigmoid_gate_pre_slope",
+        "output.activated.sigmoid_gate_post_slope",
+        "output.activated.sigmoid_gate_slope_delta",
+        "output.activated.sigmoid_gate_slope_delta_abs",
+        "output.activated.sigmoid_gate_cusum_peak",
+        "output.activated.sigmoid_gate_boundary_alignment",
+        "output.projection.global_projection"
+      ],
+      "mechanism": "callable-node activation family selected by configuration",
+      "name": "callable_sigmoid_gate",
+      "passed": true,
+      "threshold_auc": 0.65
+    },
+    {
+      "auc": 0.9993141289437586,
+      "baseline_auc": null,
+      "config": {
+        "activation": "sigmoid_gate",
+        "ridge_g": "identity",
+        "ridge_w": "uniform",
+        "segment_stats": "basic",
+        "shape_stats": "cusum",
+        "trend_stats": "linear"
+      },
+      "delta_vs_baseline": null,
+      "evidence": {
+        "auc": 0.9993141289437586,
+        "cache": {
+          "entries": 9,
+          "hits": 6,
+          "key": "ancestor_conditioned_subpath",
+          "misses": 9,
+          "shared_across_configurations": true
+        },
+        "config": {
+          "activation": "sigmoid_gate",
+          "ridge_g": "identity",
+          "ridge_w": "uniform",
+          "segment_stats": "basic",
+          "shape_stats": "cusum",
+          "trend_stats": "linear"
+        },
+        "configuration_search_capped": false,
+        "global_ridge": {
+          "alpha": 0.01,
+          "auc": 1.0,
+          "contribution_reconstruction_error": 1.7763568394002505e-15,
+          "intercept": 0.49999999999998923,
+          "irls_iterations": [],
+          "irls_steps_used": 0,
+          "mean_abs_contribution": 0.5736346800872956,
+          "prediction_std": 0.46673349572981176,
+          "residual_reweighted": false,
+          "residual_std": 0.17091979837951748,
+          "sample_weight_max": 1.0,
+          "sample_weight_mean": 1.0,
+          "sample_weight_min": 1.0,
+          "sample_weight_std": 0.0
+        },
+        "global_ridge_auc": 1.0,
+        "linear_shap": {
+          "basis": "standardized linear Ridge contribution z_j * coefficient_j",
+          "cv_reconstruction_error": 2.4424906541753444e-15,
+          "global_reconstruction_error": 1.7763568394002505e-15,
+          "mean_abs_contribution_total": 12.046328281833208,
+          "top_feature": "output.activated.sigmoid_gate_std_log_ratio_abs"
+        },
+        "n_configs_evaluated": 1,
+        "n_configs_total": 1,
+        "n_features": 21,
+        "ridge_g": {
+          "alternative": "identity",
+          "description": "No residual reweighting.",
+          "irls": [
+            {
+              "final_alpha": 0.0031622776601683794,
+              "fold": 0,
+              "iterations": [],
+              "steps_used": 0
+            },
+            {
+              "final_alpha": 0.01,
+              "fold": 1,
+              "iterations": [],
+              "steps_used": 0
+            },
+            {
+              "final_alpha": 0.0031622776601683794,
+              "fold": 2,
+              "iterations": [],
+              "steps_used": 0
+            }
+          ],
+          "irls_steps_requested": 2,
+          "irls_steps_used_per_fold": [
+            0,
+            0,
+            0
+          ],
+          "rule": "identity"
+        },
+        "ridge_w": {
+          "alternative": "uniform",
+          "max": 1.0,
+          "mean": 1.0,
+          "min": 1.0,
+          "std": 0.0
+        },
+        "shap_reconstruction_error": 1.7763568394002505e-15
+      },
+      "feature_names": [
+        "output.raw_concat.mean_delta",
+        "output.raw_concat.mean_delta_abs",
+        "output.raw_concat.std_log_ratio",
+        "output.raw_concat.std_log_ratio_abs",
+        "output.raw_concat.pre_slope",
+        "output.raw_concat.post_slope",
+        "output.raw_concat.slope_delta",
+        "output.raw_concat.slope_delta_abs",
+        "output.raw_concat.cusum_peak",
+        "output.raw_concat.boundary_alignment",
+        "output.activated.sigmoid_gate_mean_delta",
+        "output.activated.sigmoid_gate_mean_delta_abs",
+        "output.activated.sigmoid_gate_std_log_ratio",
+        "output.activated.sigmoid_gate_std_log_ratio_abs",
+        "output.activated.sigmoid_gate_pre_slope",
+        "output.activated.sigmoid_gate_post_slope",
+        "output.activated.sigmoid_gate_slope_delta",
+        "output.activated.sigmoid_gate_slope_delta_abs",
+        "output.activated.sigmoid_gate_cusum_peak",
+        "output.activated.sigmoid_gate_boundary_alignment",
+        "output.projection.global_projection"
+      ],
+      "mechanism": "output feature backed by persistent trainable globals",
+      "name": "global_projection_feature",
+      "passed": true,
+      "threshold_auc": 0.65
+    }
+  ],
+  "datasets": {
+    "clean": {
+      "boundary": 48,
+      "length": 96,
+      "n_series": 108,
+      "positive_rate": 0.5,
+      "value_std": 0.4464172587498769
+    },
+    "outlier_heavy": {
+      "boundary": 48,
+      "length": 96,
+      "n_series": 108,
+      "positive_rate": 0.5,
+      "value_std": 0.5276752113750506
+    }
+  },
+  "quick": false,
+  "scope": "These benchmarks validate architecture-level behavior of this clean-room reimplementation. They do not claim to reproduce the authors' private evolved graph, private code-generation stack, competition pipeline, or reported ROC-AUC.",
+  "seed": 23,
+  "summary": {
+    "all_passed": true,
+    "passed": 5,
+    "total": 5
+  }
+}

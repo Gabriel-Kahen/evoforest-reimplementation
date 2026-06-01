@@ -1,0 +1,1090 @@
+{
+  "ablations": [
+    {
+      "auc": 0.9969135802469136,
+      "delta_auc_vs_full": 0.0,
+      "description": "No ablation; capped configuration search over the full seed graph.",
+      "evaluation": {
+        "auc": 0.9969135802469136,
+        "cache": {
+          "entries": 31,
+          "hits": 157,
+          "key": "ancestor_conditioned_subpath",
+          "misses": 31,
+          "shared_across_configurations": true
+        },
+        "config": {
+          "activation": "identity",
+          "ridge_g": "identity",
+          "ridge_w": "uniform",
+          "segment_stats": "basic",
+          "shape_stats": "spectral",
+          "trend_stats": "linear"
+        },
+        "configuration_search_capped": true,
+        "global_ridge_auc": 0.9986282578875172,
+        "n_configs_evaluated": 24,
+        "n_configs_total": 48,
+        "n_features": 21,
+        "ridge_g": {
+          "alternative": "identity",
+          "description": "No residual reweighting.",
+          "irls": [
+            {
+              "final_alpha": 10.0,
+              "fold": 0,
+              "iterations": [],
+              "steps_used": 0
+            },
+            {
+              "final_alpha": 10.0,
+              "fold": 1,
+              "iterations": [],
+              "steps_used": 0
+            },
+            {
+              "final_alpha": 10.0,
+              "fold": 2,
+              "iterations": [],
+              "steps_used": 0
+            }
+          ],
+          "irls_steps_requested": 2,
+          "irls_steps_used_per_fold": [
+            0,
+            0,
+            0
+          ],
+          "rule": "identity"
+        },
+        "ridge_w": {
+          "alternative": "uniform",
+          "max": 1.0,
+          "mean": 1.0,
+          "min": 1.0,
+          "std": 0.0
+        },
+        "shap_reconstruction_error": 4.440892098500626e-16
+      },
+      "graph": {
+        "alternatives": 15,
+        "alternatives_by_kind": {
+          "callable": 3,
+          "fitting": 4,
+          "input": 0,
+          "intermediate": 5,
+          "output": 3
+        },
+        "configuration_nodes": [
+          "activation",
+          "ridge_g",
+          "ridge_w",
+          "segment_stats",
+          "shape_stats",
+          "trend_stats"
+        ],
+        "fitting_nodes": [
+          "ridge_w",
+          "ridge_g"
+        ],
+        "globals": {
+          "gate_scale": {
+            "description": "Shared scale for callable gate families.",
+            "name": "gate_scale",
+            "shape": [
+              1
+            ],
+            "trainable": true,
+            "value": [
+              1.0
+            ]
+          },
+          "projection_vector": {
+            "description": "Low-dimensional global vector used by projection outputs.",
+            "name": "projection_vector",
+            "shape": [
+              16
+            ],
+            "trainable": true,
+            "value": [
+              0.2,
+              0.25333333333333335,
+              0.3066666666666667,
+              0.36,
+              0.41333333333333333,
+              0.4666666666666667,
+              0.52,
+              0.5733333333333334,
+              0.6266666666666667,
+              0.68,
+              0.7333333333333334,
+              0.7866666666666666,
+              0.8400000000000001,
+              0.8933333333333333,
+              0.9466666666666668,
+              1.0
+            ]
+          },
+          "residual_huber_scale": {
+            "description": "Shared threshold for residual-based Ridge reweighting.",
+            "name": "residual_huber_scale",
+            "shape": [
+              1
+            ],
+            "trainable": true,
+            "value": [
+              1.0
+            ]
+          }
+        },
+        "name": "evoforest_seed",
+        "node_kinds": {
+          "callable": 1,
+          "fitting": 2,
+          "input": 2,
+          "intermediate": 3,
+          "output": 1
+        },
+        "nodes": 9,
+        "output_nodes": [
+          "output"
+        ],
+        "total_configurations": 48
+      },
+      "name": "full",
+      "passed": true
+    },
+    {
+      "auc": 0.9962277091906722,
+      "delta_auc_vs_full": -0.000685871056241405,
+      "description": "Disable configuration search by scoring only the default selected path.",
+      "evaluation": {
+        "auc": 0.9962277091906722,
+        "cache": {
+          "entries": 9,
+          "hits": 6,
+          "key": "ancestor_conditioned_subpath",
+          "misses": 9,
+          "shared_across_configurations": true
+        },
+        "config": {
+          "activation": "identity",
+          "ridge_g": "identity",
+          "ridge_w": "uniform",
+          "segment_stats": "basic",
+          "shape_stats": "cusum",
+          "trend_stats": "linear"
+        },
+        "configuration_search_capped": false,
+        "global_ridge_auc": 0.9969135802469136,
+        "n_configs_evaluated": 1,
+        "n_configs_total": 1,
+        "n_features": 21,
+        "ridge_g": {
+          "alternative": "identity",
+          "description": "No residual reweighting.",
+          "irls": [
+            {
+              "final_alpha": 31.622776601683793,
+              "fold": 0,
+              "iterations": [],
+              "steps_used": 0
+            },
+            {
+              "final_alpha": 10.0,
+              "fold": 1,
+              "iterations": [],
+              "steps_used": 0
+            },
+            {
+              "final_alpha": 10.0,
+              "fold": 2,
+              "iterations": [],
+              "steps_used": 0
+            }
+          ],
+          "irls_steps_requested": 2,
+          "irls_steps_used_per_fold": [
+            0,
+            0,
+            0
+          ],
+          "rule": "identity"
+        },
+        "ridge_w": {
+          "alternative": "uniform",
+          "max": 1.0,
+          "mean": 1.0,
+          "min": 1.0,
+          "std": 0.0
+        },
+        "shap_reconstruction_error": 2.220446049250313e-16
+      },
+      "graph": {
+        "alternatives": 15,
+        "alternatives_by_kind": {
+          "callable": 3,
+          "fitting": 4,
+          "input": 0,
+          "intermediate": 5,
+          "output": 3
+        },
+        "configuration_nodes": [
+          "activation",
+          "ridge_g",
+          "ridge_w",
+          "segment_stats",
+          "shape_stats",
+          "trend_stats"
+        ],
+        "fitting_nodes": [
+          "ridge_w",
+          "ridge_g"
+        ],
+        "globals": {
+          "gate_scale": {
+            "description": "Shared scale for callable gate families.",
+            "name": "gate_scale",
+            "shape": [
+              1
+            ],
+            "trainable": true,
+            "value": [
+              1.0
+            ]
+          },
+          "projection_vector": {
+            "description": "Low-dimensional global vector used by projection outputs.",
+            "name": "projection_vector",
+            "shape": [
+              16
+            ],
+            "trainable": true,
+            "value": [
+              0.2,
+              0.25333333333333335,
+              0.3066666666666667,
+              0.36,
+              0.41333333333333333,
+              0.4666666666666667,
+              0.52,
+              0.5733333333333334,
+              0.6266666666666667,
+              0.68,
+              0.7333333333333334,
+              0.7866666666666666,
+              0.8400000000000001,
+              0.8933333333333333,
+              0.9466666666666668,
+              1.0
+            ]
+          },
+          "residual_huber_scale": {
+            "description": "Shared threshold for residual-based Ridge reweighting.",
+            "name": "residual_huber_scale",
+            "shape": [
+              1
+            ],
+            "trainable": true,
+            "value": [
+              1.0
+            ]
+          }
+        },
+        "name": "evoforest_seed",
+        "node_kinds": {
+          "callable": 1,
+          "fitting": 2,
+          "input": 2,
+          "intermediate": 3,
+          "output": 1
+        },
+        "nodes": 9,
+        "output_nodes": [
+          "output"
+        ],
+        "total_configurations": 48
+      },
+      "name": "default_path_only",
+      "passed": true
+    },
+    {
+      "auc": 0.997599451303155,
+      "delta_auc_vs_full": 0.000685871056241405,
+      "description": "Remove output ensemble diversity by keeping only raw concatenated outputs.",
+      "evaluation": {
+        "auc": 0.997599451303155,
+        "cache": {
+          "entries": 13,
+          "hits": 47,
+          "key": "ancestor_conditioned_subpath",
+          "misses": 13,
+          "shared_across_configurations": true
+        },
+        "config": {
+          "ridge_g": "identity",
+          "ridge_w": "uniform",
+          "segment_stats": "basic",
+          "shape_stats": "spectral",
+          "trend_stats": "linear"
+        },
+        "configuration_search_capped": false,
+        "global_ridge_auc": 0.9982853223593965,
+        "n_configs_evaluated": 16,
+        "n_configs_total": 16,
+        "n_features": 10,
+        "ridge_g": {
+          "alternative": "identity",
+          "description": "No residual reweighting.",
+          "irls": [
+            {
+              "final_alpha": 10.0,
+              "fold": 0,
+              "iterations": [],
+              "steps_used": 0
+            },
+            {
+              "final_alpha": 10.0,
+              "fold": 1,
+              "iterations": [],
+              "steps_used": 0
+            },
+            {
+              "final_alpha": 3.1622776601683795,
+              "fold": 2,
+              "iterations": [],
+              "steps_used": 0
+            }
+          ],
+          "irls_steps_requested": 2,
+          "irls_steps_used_per_fold": [
+            0,
+            0,
+            0
+          ],
+          "rule": "identity"
+        },
+        "ridge_w": {
+          "alternative": "uniform",
+          "max": 1.0,
+          "mean": 1.0,
+          "min": 1.0,
+          "std": 0.0
+        },
+        "shap_reconstruction_error": 2.220446049250313e-16
+      },
+      "graph": {
+        "alternatives": 13,
+        "alternatives_by_kind": {
+          "callable": 3,
+          "fitting": 4,
+          "input": 0,
+          "intermediate": 5,
+          "output": 1
+        },
+        "configuration_nodes": [
+          "ridge_g",
+          "ridge_w",
+          "segment_stats",
+          "shape_stats",
+          "trend_stats"
+        ],
+        "fitting_nodes": [
+          "ridge_w",
+          "ridge_g"
+        ],
+        "globals": {
+          "gate_scale": {
+            "description": "Shared scale for callable gate families.",
+            "name": "gate_scale",
+            "shape": [
+              1
+            ],
+            "trainable": true,
+            "value": [
+              1.0
+            ]
+          },
+          "projection_vector": {
+            "description": "Low-dimensional global vector used by projection outputs.",
+            "name": "projection_vector",
+            "shape": [
+              16
+            ],
+            "trainable": true,
+            "value": [
+              0.2,
+              0.25333333333333335,
+              0.3066666666666667,
+              0.36,
+              0.41333333333333333,
+              0.4666666666666667,
+              0.52,
+              0.5733333333333334,
+              0.6266666666666667,
+              0.68,
+              0.7333333333333334,
+              0.7866666666666666,
+              0.8400000000000001,
+              0.8933333333333333,
+              0.9466666666666668,
+              1.0
+            ]
+          },
+          "residual_huber_scale": {
+            "description": "Shared threshold for residual-based Ridge reweighting.",
+            "name": "residual_huber_scale",
+            "shape": [
+              1
+            ],
+            "trainable": true,
+            "value": [
+              1.0
+            ]
+          }
+        },
+        "name": "evoforest_seed",
+        "node_kinds": {
+          "callable": 1,
+          "fitting": 2,
+          "input": 2,
+          "intermediate": 3,
+          "output": 1
+        },
+        "nodes": 9,
+        "output_nodes": [
+          "output"
+        ],
+        "total_configurations": 16
+      },
+      "name": "raw_output_only",
+      "passed": true
+    },
+    {
+      "auc": 0.9969135802469136,
+      "delta_auc_vs_full": 0.0,
+      "description": "Collapse callable family search to the identity callable.",
+      "evaluation": {
+        "auc": 0.9969135802469136,
+        "cache": {
+          "entries": 22,
+          "hits": 98,
+          "key": "ancestor_conditioned_subpath",
+          "misses": 22,
+          "shared_across_configurations": true
+        },
+        "config": {
+          "activation": "identity",
+          "ridge_g": "identity",
+          "ridge_w": "uniform",
+          "segment_stats": "basic",
+          "shape_stats": "spectral",
+          "trend_stats": "linear"
+        },
+        "configuration_search_capped": false,
+        "global_ridge_auc": 0.9986282578875172,
+        "n_configs_evaluated": 16,
+        "n_configs_total": 16,
+        "n_features": 21,
+        "ridge_g": {
+          "alternative": "identity",
+          "description": "No residual reweighting.",
+          "irls": [
+            {
+              "final_alpha": 10.0,
+              "fold": 0,
+              "iterations": [],
+              "steps_used": 0
+            },
+            {
+              "final_alpha": 10.0,
+              "fold": 1,
+              "iterations": [],
+              "steps_used": 0
+            },
+            {
+              "final_alpha": 10.0,
+              "fold": 2,
+              "iterations": [],
+              "steps_used": 0
+            }
+          ],
+          "irls_steps_requested": 2,
+          "irls_steps_used_per_fold": [
+            0,
+            0,
+            0
+          ],
+          "rule": "identity"
+        },
+        "ridge_w": {
+          "alternative": "uniform",
+          "max": 1.0,
+          "mean": 1.0,
+          "min": 1.0,
+          "std": 0.0
+        },
+        "shap_reconstruction_error": 4.440892098500626e-16
+      },
+      "graph": {
+        "alternatives": 13,
+        "alternatives_by_kind": {
+          "callable": 1,
+          "fitting": 4,
+          "input": 0,
+          "intermediate": 5,
+          "output": 3
+        },
+        "configuration_nodes": [
+          "activation",
+          "ridge_g",
+          "ridge_w",
+          "segment_stats",
+          "shape_stats",
+          "trend_stats"
+        ],
+        "fitting_nodes": [
+          "ridge_w",
+          "ridge_g"
+        ],
+        "globals": {
+          "gate_scale": {
+            "description": "Shared scale for callable gate families.",
+            "name": "gate_scale",
+            "shape": [
+              1
+            ],
+            "trainable": true,
+            "value": [
+              1.0
+            ]
+          },
+          "projection_vector": {
+            "description": "Low-dimensional global vector used by projection outputs.",
+            "name": "projection_vector",
+            "shape": [
+              16
+            ],
+            "trainable": true,
+            "value": [
+              0.2,
+              0.25333333333333335,
+              0.3066666666666667,
+              0.36,
+              0.41333333333333333,
+              0.4666666666666667,
+              0.52,
+              0.5733333333333334,
+              0.6266666666666667,
+              0.68,
+              0.7333333333333334,
+              0.7866666666666666,
+              0.8400000000000001,
+              0.8933333333333333,
+              0.9466666666666668,
+              1.0
+            ]
+          },
+          "residual_huber_scale": {
+            "description": "Shared threshold for residual-based Ridge reweighting.",
+            "name": "residual_huber_scale",
+            "shape": [
+              1
+            ],
+            "trainable": true,
+            "value": [
+              1.0
+            ]
+          }
+        },
+        "name": "evoforest_seed",
+        "node_kinds": {
+          "callable": 1,
+          "fitting": 2,
+          "input": 2,
+          "intermediate": 3,
+          "output": 1
+        },
+        "nodes": 9,
+        "output_nodes": [
+          "output"
+        ],
+        "total_configurations": 16
+      },
+      "name": "no_callable_choice",
+      "passed": true
+    },
+    {
+      "auc": 0.9969135802469136,
+      "delta_auc_vs_full": 0.0,
+      "description": "Collapse fitting-rule search to uniform sample weights and identity residual weights.",
+      "evaluation": {
+        "auc": 0.9969135802469136,
+        "cache": {
+          "entries": 30,
+          "hits": 102,
+          "key": "ancestor_conditioned_subpath",
+          "misses": 30,
+          "shared_across_configurations": true
+        },
+        "config": {
+          "activation": "identity",
+          "ridge_g": "identity",
+          "ridge_w": "uniform",
+          "segment_stats": "basic",
+          "shape_stats": "spectral",
+          "trend_stats": "linear"
+        },
+        "configuration_search_capped": false,
+        "global_ridge_auc": 0.9986282578875172,
+        "n_configs_evaluated": 12,
+        "n_configs_total": 12,
+        "n_features": 21,
+        "ridge_g": {
+          "alternative": "identity",
+          "description": "No residual reweighting.",
+          "irls": [
+            {
+              "final_alpha": 10.0,
+              "fold": 0,
+              "iterations": [],
+              "steps_used": 0
+            },
+            {
+              "final_alpha": 10.0,
+              "fold": 1,
+              "iterations": [],
+              "steps_used": 0
+            },
+            {
+              "final_alpha": 10.0,
+              "fold": 2,
+              "iterations": [],
+              "steps_used": 0
+            }
+          ],
+          "irls_steps_requested": 2,
+          "irls_steps_used_per_fold": [
+            0,
+            0,
+            0
+          ],
+          "rule": "identity"
+        },
+        "ridge_w": {
+          "alternative": "uniform",
+          "max": 1.0,
+          "mean": 1.0,
+          "min": 1.0,
+          "std": 0.0
+        },
+        "shap_reconstruction_error": 4.440892098500626e-16
+      },
+      "graph": {
+        "alternatives": 13,
+        "alternatives_by_kind": {
+          "callable": 3,
+          "fitting": 2,
+          "input": 0,
+          "intermediate": 5,
+          "output": 3
+        },
+        "configuration_nodes": [
+          "activation",
+          "ridge_g",
+          "ridge_w",
+          "segment_stats",
+          "shape_stats",
+          "trend_stats"
+        ],
+        "fitting_nodes": [
+          "ridge_w",
+          "ridge_g"
+        ],
+        "globals": {
+          "gate_scale": {
+            "description": "Shared scale for callable gate families.",
+            "name": "gate_scale",
+            "shape": [
+              1
+            ],
+            "trainable": true,
+            "value": [
+              1.0
+            ]
+          },
+          "projection_vector": {
+            "description": "Low-dimensional global vector used by projection outputs.",
+            "name": "projection_vector",
+            "shape": [
+              16
+            ],
+            "trainable": true,
+            "value": [
+              0.2,
+              0.25333333333333335,
+              0.3066666666666667,
+              0.36,
+              0.41333333333333333,
+              0.4666666666666667,
+              0.52,
+              0.5733333333333334,
+              0.6266666666666667,
+              0.68,
+              0.7333333333333334,
+              0.7866666666666666,
+              0.8400000000000001,
+              0.8933333333333333,
+              0.9466666666666668,
+              1.0
+            ]
+          },
+          "residual_huber_scale": {
+            "description": "Shared threshold for residual-based Ridge reweighting.",
+            "name": "residual_huber_scale",
+            "shape": [
+              1
+            ],
+            "trainable": true,
+            "value": [
+              1.0
+            ]
+          }
+        },
+        "name": "evoforest_seed",
+        "node_kinds": {
+          "callable": 1,
+          "fitting": 2,
+          "input": 2,
+          "intermediate": 3,
+          "output": 1
+        },
+        "nodes": 9,
+        "output_nodes": [
+          "output"
+        ],
+        "total_configurations": 12
+      },
+      "name": "no_fitting_choice",
+      "passed": true
+    },
+    {
+      "auc": 0.9972565157750343,
+      "delta_auc_vs_full": 0.0003429355281207025,
+      "description": "Remove the output alternative that uses persistent global projection parameters.",
+      "evaluation": {
+        "auc": 0.9972565157750343,
+        "cache": {
+          "entries": 27,
+          "hits": 125,
+          "key": "ancestor_conditioned_subpath",
+          "misses": 27,
+          "shared_across_configurations": true
+        },
+        "config": {
+          "activation": "identity",
+          "ridge_g": "identity",
+          "ridge_w": "uniform",
+          "segment_stats": "basic",
+          "shape_stats": "spectral",
+          "trend_stats": "linear"
+        },
+        "configuration_search_capped": true,
+        "global_ridge_auc": 0.9986282578875172,
+        "n_configs_evaluated": 24,
+        "n_configs_total": 48,
+        "n_features": 20,
+        "ridge_g": {
+          "alternative": "identity",
+          "description": "No residual reweighting.",
+          "irls": [
+            {
+              "final_alpha": 10.0,
+              "fold": 0,
+              "iterations": [],
+              "steps_used": 0
+            },
+            {
+              "final_alpha": 10.0,
+              "fold": 1,
+              "iterations": [],
+              "steps_used": 0
+            },
+            {
+              "final_alpha": 10.0,
+              "fold": 2,
+              "iterations": [],
+              "steps_used": 0
+            }
+          ],
+          "irls_steps_requested": 2,
+          "irls_steps_used_per_fold": [
+            0,
+            0,
+            0
+          ],
+          "rule": "identity"
+        },
+        "ridge_w": {
+          "alternative": "uniform",
+          "max": 1.0,
+          "mean": 1.0,
+          "min": 1.0,
+          "std": 0.0
+        },
+        "shap_reconstruction_error": 4.440892098500626e-16
+      },
+      "graph": {
+        "alternatives": 14,
+        "alternatives_by_kind": {
+          "callable": 3,
+          "fitting": 4,
+          "input": 0,
+          "intermediate": 5,
+          "output": 2
+        },
+        "configuration_nodes": [
+          "activation",
+          "ridge_g",
+          "ridge_w",
+          "segment_stats",
+          "shape_stats",
+          "trend_stats"
+        ],
+        "fitting_nodes": [
+          "ridge_w",
+          "ridge_g"
+        ],
+        "globals": {
+          "gate_scale": {
+            "description": "Shared scale for callable gate families.",
+            "name": "gate_scale",
+            "shape": [
+              1
+            ],
+            "trainable": true,
+            "value": [
+              1.0
+            ]
+          },
+          "projection_vector": {
+            "description": "Low-dimensional global vector used by projection outputs.",
+            "name": "projection_vector",
+            "shape": [
+              16
+            ],
+            "trainable": true,
+            "value": [
+              0.2,
+              0.25333333333333335,
+              0.3066666666666667,
+              0.36,
+              0.41333333333333333,
+              0.4666666666666667,
+              0.52,
+              0.5733333333333334,
+              0.6266666666666667,
+              0.68,
+              0.7333333333333334,
+              0.7866666666666666,
+              0.8400000000000001,
+              0.8933333333333333,
+              0.9466666666666668,
+              1.0
+            ]
+          },
+          "residual_huber_scale": {
+            "description": "Shared threshold for residual-based Ridge reweighting.",
+            "name": "residual_huber_scale",
+            "shape": [
+              1
+            ],
+            "trainable": true,
+            "value": [
+              1.0
+            ]
+          }
+        },
+        "name": "evoforest_seed",
+        "node_kinds": {
+          "callable": 1,
+          "fitting": 2,
+          "input": 2,
+          "intermediate": 3,
+          "output": 1
+        },
+        "nodes": 9,
+        "output_nodes": [
+          "output"
+        ],
+        "total_configurations": 48
+      },
+      "name": "no_global_projection",
+      "passed": true
+    },
+    {
+      "auc": 0.9962277091906722,
+      "delta_auc_vs_full": -0.000685871056241405,
+      "description": "Remove spectral shape alternatives from the intermediate search space.",
+      "evaluation": {
+        "auc": 0.9962277091906722,
+        "cache": {
+          "entries": 21,
+          "hits": 135,
+          "key": "ancestor_conditioned_subpath",
+          "misses": 21,
+          "shared_across_configurations": true
+        },
+        "config": {
+          "activation": "identity",
+          "ridge_g": "identity",
+          "ridge_w": "uniform",
+          "segment_stats": "basic",
+          "shape_stats": "cusum",
+          "trend_stats": "linear"
+        },
+        "configuration_search_capped": false,
+        "global_ridge_auc": 0.9969135802469136,
+        "n_configs_evaluated": 24,
+        "n_configs_total": 24,
+        "n_features": 21,
+        "ridge_g": {
+          "alternative": "identity",
+          "description": "No residual reweighting.",
+          "irls": [
+            {
+              "final_alpha": 31.622776601683793,
+              "fold": 0,
+              "iterations": [],
+              "steps_used": 0
+            },
+            {
+              "final_alpha": 10.0,
+              "fold": 1,
+              "iterations": [],
+              "steps_used": 0
+            },
+            {
+              "final_alpha": 10.0,
+              "fold": 2,
+              "iterations": [],
+              "steps_used": 0
+            }
+          ],
+          "irls_steps_requested": 2,
+          "irls_steps_used_per_fold": [
+            0,
+            0,
+            0
+          ],
+          "rule": "identity"
+        },
+        "ridge_w": {
+          "alternative": "uniform",
+          "max": 1.0,
+          "mean": 1.0,
+          "min": 1.0,
+          "std": 0.0
+        },
+        "shap_reconstruction_error": 2.220446049250313e-16
+      },
+      "graph": {
+        "alternatives": 14,
+        "alternatives_by_kind": {
+          "callable": 3,
+          "fitting": 4,
+          "input": 0,
+          "intermediate": 4,
+          "output": 3
+        },
+        "configuration_nodes": [
+          "activation",
+          "ridge_g",
+          "ridge_w",
+          "segment_stats",
+          "shape_stats",
+          "trend_stats"
+        ],
+        "fitting_nodes": [
+          "ridge_w",
+          "ridge_g"
+        ],
+        "globals": {
+          "gate_scale": {
+            "description": "Shared scale for callable gate families.",
+            "name": "gate_scale",
+            "shape": [
+              1
+            ],
+            "trainable": true,
+            "value": [
+              1.0
+            ]
+          },
+          "projection_vector": {
+            "description": "Low-dimensional global vector used by projection outputs.",
+            "name": "projection_vector",
+            "shape": [
+              16
+            ],
+            "trainable": true,
+            "value": [
+              0.2,
+              0.25333333333333335,
+              0.3066666666666667,
+              0.36,
+              0.41333333333333333,
+              0.4666666666666667,
+              0.52,
+              0.5733333333333334,
+              0.6266666666666667,
+              0.68,
+              0.7333333333333334,
+              0.7866666666666666,
+              0.8400000000000001,
+              0.8933333333333333,
+              0.9466666666666668,
+              1.0
+            ]
+          },
+          "residual_huber_scale": {
+            "description": "Shared threshold for residual-based Ridge reweighting.",
+            "name": "residual_huber_scale",
+            "shape": [
+              1
+            ],
+            "trainable": true,
+            "value": [
+              1.0
+            ]
+          }
+        },
+        "name": "evoforest_seed",
+        "node_kinds": {
+          "callable": 1,
+          "fitting": 2,
+          "input": 2,
+          "intermediate": 3,
+          "output": 1
+        },
+        "nodes": 9,
+        "output_nodes": [
+          "output"
+        ],
+        "total_configurations": 24
+      },
+      "name": "no_spectral_shape",
+      "passed": true
+    }
+  ],
+  "benchmark": "ablation_suite",
+  "quick": false,
+  "scope": "These benchmarks validate architecture-level behavior of this clean-room reimplementation. They do not claim to reproduce the authors' private evolved graph, private code-generation stack, competition pipeline, or reported ROC-AUC.",
+  "seed": 29,
+  "summary": {
+    "all_passed": true,
+    "full_auc": 0.9969135802469136,
+    "passed": 7,
+    "total": 7
+  }
+}

@@ -1,0 +1,1 @@
+{"version": 0, "step": 0, "mode": "single", "island": null, "auc": 0.9760802469135802, "config": {"activation": "sigmoid_gate", "ridge_g": "identity", "ridge_w": "boundary_energy", "segment_stats": "basic", "shape_stats": "spectral", "trend_stats": "linear"}, "path": "global_best_v0000_step_0000_single.json"}
