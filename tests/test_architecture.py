@@ -1,0 +1,766 @@
+from __future__ import annotations
+
+import json
+
+import numpy as np
+import pytest
+
+from evoforest_arch.agents import EngineerAgent, ScientistAgent
+from evoforest_arch.evaluator import RidgeEvaluator
+from evoforest_arch.evolution import EvolutionLoop
+from evoforest_arch.feedback import toon_report
+from evoforest_arch.graph import CallableFamily, EvalContext, FeatureBlock, Graph, ResidualWeightRule
+from evoforest_arch.llm import LLMEngineerAgent, LLMScientistAgent, PromptBuilder, StaticLLMClient
+from evoforest_arch.maintenance import GraphMaintenance
+from evoforest_arch.mutations import GlobalSpec, MutationDocument, MutationEngine, MutationSpec, NodeSpec, RemoveSpec
+from evoforest_arch.seed import build_seed_graph
+from evoforest_arch.synthetic import make_structural_break_data
+
+
+def test_seed_graph_exposes_paper_architecture_motifs() -> None:
+    graph = build_seed_graph()
+    assert graph.nodes["segment_stats"].kind == "intermediate"
+    assert graph.nodes["activation"].kind == "callable"
+    assert graph.nodes["output"].kind == "output"
+    assert graph.nodes["ridge_w"].kind == "fitting"
+    assert graph.nodes["ridge_g"].kind == "fitting"
+    assert len(graph.nodes["segment_stats"].alternatives) >= 2
+    assert len(graph.nodes["activation"].alternatives) >= 3
+    assert len(graph.nodes["output"].alternatives) >= 3
+    assert "gate_scale" in graph.globals.names()
+    assert "projection_vector" in graph.globals.names()
+    assert "residual_huber_scale" in graph.globals.names()
+    assert "output" not in graph.configuration_space()
+    assert "ridge_w" in graph.configuration_space()
+    assert "ridge_g" in graph.configuration_space()
+
+
+def test_graph_evaluates_alternatives_callables_and_globals() -> None:
+    dataset = make_structural_break_data(n_series=40, length=80, seed=3)
+    graph = build_seed_graph()
+    config = graph.default_config()
+    config["activation"] = "sigmoid_gate"
+    x, names, ctx = graph.evaluate_features(dataset.inputs(), config)
+    assert x.shape[0] == 40
+    assert len(names) == x.shape[1]
+    assert any(name.startswith("output.activated") for name in names)
+    assert any(name.startswith("output.projection") for name in names)
+    callable_value = graph.evaluate_node("activation", config, ctx)
+    assert isinstance(callable_value, CallableFamily)
+    residual_rule = graph.evaluate_node("ridge_g", {**config, "ridge_g": "huber"}, ctx)
+    assert isinstance(residual_rule, ResidualWeightRule)
+    assert ctx.cache_hits >= 0
+    assert ctx.cache_misses > 0
+
+
+def test_configuration_search_uses_ancestor_conditioned_shared_cache() -> None:
+    dataset = make_structural_break_data(n_series=48, length=60, seed=9)
+    graph = Graph("cache_test")
+    graph.add_input("series", "Synthetic series.")
+    graph.add_node("a", "intermediate", "Shared ancestor.")
+    graph.add_node("b", "intermediate", "Child depending on selected ancestor.")
+    graph.add_node("output", "output", "Scored output.")
+    counts = {"a0": 0, "a1": 0, "b0": 0, "b1": 0, "out": 0}
+
+    def a_fn(label: str, offset: float):
+        def fn(_ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
+            counts[label] += 1
+            series = np.asarray(values["series"], dtype=np.float64)
+            return FeatureBlock(series[:, :1] + offset, [label])
+
+        return fn
+
+    def b_fn(label: str, scale: float):
+        def fn(_ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
+            counts[label] += 1
+            block = values["a"]
+            assert isinstance(block, FeatureBlock)
+            return FeatureBlock(block.values * scale, [label])
+
+        return fn
+
+    def out_fn(_ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
+        counts["out"] += 1
+        a_block = values["a"]
+        b_block = values["b"]
+        assert isinstance(a_block, FeatureBlock)
+        assert isinstance(b_block, FeatureBlock)
+        return FeatureBlock(np.column_stack([a_block.values[:, 0], b_block.values[:, 0]]), ["a_value", "b_value"])
+
+    graph.add_alternative("a", "a0", ("series",), a_fn("a0", 0.0))
+    graph.add_alternative("a", "a1", ("series",), a_fn("a1", 0.25))
+    graph.add_alternative("b", "b0", ("a",), b_fn("b0", 1.0))
+    graph.add_alternative("b", "b1", ("a",), b_fn("b1", -1.0))
+    graph.add_alternative("output", "out", ("a", "b"), out_fn)
+
+    result = RidgeEvaluator(n_splits=2, seed=9, max_configurations=4).evaluate(graph, dataset.inputs(), dataset.y)
+
+    assert result.diagnostics["configuration_search"]["evaluated"] == 4
+    cache = result.diagnostics["configuration_search"]["cache"]
+    assert cache["shared_across_configurations"] is True
+    assert cache["key"] == "ancestor_conditioned_subpath"
+    assert cache["hits"] > 0
+    assert counts["a0"] == 1
+    assert counts["a1"] == 1
+    assert counts["b0"] == 2
+    assert counts["b1"] == 2
+    assert counts["out"] == 4
+
+
+def test_ridge_evaluator_scores_synthetic_breaks() -> None:
+    dataset = make_structural_break_data(n_series=120, length=100, seed=11)
+    graph = build_seed_graph()
+    result = RidgeEvaluator(n_splits=3, seed=11).evaluate(graph, dataset.inputs(), dataset.y)
+    assert result.auc > 0.8
+    assert result.diagnostics["features"]
+    assert result.diagnostics["graph"]["alternatives"] >= 14
+    assert result.diagnostics["configuration_search"]["evaluated"] >= 12
+    search = result.diagnostics["configuration_search"]
+    assert search["cache"]["shared_across_configurations"] is True
+    assert search["cache"]["key"] == "ancestor_conditioned_subpath"
+    assert search["auc_range"][0] <= result.auc <= search["auc_range"][1]
+    assert search["best_config_auc"] == result.auc
+    scoring = result.diagnostics["scoring_context"]
+    assert scoring["best_config_auc"] == result.auc
+    assert scoring["global_ridge_auc"] > 0.8
+    assert scoring["shap_reconstruction_error"] < 1e-8
+    assert scoring["n_configs"] == search["evaluated"]
+    assert scoring["n_features_best_config"] == len(result.feature_names)
+    assert result.diagnostics["global_ridge"]["auc"] == scoring["global_ridge_auc"]
+    assert result.diagnostics["linear_shap"]["global_reconstruction_error"] < 1e-8
+    assert result.diagnostics["linear_shap"]["cv_reconstruction_error"] < 1e-8
+    assert result.diagnostics["folds"]["auc_std"] >= 0.0
+    assert result.diagnostics["effective_rank"] > 0.0
+    assert result.diagnostics["mean_max_corr"] >= 0.0
+    assert result.diagnostics["fitting"]["ridge_w"]["alternative"] in {"uniform", "boundary_energy"}
+    assert result.diagnostics["fitting"]["ridge_g"]["alternative"] in {"identity", "huber"}
+    assert result.diagnostics["fitting"]["ridge_g"]["irls_steps_requested"] == 2
+    assert "irls_steps_used_per_fold" in result.diagnostics["fitting"]["ridge_g"]
+    first_feature = result.diagnostics["features"][0]
+    assert {
+        "dependencies",
+        "depth",
+        "max_corr",
+        "n_high_corr",
+        "most_correlated",
+        "redundancy",
+        "residual_quadratic_corr",
+        "weight_stability",
+        "class_effect",
+        "global_coef",
+        "shap_mean_abs",
+        "shap_importance",
+        "cv_shap_mean_abs",
+    } <= set(first_feature)
+    assert result.diagnostics["subnodes"]
+    assert all("." in row["name"] for row in result.diagnostics["subnodes"])
+    assert "shap_importance" in result.diagnostics["subnodes"][0]
+    assert result.diagnostics["alternatives"]
+    assert any(row["name"] == "output.raw_concat" for row in result.diagnostics["alternatives"])
+    assert result.diagnostics["alternative_stats"]
+    assert result.diagnostics["graph"]["selected_alternatives"]["activation"] in {"identity", "sigmoid_gate", "clipped_linear"}
+    toon = toon_report(result)
+    assert "context:" in toon
+    assert "global_ridge_auc:" in toon
+    assert "effective_rank:" in toon
+    assert "features[name,depth,imp,auc,sign,max_corr" in toon
+    assert "shap" in toon
+    assert "alternatives[name,age,evals,sel,n,imp,shap" in toon
+
+
+def test_ridge_g_runs_iterative_reweighted_least_squares() -> None:
+    dataset = make_structural_break_data(n_series=84, length=90, seed=16)
+    graph = build_seed_graph()
+    result = RidgeEvaluator(n_splits=3, seed=16, max_configurations=4, irls_steps=3).evaluate(
+        graph,
+        dataset.inputs(),
+        dataset.y,
+        config={"ridge_g": "huber"},
+    )
+
+    ridge_g = result.diagnostics["fitting"]["ridge_g"]
+    assert ridge_g["alternative"] == "huber"
+    assert ridge_g["rule"] == "huber"
+    assert ridge_g["irls_steps_requested"] == 3
+    assert ridge_g["irls_steps_used_per_fold"] == [3, 3, 3]
+    assert all(len(row["iterations"]) == 3 for row in ridge_g["irls"])
+    assert all("weight_min" in iteration for row in ridge_g["irls"] for iteration in row["iterations"])
+    assert result.diagnostics["global_ridge"]["residual_reweighted"] is True
+    assert result.diagnostics["global_ridge"]["irls_steps_used"] == 3
+    assert len(result.diagnostics["global_ridge"]["irls_iterations"]) == 3
+
+
+def test_update_graph_persists_alternative_statistics_and_age() -> None:
+    dataset = make_structural_break_data(n_series=90, length=90, seed=12)
+    graph = build_seed_graph()
+    result = RidgeEvaluator(n_splits=3, seed=12, max_configurations=8).evaluate(
+        graph,
+        dataset.inputs(),
+        dataset.y,
+        update_graph=True,
+    )
+    selected_segment = result.config["segment_stats"]
+    selected = next(alternative for alternative in graph.nodes["segment_stats"].alternatives if alternative.id == selected_segment)
+    assert selected.age == 1
+    assert selected.stats["participation_count"] == 1
+    assert selected.stats["selected_count"] == 1
+    assert selected.stats["last_config_auc"] == result.auc
+    assert selected.stats["last_feature_count"] > 0
+    assert selected.stats["mean_shap_importance"] > 0.0
+    assert selected.stats["mean_abs_shap"] > 0.0
+    assert graph.nodes["output"].alternatives[0].age == 1
+    assert graph.nodes["output"].alternatives[0].stats["output_count"] == 1
+    serialized = graph.to_dict()
+    first_alternative = next(node["alternatives"][0] for node in serialized["nodes"] if node["alternatives"])
+    assert "age" in first_alternative
+    assert "stats" in first_alternative
+    snapshot = result.diagnostics["alternative_stats"]
+    row = next(item for item in snapshot if item["name"] == f"segment_stats.{selected_segment}")
+    assert row["age"] == 1
+    assert row["participation_count"] == 1
+    assert row["best_config_auc"] == result.auc
+
+
+def test_scientist_and_engineer_generate_diagnostic_mutation_documents() -> None:
+    dataset = make_structural_break_data(n_series=80, length=90, seed=15)
+    graph = build_seed_graph()
+    result = RidgeEvaluator(n_splits=3, seed=15, max_configurations=8).evaluate(graph, dataset.inputs(), dataset.y)
+    hypotheses = ScientistAgent().generate(graph, result)
+    document = EngineerAgent().synthesize(graph, result, hypotheses, step=7, island=2, rng=np.random.default_rng(15))
+    assert hypotheses
+    assert document.add
+    assert document.add[0].alternative_id.endswith("_i2_7")
+    assert any("Expected:" in item for item in document.hypotheses)
+
+
+def test_mutation_engine_adds_alternative_without_mutating_parent_graph() -> None:
+    graph = build_seed_graph()
+    before = len(graph.nodes["shape_stats"].alternatives)
+    spec = MutationSpec(
+        kind="add_alternative",
+        target_node="shape_stats",
+        primitive="spectral_basic",
+        alternative_id="spectral_extra",
+        parents=("series",),
+        description="Additional spectral probe with distinct lineage.",
+    )
+    mutated = MutationEngine().apply(graph, spec)
+    assert len(graph.nodes["shape_stats"].alternatives) == before
+    assert len(mutated.nodes["shape_stats"].alternatives) == before + 1
+    assert "spectral_extra" in mutated.configuration_space()["shape_stats"]
+    output_spec = MutationSpec(
+        kind="add_alternative",
+        target_node="output",
+        primitive="projection_outputs",
+        alternative_id="projection_extra",
+        parents=("segment_stats", "trend_stats", "shape_stats"),
+        description="Additional projection output lineage.",
+    )
+    output_mutated = MutationEngine().apply(graph, output_spec)
+    assert "output" not in output_mutated.configuration_space()
+    assert len(output_mutated.nodes["output"].alternatives) == len(graph.nodes["output"].alternatives) + 1
+
+
+def test_mutation_document_round_trip_and_maintenance() -> None:
+    graph = build_seed_graph()
+    document = MutationDocument(
+        hypotheses=("Remove weak duplicate and add a distinct robust segment alternative.",),
+        rationale="Exercise paper-style YAML mutation documents.",
+        globals=(GlobalSpec("roundtrip_unused_global", [0.25], True, "Unused parser coverage global."),),
+        remove=(RemoveSpec("segment_stats", "robust", "test removal"),),
+        add=(
+            MutationSpec(
+                kind="add_alternative",
+                target_node="segment_stats",
+                primitive="segment_robust",
+                alternative_id="robust_replacement",
+                parents=("series",),
+                description="Replacement robust segment lineage.",
+            ),
+        ),
+    )
+    parsed = MutationDocument.from_yaml(document.to_yaml())
+    assert parsed.to_dict() == document.to_dict()
+    applied = MutationEngine().apply_document(graph, parsed)
+    assert "robust" not in applied.graph.configuration_space()["segment_stats"]
+    assert "robust_replacement" in applied.graph.configuration_space()["segment_stats"]
+    assert applied.maintenance.to_dict()["removed_alternatives"] == ["segment_stats.robust"]
+    assert "roundtrip_unused_global" in applied.maintenance.to_dict()["removed_globals"]
+
+
+def test_mutation_document_can_introduce_reachable_nodes() -> None:
+    graph = build_seed_graph()
+    document = MutationDocument(
+        hypotheses=("Introduce a reusable local_stats node and expose it through output.",),
+        rationale="Exercise node-level graph mutation.",
+        nodes=(NodeSpec("local_stats", "intermediate", "Additional reusable segment statistics."),),
+        add=(
+            MutationSpec(
+                kind="add_alternative",
+                target_node="local_stats",
+                primitive="segment_basic",
+                alternative_id="basic_local",
+                parents=("series",),
+                description="Local segment statistics on the raw series.",
+            ),
+            MutationSpec(
+                kind="add_alternative",
+                target_node="output",
+                primitive="pass_outputs",
+                alternative_id="local_stats_output",
+                parents=("local_stats",),
+                description="Expose the new reusable node as output features.",
+            ),
+        ),
+    )
+    parsed = MutationDocument.from_yaml(document.to_yaml())
+    applied = MutationEngine().apply_document(graph, parsed)
+    assert "local_stats" in applied.graph.nodes
+    assert "basic_local" in applied.graph.configuration_space()["local_stats"]
+    assert any(alternative.id == "local_stats_output" for alternative in applied.graph.nodes["output"].alternatives)
+
+
+def test_trusted_source_mutation_adds_lambda_alternative() -> None:
+    dataset = make_structural_break_data(n_series=30, length=70, seed=29)
+    graph = build_seed_graph()
+    source_payload = {
+        "kind": "add_alternative",
+        "target_node": "output",
+        "alternative_id": "source_squared_delta",
+        "parents": ["segment_stats"],
+        "source": "lambda ctx, values: FeatureBlock(np.column_stack([values['segment_stats'].values[:, 0] ** 2]), ['squared_delta'])",
+        "description": "Paper-style source lambda output feature.",
+    }
+    text = "\n".join(
+        [
+            'rationale: "exercise trusted source-backed alternatives"',
+            "hypotheses:",
+            "  []",
+            "nodes:",
+            "  []",
+            "remove:",
+            "  []",
+            "globals:",
+            "  []",
+            "add:",
+            f"  - {json.dumps(source_payload, sort_keys=True)}",
+        ]
+    )
+    document = MutationDocument.from_yaml(text)
+    assert document.add[0].primitive == "source"
+    with pytest.raises(ValueError, match="allow_source"):
+        MutationEngine().apply_document(graph, document)
+    applied = MutationEngine(allow_source=True).apply_document(graph, document)
+    assert applied.graph.nodes["output"].alternatives[-1].source.startswith("lambda ctx, values:")
+    x, names, _ctx = applied.graph.evaluate_features(dataset.inputs(), applied.graph.default_config())
+    assert x.shape[0] == dataset.y.shape[0]
+    assert any(name.endswith("source_squared_delta.squared_delta") for name in names)
+
+
+def test_maintenance_prunes_unreachable_nodes_and_unused_globals() -> None:
+    graph = build_seed_graph()
+    graph.add_node("dead_branch", "intermediate", "Unreachable branch.")
+    graph.globals.add("unused", [1.0], trainable=True, description="Unused test parameter.")
+    cleaned, report = GraphMaintenance().clean(graph)
+    assert "dead_branch" not in cleaned.nodes
+    assert "unused" not in cleaned.globals.names()
+    assert "dead_branch" in report.removed_nodes
+    assert "unused" in report.removed_globals
+
+
+def test_global_refinement_phase_runs_without_mutating_parent_graph() -> None:
+    dataset = make_structural_break_data(n_series=50, length=80, seed=13)
+    graph = build_seed_graph()
+    before = graph.globals.get("gate_scale").copy()
+    result = RidgeEvaluator(n_splits=3, seed=13, max_configurations=4, refine_globals=True, refine_steps=2).evaluate(
+        graph,
+        dataset.inputs(),
+        dataset.y,
+    )
+    assert result.diagnostics["refinement"]["enabled"] is True
+    assert result.diagnostics["refinement"]["requested_backend"] == "auto"
+    assert result.diagnostics["refinement"]["backend"] in {"numpy_coordinate", "torch_l_bfgs"}
+    assert result.diagnostics["configuration_search"]["evaluated"] == 4
+    assert np.array_equal(graph.globals.get("gate_scale"), before)
+
+
+def test_numpy_refinement_backend_can_be_requested_explicitly() -> None:
+    dataset = make_structural_break_data(n_series=40, length=70, seed=17)
+    graph = build_seed_graph()
+    result = RidgeEvaluator(
+        n_splits=3,
+        seed=17,
+        max_configurations=3,
+        refine_globals=True,
+        refine_steps=1,
+        refine_backend="numpy",
+    ).evaluate(graph, dataset.inputs(), dataset.y)
+    assert result.diagnostics["refinement"]["backend"] == "numpy_coordinate"
+    assert result.diagnostics["refinement"]["requested_backend"] == "numpy"
+
+
+def test_torch_l_bfgs_refinement_backend_when_available() -> None:
+    pytest.importorskip("torch")
+    dataset = make_structural_break_data(n_series=32, length=70, seed=19)
+    graph = build_seed_graph()
+    result = RidgeEvaluator(
+        n_splits=3,
+        seed=19,
+        max_configurations=3,
+        refine_globals=True,
+        refine_steps=2,
+        refine_backend="torch",
+    ).evaluate(graph, dataset.inputs(), dataset.y)
+    assert result.diagnostics["refinement"]["backend"] == "torch_l_bfgs"
+    assert result.diagnostics["refinement"]["enabled"] is True
+
+
+def test_evolution_loop_writes_events_checkpoint_and_memorandum(tmp_path) -> None:
+    dataset = make_structural_break_data(n_series=90, length=90, seed=21)
+    graph = build_seed_graph()
+    result = EvolutionLoop(graph, evaluator=RidgeEvaluator(n_splits=3, seed=21, max_configurations=12), seed=21).run(
+        dataset.inputs(),
+        dataset.y,
+        steps=4,
+        output_dir=tmp_path,
+    )
+    assert result.auc > 0.75
+    events = (tmp_path / "events.jsonl").read_text(encoding="utf-8").strip().splitlines()
+    assert len(events) == 4
+    first_event = json.loads(events[0])
+    assert {"step", "accepted", "score", "best_score", "mutation", "config"} <= set(first_event)
+    assert {"maintenance", "salvaged"} <= set(first_event)
+    assert first_event["mutation"]["hypotheses"]
+    checkpoint = json.loads((tmp_path / "checkpoint.json").read_text(encoding="utf-8"))
+    assert "graph" in checkpoint
+    assert "feedback" in checkpoint
+    assert "diagnostics_toon" in checkpoint
+    assert checkpoint["feedback"]["top_subnodes"]
+    archive_rows = [
+        json.loads(line)
+        for line in (tmp_path / "archive" / "index.jsonl").read_text(encoding="utf-8").strip().splitlines()
+    ]
+    assert archive_rows[0]["version"] == 0
+    assert archive_rows[0]["step"] == 0
+    assert (tmp_path / "archive" / archive_rows[0]["path"]).exists()
+    archived = json.loads((tmp_path / "archive" / archive_rows[0]["path"]).read_text(encoding="utf-8"))
+    assert archived["feedback"]["top_subnodes"]
+    assert archived["diagnostics_toon"]
+    assert (tmp_path / "mutations" / "step_0001.yaml").exists()
+    assert "Expected:" in (tmp_path / "mutations" / "step_0001.yaml").read_text(encoding="utf-8")
+    assert (tmp_path / "memorandum.md").exists()
+    assert (tmp_path / "task_context.md").exists()
+    memorandum = (tmp_path / "memorandum.md").read_text(encoding="utf-8")
+    assert "[OUTCOME HISTORY]" in memorandum
+    assert "[STATE]" in memorandum
+    assert "[WHAT WORKS]" in memorandum
+    assert "[WHAT FAILED]" in memorandum
+    assert "[ERROR LOG]" in memorandum
+    task_context = (tmp_path / "task_context.md").read_text(encoding="utf-8")
+    assert "## Tensor Inventory" in task_context
+    assert "series: numeric_tensor" in task_context
+    assert "## Scorer Mechanics" in task_context
+    assert "stratified 3-fold Ridge CV" in task_context
+
+
+def test_llm_agents_write_prompt_artifacts_and_mutation_yaml(tmp_path) -> None:
+    dataset = make_structural_break_data(n_series=50, length=70, seed=23)
+    graph = build_seed_graph()
+    llm_document = MutationDocument(
+        hypotheses=("Add a nonduplicate spectral shape alternative to cover residual frequency structure.",),
+        rationale="LLM engineer selected a shape_stats mutation grounded in diagnostics.",
+        add=(
+            MutationSpec(
+                kind="add_alternative",
+                target_node="shape_stats",
+                primitive="spectral_basic",
+                alternative_id="spectral_llm",
+                parents=("series",),
+                description="LLM-proposed frequency-band ratio change statistics.",
+            ),
+        ),
+    )
+    client = StaticLLMClient(
+        (
+            "\n".join(
+                [
+                    "Hypothesis: Add a spectral shape_stats alternative.",
+                    "Rationale: shape_stats appears in the selected output dependencies.",
+                    "Expected Improvement: more complementary residual frequency coverage.",
+                    "Risk Mode: Balanced.",
+                ]
+            ),
+            f"```yaml\n{llm_document.to_yaml()}```",
+        )
+    )
+    result = EvolutionLoop(
+        graph,
+        evaluator=RidgeEvaluator(n_splits=3, seed=23, max_configurations=6),
+        scientist=LLMScientistAgent(client),
+        engineer=LLMEngineerAgent(client),
+        seed=23,
+    ).run(
+        dataset.inputs(),
+        dataset.y,
+        steps=1,
+        output_dir=tmp_path,
+    )
+    assert result.auc > 0.7
+    events = [json.loads(line) for line in (tmp_path / "events.jsonl").read_text(encoding="utf-8").strip().splitlines()]
+    assert events[0]["mutation"]["add"][0]["alternative_id"] == "spectral_llm"
+    prompt_files = sorted((tmp_path / "prompts").glob("step_0001_*.md"))
+    assert len(prompt_files) == 2
+    prompt_text = "\n".join(path.read_text(encoding="utf-8") for path in prompt_files)
+    assert "GLOBAL EVOFOREST RULES" in prompt_text
+    assert "FEATURE DIAGNOSTICS" in prompt_text
+    assert "## Tensor Inventory" in prompt_text
+    assert "## Scorer Mechanics" in prompt_text
+    assert "spectral_llm" in (tmp_path / "mutations" / "step_0001.yaml").read_text(encoding="utf-8")
+    assert "[OUTCOME HISTORY]" in (tmp_path / "memorandum.md").read_text(encoding="utf-8")
+    assert "## Tensor Inventory" in (tmp_path / "task_context.md").read_text(encoding="utf-8")
+    assert len(client.requests) == 2
+
+
+def test_prompt_builder_advertises_source_schema_only_when_enabled() -> None:
+    dataset = make_structural_break_data(n_series=35, length=70, seed=24)
+    graph = build_seed_graph()
+    result = RidgeEvaluator(n_splits=3, seed=24, max_configurations=4).evaluate(graph, dataset.inputs(), dataset.y)
+    hypothesis = ScientistAgent().generate(graph, result, max_hypotheses=1)
+    _system, source_user = PromptBuilder(allow_source=True).engineer_prompts(graph, result, hypothesis)
+    _system, primitive_user = PromptBuilder(allow_source=False).engineer_prompts(graph, result, hypothesis)
+    assert '"source": "lambda ctx, values:' in source_user
+    assert '"source": "lambda ctx, values:' not in primitive_user
+
+
+def test_failed_llm_source_mutation_is_logged_and_fed_back(tmp_path) -> None:
+    dataset = make_structural_break_data(n_series=45, length=70, seed=26)
+    graph = build_seed_graph()
+    bad_document = MutationDocument(
+        hypotheses=("Try a source alternative that fails at runtime.",),
+        rationale="Exercise execution-error feedback.",
+        add=(
+            MutationSpec(
+                kind="add_alternative",
+                target_node="output",
+                primitive="source",
+                alternative_id="bad_source_output",
+                parents=("segment_stats",),
+                source="lambda ctx, values: values['missing_parent']",
+                description="Intentional runtime failure.",
+            ),
+        ),
+    )
+    repair_document = MutationDocument(
+        hypotheses=("Repair by using a registry-backed spectral alternative.",),
+        rationale="Use a known primitive after the source failure.",
+        add=(
+            MutationSpec(
+                kind="add_alternative",
+                target_node="shape_stats",
+                primitive="spectral_basic",
+                alternative_id="spectral_after_error",
+                parents=("series",),
+                description="Valid repair after runtime failure.",
+            ),
+        ),
+    )
+    client = StaticLLMClient(
+        (
+            "Hypothesis: Add a failing source output.\nRationale: Exercise failures.\nExpected Improvement: none.\nRisk Mode: Risky.",
+            bad_document.to_yaml(),
+            "Hypothesis: Use a safer shape_stats primitive.\nRationale: Prior source failed.\nExpected Improvement: recover valid search.\nRisk Mode: Conservative.",
+            repair_document.to_yaml(),
+        )
+    )
+    result = EvolutionLoop(
+        graph,
+        evaluator=RidgeEvaluator(n_splits=3, seed=26, max_configurations=4),
+        mutation_engine=MutationEngine(allow_source=True),
+        scientist=LLMScientistAgent(client),
+        engineer=LLMEngineerAgent(client, allow_source=True),
+        seed=26,
+    ).run(dataset.inputs(), dataset.y, steps=2, output_dir=tmp_path)
+    assert result.auc > 0.7
+    events = [json.loads(line) for line in (tmp_path / "events.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert events[0]["failed"] is True
+    assert events[0]["score"] is None
+    assert "KeyError" in events[0]["error"]
+    assert "bad_source_output" in events[0]["mutation"]["add"][0]["alternative_id"]
+    assert "failed" not in events[1] or events[1]["failed"] is False
+    memorandum = (tmp_path / "memorandum.md").read_text(encoding="utf-8")
+    assert "[ERROR LOG]" in memorandum
+    assert "KeyError" in memorandum
+    assert "KeyError" in str(client.requests[3]["user_prompt"])
+
+
+def test_llm_island_mode_uses_scientist_temperature_schedule(tmp_path) -> None:
+    dataset = make_structural_break_data(n_series=42, length=70, seed=30)
+    graph = build_seed_graph()
+    document = MutationDocument(
+        hypotheses=("Add a spectral shape alternative from island diagnostics.",),
+        rationale="Exercise island-specific LLM temperature scheduling.",
+        add=(
+            MutationSpec(
+                kind="add_alternative",
+                target_node="shape_stats",
+                primitive="spectral_basic",
+                alternative_id="spectral_island_temp",
+                parents=("series",),
+                description="Island-scheduled spectral statistic.",
+            ),
+        ),
+    )
+    client = StaticLLMClient(
+        (
+            "\n".join(
+                [
+                    "Hypothesis: Add island spectral shape.",
+                    "Rationale: residual frequency evidence.",
+                    "Expected Improvement: complementary coverage.",
+                    "Risk Mode: Balanced.",
+                ]
+            ),
+            document.to_yaml(),
+            "\n".join(
+                [
+                    "Hypothesis: Add island spectral shape.",
+                    "Rationale: residual frequency evidence.",
+                    "Expected Improvement: complementary coverage.",
+                    "Risk Mode: Balanced.",
+                ]
+            ),
+            document.to_yaml(),
+        )
+    )
+
+    result = EvolutionLoop(
+        graph,
+        evaluator=RidgeEvaluator(n_splits=3, seed=30, max_configurations=4),
+        scientist=LLMScientistAgent(client, island_temperatures=(0.35, 0.5)),
+        engineer=LLMEngineerAgent(client, temperature=0.0),
+        seed=30,
+    ).run_islands(
+        dataset.inputs(),
+        dataset.y,
+        islands=2,
+        steps_per_island=1,
+        output_dir=tmp_path,
+    )
+
+    assert result.auc > 0.7
+    assert [request["temperature"] for request in client.requests] == [0.35, 0.0, 0.5, 0.0]
+
+
+def test_async_islands_record_failed_candidates_without_crashing(tmp_path) -> None:
+    class BadSourceEngineer(EngineerAgent):
+        def synthesize(self, graph, result, hypotheses, step, island, rng):  # type: ignore[no-untyped-def]
+            del graph, result, hypotheses, rng
+            return MutationDocument(
+                hypotheses=("Async island source failure.",),
+                rationale="Ensure failed worker candidates become events.",
+                add=(
+                    MutationSpec(
+                        kind="add_alternative",
+                        target_node="output",
+                        primitive="source",
+                        alternative_id=f"bad_async_{island}_{step}",
+                        parents=("segment_stats",),
+                        source="lambda ctx, values: values['missing_async_parent']",
+                        description="Intentional async runtime failure.",
+                    ),
+                ),
+            )
+
+    dataset = make_structural_break_data(n_series=42, length=70, seed=28)
+    graph = build_seed_graph()
+    result = EvolutionLoop(
+        graph,
+        evaluator=RidgeEvaluator(n_splits=3, seed=28, max_configurations=4),
+        mutation_engine=MutationEngine(allow_source=True),
+        engineer=BadSourceEngineer(),
+        seed=28,
+    ).run_async_islands(
+        dataset.inputs(),
+        dataset.y,
+        islands=2,
+        steps_per_island=1,
+        output_dir=tmp_path,
+        max_workers=2,
+    )
+    assert result.auc > 0.7
+    events = [json.loads(line) for line in (tmp_path / "events.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert len(events) == 2
+    assert all(event["failed"] is True for event in events)
+    assert all(event["score"] is None for event in events)
+    assert all("KeyError" in event["error"] for event in events)
+    assert "[ERROR LOG]" in (tmp_path / "memorandum.md").read_text(encoding="utf-8")
+
+
+def test_island_evolution_writes_global_and_island_artifacts(tmp_path) -> None:
+    dataset = make_structural_break_data(n_series=60, length=80, seed=25)
+    graph = build_seed_graph()
+    result = EvolutionLoop(graph, evaluator=RidgeEvaluator(n_splits=3, seed=25, max_configurations=8), seed=25).run_islands(
+        dataset.inputs(),
+        dataset.y,
+        islands=2,
+        steps_per_island=2,
+        output_dir=tmp_path,
+        migration_interval=2,
+    )
+    assert result.auc > 0.7
+    events = (tmp_path / "events.jsonl").read_text(encoding="utf-8").strip().splitlines()
+    assert len(events) == 4
+    assert json.loads(events[0])["island"] in {0, 1}
+    archive_rows = [
+        json.loads(line)
+        for line in (tmp_path / "archive" / "index.jsonl").read_text(encoding="utf-8").strip().splitlines()
+    ]
+    assert archive_rows[0]["mode"] == "sequential_island"
+    assert archive_rows[0]["path"].startswith("global_best_v0000_step_0000_")
+    assert (tmp_path / "archive" / archive_rows[0]["path"]).exists()
+    assert (tmp_path / "mutations" / "island_0_step_0001.yaml").exists()
+    assert (tmp_path / "task_context.md").exists()
+    assert (tmp_path / "island_0" / "task_context.md").exists()
+    assert (tmp_path / "island_0" / "memorandum.md").exists()
+    assert (tmp_path / "island_1" / "memorandum.md").exists()
+
+
+def test_async_island_evolution_writes_concurrent_artifacts(tmp_path) -> None:
+    dataset = make_structural_break_data(n_series=50, length=70, seed=27)
+    graph = build_seed_graph()
+    result = EvolutionLoop(graph, evaluator=RidgeEvaluator(n_splits=3, seed=27, max_configurations=6), seed=27).run_async_islands(
+        dataset.inputs(),
+        dataset.y,
+        islands=2,
+        steps_per_island=2,
+        output_dir=tmp_path,
+        migration_interval=2,
+        max_workers=2,
+    )
+    assert result.auc > 0.7
+    events = [json.loads(line) for line in (tmp_path / "events.jsonl").read_text(encoding="utf-8").strip().splitlines()]
+    assert len(events) == 4
+    assert {event["mode"] for event in events} == {"async_island"}
+    assert {event["round"] for event in events} == {1, 2}
+    assert all("proposed_step" in event for event in events)
+    archive_rows = [
+        json.loads(line)
+        for line in (tmp_path / "archive" / "index.jsonl").read_text(encoding="utf-8").strip().splitlines()
+    ]
+    assert archive_rows[0]["mode"] == "async_island"
+    assert (tmp_path / "archive" / archive_rows[0]["path"]).exists()
+    assert (tmp_path / "mutations" / "island_0_step_0001.yaml").exists()
+    assert (tmp_path / "task_context.md").exists()
+    assert (tmp_path / "island_0" / "task_context.md").exists()
+    assert (tmp_path / "island_0" / "memorandum.md").exists()
+    assert (tmp_path / "island_1" / "memorandum.md").exists()
+
+
+def test_demo_predictions_are_deterministic() -> None:
+    dataset = make_structural_break_data(n_series=60, length=70, seed=31)
+    graph = build_seed_graph()
+    config = graph.default_config()
+    x1, names1, _ = graph.evaluate_features(dataset.inputs(), config)
+    x2, names2, _ = graph.evaluate_features(dataset.inputs(), config)
+    assert names1 == names2
+    assert np.max(np.abs(x1 - x2)) == 0.0

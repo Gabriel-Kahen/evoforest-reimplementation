@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "evoforest-architecture"
+version = "0.1.0"
+description = "A clean-room software architecture recreation of the EvoForest paper."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8",
+]
+torch = [
+  "torch>=2.3",
+]
+
+[project.scripts]
+evoforest-arch = "evoforest_arch.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["evoforest_arch*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
