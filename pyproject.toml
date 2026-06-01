@@ -22,9 +22,10 @@ torch = [
 
 [project.scripts]
 evoforest-arch = "evoforest_arch.cli:main"
+evoforest-benchmarks = "benchmarks.run_all:main"
 
 [tool.setuptools.packages.find]
-include = ["evoforest_arch*"]
+include = ["evoforest_arch*", "benchmarks*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

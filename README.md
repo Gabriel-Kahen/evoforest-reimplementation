@@ -70,6 +70,18 @@ pytest -q
 evoforest-arch demo --steps 12 --islands 2 --async-islands --refine-globals --refine-backend auto --output runs/demo
 ```
 
+## Run Benchmarks
+
+The benchmark suite generates reproducible JSON and Markdown reports that show
+architecture-level faithfulness to the paper without claiming to reproduce the
+authors' private evolved graph or reported score:
+
+```bash
+python -m benchmarks.run_all --quick --output benchmark_reports/quick
+```
+
+See [docs/benchmarks.md](docs/benchmarks.md) for the full benchmark methodology.
+
 Live LLM mutation synthesis is opt-in. Point the generic HTTP JSON client at a
 chat-completions-compatible endpoint:
 
