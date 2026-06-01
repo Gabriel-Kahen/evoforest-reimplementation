@@ -70,6 +70,38 @@ pytest -q
 evoforest-arch demo --steps 12 --islands 2 --async-islands --refine-globals --refine-backend auto --output runs/demo
 ```
 
+## Run Production Evolution Smoke
+
+The production workflow is the safer path for serious graph search. It writes a
+run manifest, dataset fingerprint, fixed train/validation/test split manifest,
+resume state, reloadable graph artifacts, and a stricter archive that only promotes
+graphs after both train improvement and validation recheck improvement.
+
+```bash
+evoforest-arch evolve --steps 4 --seed 17 --n-series 240 --length 160 --output runs/production-smoke
+evoforest-arch inspect runs/production-smoke
+evoforest-arch export-best runs/production-smoke --output runs/production-smoke-best.json
+evoforest-arch recheck runs/production-smoke
+```
+
+To continue an interrupted run, pass `--resume`; `--steps` then means additional
+steps:
+
+```bash
+evoforest-arch evolve --resume --steps 4 --output runs/production-smoke
+```
+
+The test split is not evaluated during `evolve` or default `recheck`. Consume it
+only when you are ready to burn the holdout:
+
+```bash
+evoforest-arch recheck runs/production-smoke --include-test
+```
+
+This command currently wires the synthetic structural-break dataset. A real
+strength claim needs a fixed external dataset loader plus a committed split
+manifest; see [docs/evolution_workflow.md](docs/evolution_workflow.md).
+
 ## Run Benchmarks
 
 The benchmark suite generates reproducible JSON and Markdown reports that show

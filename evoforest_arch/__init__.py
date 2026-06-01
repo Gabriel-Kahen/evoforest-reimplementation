@@ -15,6 +15,7 @@ from evoforest_arch.llm import (
 )
 from evoforest_arch.maintenance import GraphMaintenance, MaintenanceReport
 from evoforest_arch.mutations import GlobalSpec, MutationDocument, MutationEngine, MutationSpec, NodeSpec, RemoveSpec
+from evoforest_arch.production import ProductionConfig, ProductionEvolutionRunner, export_best_graph, inspect_run, recheck_run
 from evoforest_arch.refinement import GlobalRefiner, RefinementResult, TorchLBFGSRefiner
 from evoforest_arch.seed import build_seed_graph
 from evoforest_arch.source import build_source_alternative, compile_lambda_source
@@ -45,6 +46,8 @@ __all__ = [
     "NodeSpec",
     "PromptBuilder",
     "PromptRecord",
+    "ProductionConfig",
+    "ProductionEvolutionRunner",
     "RefinementResult",
     "RemoveSpec",
     "ResidualWeightRule",
@@ -58,5 +61,8 @@ __all__ = [
     "build_seed_graph",
     "build_source_alternative",
     "compile_lambda_source",
+    "export_best_graph",
+    "inspect_run",
     "make_structural_break_data",
+    "recheck_run",
 ]

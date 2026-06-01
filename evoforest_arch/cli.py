@@ -14,6 +14,7 @@ from evoforest_arch.llm import (
     PromptBuilder,
 )
 from evoforest_arch.mutations import MutationEngine
+from evoforest_arch.production import ProductionConfig, ProductionEvolutionRunner, export_best_graph, inspect_run, recheck_run
 from evoforest_arch.seed import build_seed_graph
 from evoforest_arch.synthetic import make_structural_break_data
 
@@ -65,6 +66,45 @@ def main(argv: list[str] | None = None) -> int:
     demo.add_argument("--allow-source-mutations", action="store_true")
     demo.add_argument("--output", type=pathlib.Path, default=pathlib.Path("runs/demo"))
     demo.set_defaults(func=run_demo)
+
+    evolve = sub.add_parser("evolve", help="Run resume-safe production evolution with fixed split manifests.")
+    evolve.add_argument("--steps", type=int, default=4, help="New steps to run. With --resume, this is additional steps.")
+    evolve.add_argument("--dataset", choices=("synthetic-structural-break",), default="synthetic-structural-break")
+    evolve.add_argument("--n-series", type=int, default=240)
+    evolve.add_argument("--length", type=int, default=160)
+    evolve.add_argument("--boundary", type=int, default=None)
+    evolve.add_argument("--seed", type=int, default=17)
+    evolve.add_argument("--split-seed", type=int, default=None)
+    evolve.add_argument("--validation-fraction", type=float, default=0.2)
+    evolve.add_argument("--test-fraction", type=float, default=0.2)
+    evolve.add_argument("--folds", type=int, default=3)
+    evolve.add_argument("--max-configurations", type=int, default=64)
+    evolve.add_argument("--irls-steps", type=int, default=2)
+    evolve.add_argument("--refine-globals", action="store_true")
+    evolve.add_argument("--refine-steps", type=int, default=20)
+    evolve.add_argument("--refine-backend", choices=("auto", "numpy", "torch"), default="auto")
+    evolve.add_argument("--min-train-improvement", type=float, default=1e-6)
+    evolve.add_argument("--min-validation-improvement", type=float, default=1e-6)
+    evolve.add_argument("--allow-source-mutations", action="store_true")
+    evolve.add_argument("--resume", action="store_true")
+    evolve.add_argument("--output", type=pathlib.Path, required=True)
+    evolve.set_defaults(func=run_evolve)
+
+    inspect_parser = sub.add_parser("inspect", help="Inspect a production evolution run directory.")
+    inspect_parser.add_argument("run_dir", type=pathlib.Path)
+    inspect_parser.set_defaults(func=run_inspect)
+
+    export_parser = sub.add_parser("export-best", help="Export the best graph from a production run.")
+    export_parser.add_argument("run_dir", type=pathlib.Path)
+    export_parser.add_argument("--output", type=pathlib.Path, required=True)
+    export_parser.add_argument("--allow-source", action="store_true")
+    export_parser.set_defaults(func=run_export_best)
+
+    recheck_parser = sub.add_parser("recheck", help="Re-evaluate the best graph on fixed production splits.")
+    recheck_parser.add_argument("run_dir", type=pathlib.Path)
+    recheck_parser.add_argument("--include-test", action="store_true", help="Explicitly consume and report the held-out test split.")
+    recheck_parser.add_argument("--allow-source", action="store_true")
+    recheck_parser.set_defaults(func=run_recheck)
     args = parser.parse_args(argv)
     return args.func(args)
 
@@ -128,6 +168,49 @@ def run_demo(args: argparse.Namespace) -> int:
         "output": str(args.output),
     }
     print(json.dumps(summary, indent=2), flush=True)
+    return 0
+
+
+def run_evolve(args: argparse.Namespace) -> int:
+    config = ProductionConfig(
+        output_dir=args.output,
+        steps=args.steps,
+        seed=args.seed,
+        dataset_name=args.dataset,
+        n_series=args.n_series,
+        length=args.length,
+        boundary=args.boundary,
+        validation_fraction=args.validation_fraction,
+        test_fraction=args.test_fraction,
+        split_seed=args.split_seed,
+        folds=args.folds,
+        max_configurations=args.max_configurations,
+        irls_steps=args.irls_steps,
+        refine_globals=args.refine_globals,
+        refine_steps=args.refine_steps,
+        refine_backend=args.refine_backend,
+        min_train_improvement=args.min_train_improvement,
+        min_validation_improvement=args.min_validation_improvement,
+        allow_source_mutations=args.allow_source_mutations,
+    )
+    summary = ProductionEvolutionRunner(config).run(resume=args.resume)
+    print(json.dumps(summary, indent=2), flush=True)
+    return 0
+
+
+def run_inspect(args: argparse.Namespace) -> int:
+    print(json.dumps(inspect_run(args.run_dir), indent=2), flush=True)
+    return 0
+
+
+def run_export_best(args: argparse.Namespace) -> int:
+    output_path = export_best_graph(args.run_dir, args.output, allow_source=args.allow_source)
+    print(json.dumps({"output": str(output_path)}, indent=2), flush=True)
+    return 0
+
+
+def run_recheck(args: argparse.Namespace) -> int:
+    print(json.dumps(recheck_run(args.run_dir, include_test=args.include_test, allow_source=args.allow_source), indent=2), flush=True)
     return 0
 
 
