@@ -9,6 +9,7 @@ from typing import Any
 
 import numpy as np
 
+from evoforest_arch.competition import COMPETITION_DATASET_NAME, DEFAULT_COMPETITION_DATA_DIR, load_competition_event_dataset
 from evoforest_arch.evaluator import EvaluationResult, RidgeEvaluator
 from evoforest_arch.evolution import EvolutionLoop
 from evoforest_arch.feedback import feedback_summary, toon_report
@@ -36,9 +37,12 @@ class ProductionConfig:
     steps: int = 4
     seed: int = 17
     dataset_name: str = "synthetic-structural-break"
+    data_dir: pathlib.Path | None = None
     n_series: int = 240
     length: int = 160
     boundary: int | None = None
+    competition_series_length: int = 160
+    max_samples: int | None = None
     validation_fraction: float = 0.2
     test_fraction: float = 0.2
     split_seed: int | None = None
@@ -53,6 +57,13 @@ class ProductionConfig:
     allow_source_mutations: bool = False
 
     def dataset_config(self) -> dict[str, Any]:
+        if self.dataset_name == COMPETITION_DATASET_NAME:
+            return {
+                "name": self.dataset_name,
+                "data_dir": str(self.data_dir or DEFAULT_COMPETITION_DATA_DIR),
+                "series_length": int(self.competition_series_length),
+                "max_samples": self.max_samples,
+            }
         return {
             "name": self.dataset_name,
             "seed": int(self.seed),
@@ -227,7 +238,7 @@ class ProductionEvolutionRunner:
         if run_dir.exists() and any(run_dir.iterdir()):
             raise FileExistsError(f"Refusing to overwrite non-empty run directory: {run_dir}")
         run_dir.mkdir(parents=True, exist_ok=True)
-        inputs, y = load_dataset(self.config.dataset_config())
+        inputs, y, dataset_metadata = load_dataset_with_metadata(self.config.dataset_config())
         split_manifest = make_split_manifest(
             inputs,
             y,
@@ -254,7 +265,7 @@ class ProductionEvolutionRunner:
             best_graph_path="best_graph.json",
             rng_state=rng.bit_generator.state,
         )
-        manifest = self._run_manifest(state.run_id, split_manifest)
+        manifest = self._run_manifest(state.run_id, split_manifest, dataset_metadata=dataset_metadata)
         (run_dir / "run_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
         context = ProductionContext(
             run_dir=run_dir,
@@ -315,7 +326,13 @@ class ProductionEvolutionRunner:
             and validation_delta > float(self.config.min_validation_improvement)
         )
 
-    def _run_manifest(self, run_id: str, split_manifest: SplitManifest) -> dict[str, Any]:
+    def _run_manifest(
+        self,
+        run_id: str,
+        split_manifest: SplitManifest,
+        *,
+        dataset_metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         return {
             "run_id": run_id,
             "created_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -323,6 +340,7 @@ class ProductionEvolutionRunner:
             "paper": {"arxiv_abs": "https://arxiv.org/abs/2604.19761"},
             "git_commit": _git_commit(),
             "dataset": self.config.dataset_config(),
+            "dataset_metadata": dataset_metadata or {},
             "dataset_fingerprint": split_manifest.dataset_fingerprint,
             "split_manifest_path": "splits.json",
             "evaluator": self.config.evaluator_config(),
@@ -333,7 +351,10 @@ class ProductionEvolutionRunner:
                 "min_validation_improvement": float(self.config.min_validation_improvement),
                 "validation_config": "candidate_train_best_config",
             },
-            "test_policy": "test split is not evaluated by evolve; use recheck --include-test to consume it explicitly",
+            "test_policy": (
+                "test split is not evaluated by evolve; use recheck --include-test to consume it explicitly. "
+                "For competition-parquet-event, reduced labeled test parquet files are also read only by recheck --include-test."
+            ),
             "safe_staged_execution_rules": list(SAFE_STAGED_EXECUTION_RULES),
         }
 
@@ -477,16 +498,48 @@ class ProductionEvolutionRunner:
 
 
 def load_dataset(dataset_config: dict[str, Any]) -> tuple[dict[str, object], np.ndarray]:
+    inputs, y, _metadata = load_dataset_with_metadata(dataset_config)
+    return inputs, y
+
+
+def load_dataset_with_metadata(dataset_config: dict[str, Any]) -> tuple[dict[str, object], np.ndarray, dict[str, Any]]:
     name = str(dataset_config.get("name", "synthetic-structural-break"))
-    if name != "synthetic-structural-break":
-        raise ValueError(f"Unsupported dataset {name!r}; only synthetic-structural-break is wired into this runner.")
-    dataset = make_structural_break_data(
-        n_series=int(dataset_config.get("n_series", 240)),
-        length=int(dataset_config.get("length", 160)),
-        boundary=dataset_config.get("boundary"),
-        seed=int(dataset_config.get("seed", 0)),
+    if name == "synthetic-structural-break":
+        dataset = make_structural_break_data(
+            n_series=int(dataset_config.get("n_series", 240)),
+            length=int(dataset_config.get("length", 160)),
+            boundary=dataset_config.get("boundary"),
+            seed=int(dataset_config.get("seed", 0)),
+        )
+        return dataset.inputs(), dataset.y, {
+            "name": name,
+            "n_samples": int(dataset.y.shape[0]),
+            "positive_count": int(np.sum(dataset.y)),
+            "negative_count": int(dataset.y.shape[0] - np.sum(dataset.y)),
+            "mapping": "synthetic structural break generator",
+        }
+    if name == COMPETITION_DATASET_NAME:
+        dataset = load_competition_event_dataset(
+            dataset_config.get("data_dir", DEFAULT_COMPETITION_DATA_DIR),
+            split="train",
+            series_length=int(dataset_config.get("series_length", 160)),
+            max_samples=dataset_config.get("max_samples"),
+        )
+        return dataset.inputs, dataset.y, dataset.metadata
+    raise ValueError(f"Unsupported dataset {name!r}.")
+
+
+def load_external_reduced_test(dataset_config: dict[str, Any]) -> tuple[dict[str, object], np.ndarray, dict[str, Any]] | None:
+    name = str(dataset_config.get("name", "synthetic-structural-break"))
+    if name != COMPETITION_DATASET_NAME:
+        return None
+    dataset = load_competition_event_dataset(
+        dataset_config.get("data_dir", DEFAULT_COMPETITION_DATA_DIR),
+        split="reduced_test",
+        series_length=int(dataset_config.get("series_length", 160)),
+        max_samples=dataset_config.get("max_samples"),
     )
-    return dataset.inputs(), dataset.y
+    return dataset.inputs, dataset.y, dataset.metadata
 
 
 def inspect_run(run_dir: str | pathlib.Path) -> dict[str, Any]:
@@ -567,6 +620,17 @@ def recheck_run(run_dir: str | pathlib.Path, *, include_test: bool = False, allo
             "n_samples": int(test_y.shape[0]),
             "config": test_result.config,
         }
+        reduced_test = load_external_reduced_test(dict(manifest["dataset"]))
+        if reduced_test is not None:
+            reduced_inputs, reduced_y, reduced_metadata = reduced_test
+            reduced_result = evaluator.evaluate(graph, reduced_inputs, reduced_y, config=state.best_config, update_graph=False)
+            result["splits"]["reduced_test"] = {
+                "auc": float(reduced_result.auc),
+                "n_samples": int(reduced_y.shape[0]),
+                "config": reduced_result.config,
+                "metadata": reduced_metadata,
+                "official_metric_note": "Reduced test is evaluated only because include_test=True was explicitly requested.",
+            }
         state.test_recheck_count += 1
         (path / "state.json").write_text(json.dumps(state.to_dict(), indent=2), encoding="utf-8")
     result["created_at_utc"] = datetime.now(timezone.utc).isoformat()

@@ -104,6 +104,26 @@ This command currently wires the synthetic structural-break dataset. A real
 strength claim needs a fixed external dataset loader plus a committed split
 manifest; see [docs/evolution_workflow.md](docs/evolution_workflow.md).
 
+The Crunch-style parquet bundle can be loaded as an id-level event-detection
+surrogate for the current sequence graph interface:
+
+```bash
+evoforest-arch data-summary --data-dir /Users/gabrielkahen/Downloads/data --max-samples 200
+evoforest-arch evolve \
+  --dataset competition-parquet-event \
+  --data-dir /Users/gabrielkahen/Downloads/data \
+  --max-samples 200 \
+  --steps 1 \
+  --output runs/competition-smoke
+```
+
+This maps each id to one fixed-length sequence and predicts whether
+`tau_index >= 0`. It is useful for evolving this architecture against the parquet
+bundle, but it is not the official row-level competition metric. The reduced
+labeled test files are not read by `evolve`, `inspect`, `data-summary`, or default
+`recheck`; they are read only when `recheck --include-test` is explicitly used.
+Run full-data parquet jobs on the PC over SSH rather than on a MacBook Air.
+
 ## Run Benchmarks
 
 The benchmark suite generates reproducible JSON and Markdown reports that show

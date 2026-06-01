@@ -6,6 +6,7 @@ import pathlib
 
 from evoforest_arch.evaluator import RidgeEvaluator
 from evoforest_arch.evolution import EvolutionLoop
+from evoforest_arch.competition import COMPETITION_DATASET_NAME, DEFAULT_COMPETITION_DATA_DIR, competition_data_summary
 from evoforest_arch.llm import (
     DEFAULT_ISLAND_TEMPERATURES,
     HTTPJSONLLMClient,
@@ -69,10 +70,13 @@ def main(argv: list[str] | None = None) -> int:
 
     evolve = sub.add_parser("evolve", help="Run resume-safe production evolution with fixed split manifests.")
     evolve.add_argument("--steps", type=int, default=4, help="New steps to run. With --resume, this is additional steps.")
-    evolve.add_argument("--dataset", choices=("synthetic-structural-break",), default="synthetic-structural-break")
+    evolve.add_argument("--dataset", choices=("synthetic-structural-break", COMPETITION_DATASET_NAME), default="synthetic-structural-break")
+    evolve.add_argument("--data-dir", type=pathlib.Path, default=DEFAULT_COMPETITION_DATA_DIR)
     evolve.add_argument("--n-series", type=int, default=240)
     evolve.add_argument("--length", type=int, default=160)
     evolve.add_argument("--boundary", type=int, default=None)
+    evolve.add_argument("--competition-series-length", type=int, default=160)
+    evolve.add_argument("--max-samples", type=int, default=None)
     evolve.add_argument("--seed", type=int, default=17)
     evolve.add_argument("--split-seed", type=int, default=None)
     evolve.add_argument("--validation-fraction", type=float, default=0.2)
@@ -105,6 +109,13 @@ def main(argv: list[str] | None = None) -> int:
     recheck_parser.add_argument("--include-test", action="store_true", help="Explicitly consume and report the held-out test split.")
     recheck_parser.add_argument("--allow-source", action="store_true")
     recheck_parser.set_defaults(func=run_recheck)
+
+    data_parser = sub.add_parser("data-summary", help="Summarize the competition parquet event dataset without running evolution.")
+    data_parser.add_argument("--data-dir", type=pathlib.Path, default=DEFAULT_COMPETITION_DATA_DIR)
+    data_parser.add_argument("--competition-series-length", type=int, default=160)
+    data_parser.add_argument("--max-samples", type=int, default=None)
+    data_parser.add_argument("--include-reduced-test", action="store_true")
+    data_parser.set_defaults(func=run_data_summary)
     args = parser.parse_args(argv)
     return args.func(args)
 
@@ -177,9 +188,12 @@ def run_evolve(args: argparse.Namespace) -> int:
         steps=args.steps,
         seed=args.seed,
         dataset_name=args.dataset,
+        data_dir=args.data_dir,
         n_series=args.n_series,
         length=args.length,
         boundary=args.boundary,
+        competition_series_length=args.competition_series_length,
+        max_samples=args.max_samples,
         validation_fraction=args.validation_fraction,
         test_fraction=args.test_fraction,
         split_seed=args.split_seed,
@@ -211,6 +225,17 @@ def run_export_best(args: argparse.Namespace) -> int:
 
 def run_recheck(args: argparse.Namespace) -> int:
     print(json.dumps(recheck_run(args.run_dir, include_test=args.include_test, allow_source=args.allow_source), indent=2), flush=True)
+    return 0
+
+
+def run_data_summary(args: argparse.Namespace) -> int:
+    summary = competition_data_summary(
+        args.data_dir,
+        series_length=args.competition_series_length,
+        max_samples=args.max_samples,
+        include_reduced_test=args.include_reduced_test,
+    )
+    print(json.dumps(summary, indent=2), flush=True)
     return 0
 
 

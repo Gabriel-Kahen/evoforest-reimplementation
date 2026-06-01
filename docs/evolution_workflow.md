@@ -47,17 +47,59 @@ For a real claim, add a loader that returns:
 
 Then create one split manifest and reuse it for every run. Do not tune on test.
 
+## Competition Parquet Loader
+
+The repository also includes a Crunch-style parquet loader:
+
+```bash
+evoforest-arch data-summary --data-dir /Users/gabrielkahen/Downloads/data --max-samples 200
+evoforest-arch evolve \
+  --dataset competition-parquet-event \
+  --data-dir /Users/gabrielkahen/Downloads/data \
+  --max-samples 200 \
+  --steps 1 \
+  --output runs/competition-smoke
+```
+
+The loader expects:
+
+- `X_train.parquet`
+- `y_train_index.parquet`
+- optional reduced holdout files `X_test.reduced.parquet` and
+  `y_test_index.reduced.parquet`
+
+It maps each id to one sequence by resampling period 1 into the pre-boundary half
+and period 2 into the post-boundary half. The target is `tau_index >= 0` from the
+index file. This is an id-level event-detection surrogate for the current graph
+interface. It is not the official row-level competition metric.
+
+Default commands do not read the reduced labeled test files:
+
+- `evolve` reads train parquet only.
+- `inspect` reads run artifacts only.
+- `data-summary` reads train parquet only unless `--include-reduced-test` is passed.
+- `recheck` reads train parquet only unless `--include-test` is passed.
+
+Use `recheck --include-test` only after the graph and search procedure are frozen.
+
+Full-data parquet jobs should run over SSH on the PC, for example:
+
+```bash
+ssh gabe@gabepc 'cd /home/gabe/evoforest-reimplementation-run && .venv/bin/evoforest-arch evolve --dataset competition-parquet-event --data-dir /home/gabe/evoforest-crunch-open-benchmark/data --steps 1 --output runs/competition-full'
+```
+
 ## Staged Execution Rules
 
 1. Run `evolve` on synthetic data with source mutations disabled.
-2. Inspect artifacts with `inspect`, export the best graph with `export-best`, and
+2. Run capped parquet smoke locally, using `--max-samples`, with reduced test files untouched.
+3. Inspect artifacts with `inspect`, export the best graph with `export-best`, and
    recheck validation with `recheck`.
-3. Add the real dataset loader and verify that the saved fingerprint rejects changed
+4. Add or adjust the real dataset loader and verify that the saved fingerprint rejects changed
    data.
-4. Run short real-data calibration jobs on train/validation only.
-5. Increase steps and islands only after resume, export, and validation rechecks are
+5. Run short real-data calibration jobs on train/validation only, using SSH for full data.
+6. Increase steps and islands only after resume, export, and validation rechecks are
    boringly reliable.
-6. Use `recheck --include-test` only once the graph and search procedure are frozen.
+7. Use `recheck --include-test` only once the graph and search procedure are frozen.
 
 ## Useful Commands
 
