@@ -178,7 +178,7 @@ python -m benchmarks.competition_row_multisplit_benchmark \
   --data-dir /Users/gabrielkahen/Downloads/data \
   --split-seeds 113,127,149 \
   --series-length 480 \
-  --max-ids 1000 \
+  --max-ids 2000 \
   --max-rows-per-id 32 \
   --max-configurations 16 \
   --objective-mode auc \
