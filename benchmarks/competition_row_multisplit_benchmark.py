@@ -14,7 +14,7 @@ from evoforest_arch.competition import COMPETITION_ROW_DATASET_NAME, DEFAULT_COM
 from evoforest_arch.evaluator import RidgeEvaluator
 from evoforest_arch.graph import Graph
 from evoforest_arch.graph_io import write_graph
-from evoforest_arch.metrics import stratified_group_folds
+from evoforest_arch.metrics import roc_auc_score, stratified_group_folds
 from evoforest_arch.mutations import MutationDocument, MutationEngine, MutationSpec, RemoveSpec, built_in_mutations
 from evoforest_arch.production import ProductionConfig, load_dataset_with_metadata
 from evoforest_arch.seed import build_seed_graph
@@ -94,6 +94,8 @@ class RowSplitGraphScore:
     alpha: float
     n_features: int
     config: dict[str, str]
+    train_predictions: np.ndarray
+    validation_predictions: np.ndarray
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -124,6 +126,19 @@ class RowMultiSplitScore:
             "min_delta_vs_baseline": float(self.min_delta_vs_baseline),
             "objective": float(self.objective),
             "splits": [split.to_dict() for split in self.splits],
+        }
+
+
+@dataclass(frozen=True)
+class RowArchiveEntry:
+    name: str
+    graph: Graph
+    score: RowMultiSplitScore
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            **self.score.to_dict(),
         }
 
 
@@ -281,6 +296,17 @@ def build_report(
         "row_template_suite_output_only_graph": (suite_output_only_graph, suite_output_only_score),
         "pruned_row_template_suite_output_only_graph": (pruned_output_only_graph, pruned_output_only_score),
     }
+    archive = [
+        RowArchiveEntry(name=name, graph=graph, score=score)
+        for name, (graph, score) in graph_candidates.items()
+    ]
+    ensembles = row_ensemble_report(
+        archive,
+        contexts,
+        stability_weight=stability_weight,
+        objective_mode=objective_mode,
+    )
+    best_ensemble = max(ensembles, key=lambda row: float(row["objective"])) if ensembles else None
     best_graph = max(
         ((name, score) for name, (_graph, score) in graph_candidates.items()),
         key=lambda row: float(row[1].objective),
@@ -292,6 +318,11 @@ def build_report(
         name: internal_test_report(graph, contexts, evaluator_kwargs=evaluator_kwargs)
         for name, graph in internal_test_graphs.items()
     }
+    internal_test_ensemble = (
+        internal_test_ensemble_report(best_ensemble, archive, contexts)
+        if best_ensemble is not None
+        else None
+    )
     internal_test = internal_tests["pruned_row_template_suite_output_only_graph"]
     split_audits = [
         {
@@ -383,11 +414,23 @@ def build_report(
         },
         "internal_test": internal_test,
         "internal_tests": internal_tests,
+        "ensembles": {
+            "rows": ensembles,
+            "best": best_ensemble,
+            "internal_test": internal_test_ensemble,
+            "archive": [entry.to_dict() for entry in archive],
+            "selection_policy": "validation-only OOF archive selection; internal test is reported after selection and is not used for choosing members",
+        },
         "summary": {
             "best_graph_by_objective": best_graph[0],
             "best_objective": float(best_graph[1].objective),
             "best_mean_validation_auc": float(best_graph[1].mean_validation_auc),
             "best_mean_delta_vs_baseline": float(best_graph[1].mean_delta_vs_baseline),
+            "best_ensemble_by_objective": best_ensemble["name"] if best_ensemble else None,
+            "best_ensemble_mean_validation_auc": float(best_ensemble["mean_validation_auc"]) if best_ensemble else None,
+            "best_ensemble_mean_delta_vs_baseline": float(best_ensemble["mean_delta_vs_baseline"]) if best_ensemble else None,
+            "best_ensemble_internal_test_mean_auc": float(internal_test_ensemble["mean_auc"]) if internal_test_ensemble else None,
+            "best_ensemble_internal_test_mean_delta_vs_baseline": float(internal_test_ensemble["mean_delta_vs_baseline"]) if internal_test_ensemble else None,
             "best_internal_test_mean_graph_auc": float(best_internal_test["mean_graph_auc"]) if best_internal_test else None,
             "best_internal_test_mean_delta_vs_baseline": float(best_internal_test["mean_delta_vs_baseline"]) if best_internal_test else None,
             "row_baseline_graph_delta_vs_seed": float(row_baseline_graph_score.objective) - float(seed_score.objective),
@@ -514,6 +557,8 @@ def score_graph_across_splits(
                 alpha=holdout.alpha,
                 n_features=holdout.n_features,
                 config=dict(train_cv.config),
+                train_predictions=holdout.train_predictions,
+                validation_predictions=holdout.validation_predictions,
             )
         )
     deltas = np.asarray([score.delta_vs_baseline for score in split_scores], dtype=np.float64)
@@ -640,6 +685,230 @@ def internal_test_report(
     }
 
 
+def row_ensemble_report(
+    archive: list[RowArchiveEntry],
+    contexts: tuple[RowSplitContext, ...],
+    *,
+    stability_weight: float,
+    objective_mode: str,
+) -> list[dict[str, Any]]:
+    ranked = sorted(archive, key=lambda entry: float(entry.score.objective), reverse=True)
+    rows: list[dict[str, Any]] = []
+    if not ranked:
+        return rows
+    rows.append(
+        _row_archive_ensemble_row(
+            "best_archive_member",
+            ranked[:1],
+            contexts,
+            stability_weight=stability_weight,
+            objective_mode=objective_mode,
+        )
+    )
+    for k in (2, 3, 5, 7):
+        selected = ranked[: min(k, len(ranked))]
+        if len(selected) < 2:
+            continue
+        rows.append(
+            _row_archive_ensemble_row(
+                f"top_{len(selected)}_archive",
+                selected,
+                contexts,
+                stability_weight=stability_weight,
+                objective_mode=objective_mode,
+            )
+        )
+    rows.append(
+        _row_baseline_blend_row(
+            ranked[0],
+            contexts,
+            stability_weight=stability_weight,
+            objective_mode=objective_mode,
+        )
+    )
+    rows.append(
+        _row_greedy_oof_ensemble_row(
+            ranked,
+            contexts,
+            stability_weight=stability_weight,
+            objective_mode=objective_mode,
+        )
+    )
+    return rows
+
+
+def _row_archive_ensemble_row(
+    name: str,
+    selected: list[RowArchiveEntry],
+    contexts: tuple[RowSplitContext, ...],
+    *,
+    stability_weight: float,
+    objective_mode: str,
+) -> dict[str, Any]:
+    split_rows: list[dict[str, Any]] = []
+    for split_index, context in enumerate(contexts):
+        predictions = np.mean(
+            np.column_stack([entry.score.splits[split_index].validation_predictions for entry in selected]),
+            axis=1,
+        )
+        auc = roc_auc_score(context.validation_y, predictions)
+        split_rows.append(
+            {
+                "seed": int(context.seed),
+                "validation_auc": float(auc),
+                "baseline_auc": float(context.baseline.validation_auc),
+                "delta_vs_baseline": float(auc) - float(context.baseline.validation_auc),
+            }
+        )
+    return _summarize_row_ensemble(
+        name,
+        [entry.name for entry in selected],
+        split_rows,
+        stability_weight=stability_weight,
+        objective_mode=objective_mode,
+    )
+
+
+def _row_baseline_blend_row(
+    entry: RowArchiveEntry,
+    contexts: tuple[RowSplitContext, ...],
+    *,
+    stability_weight: float,
+    objective_mode: str,
+) -> dict[str, Any]:
+    split_rows: list[dict[str, Any]] = []
+    for split_index, context in enumerate(contexts):
+        predictions = 0.5 * context.baseline.validation_predictions + 0.5 * entry.score.splits[split_index].validation_predictions
+        auc = roc_auc_score(context.validation_y, predictions)
+        split_rows.append(
+            {
+                "seed": int(context.seed),
+                "validation_auc": float(auc),
+                "baseline_auc": float(context.baseline.validation_auc),
+                "delta_vs_baseline": float(auc) - float(context.baseline.validation_auc),
+            }
+        )
+    return _summarize_row_ensemble(
+        "baseline_plus_best_archive_blend",
+        ["baseline", entry.name],
+        split_rows,
+        stability_weight=stability_weight,
+        objective_mode=objective_mode,
+    )
+
+
+def _row_greedy_oof_ensemble_row(
+    ranked: list[RowArchiveEntry],
+    contexts: tuple[RowSplitContext, ...],
+    *,
+    stability_weight: float,
+    objective_mode: str,
+) -> dict[str, Any]:
+    selected = [ranked[0]]
+    best = _row_archive_ensemble_row(
+        "greedy_oof_archive",
+        selected,
+        contexts,
+        stability_weight=stability_weight,
+        objective_mode=objective_mode,
+    )
+    for candidate in ranked[1:]:
+        trial_selected = [*selected, candidate]
+        trial = _row_archive_ensemble_row(
+            "greedy_oof_archive",
+            trial_selected,
+            contexts,
+            stability_weight=stability_weight,
+            objective_mode=objective_mode,
+        )
+        if float(trial["objective"]) > float(best["objective"]) + 1e-12:
+            selected = trial_selected
+            best = trial
+    return best
+
+
+def _summarize_row_ensemble(
+    name: str,
+    members: list[str],
+    split_rows: list[dict[str, Any]],
+    *,
+    stability_weight: float,
+    objective_mode: str,
+) -> dict[str, Any]:
+    aucs = np.asarray([row["validation_auc"] for row in split_rows], dtype=np.float64)
+    deltas = np.asarray([row["delta_vs_baseline"] for row in split_rows], dtype=np.float64)
+    mean_auc = float(np.mean(aucs)) if aucs.size else 0.5
+    min_auc = float(np.min(aucs)) if aucs.size else 0.5
+    mean_delta = float(np.mean(deltas)) if deltas.size else 0.0
+    min_delta = float(np.min(deltas)) if deltas.size else 0.0
+    return {
+        "name": name,
+        "members": members,
+        "mean_validation_auc": mean_auc,
+        "min_validation_auc": min_auc,
+        "mean_delta_vs_baseline": mean_delta,
+        "min_delta_vs_baseline": min_delta,
+        "objective": score_objective(
+            mean_validation_auc=mean_auc,
+            min_validation_auc=min_auc,
+            mean_delta_vs_baseline=mean_delta,
+            min_delta_vs_baseline=min_delta,
+            stability_weight=stability_weight,
+            objective_mode=objective_mode,
+        ),
+        "splits": split_rows,
+    }
+
+
+def internal_test_ensemble_report(
+    ensemble: dict[str, Any],
+    archive: list[RowArchiveEntry],
+    contexts: tuple[RowSplitContext, ...],
+) -> dict[str, Any]:
+    by_name = {entry.name: entry for entry in archive}
+    rows: list[dict[str, Any]] = []
+    for split_index, context in enumerate(contexts):
+        member_predictions: list[np.ndarray] = []
+        baseline = evaluate_baseline_holdout(context.train_inputs, context.train_y, context.test_inputs, context.test_y)
+        for member in ensemble["members"]:
+            if member == "baseline":
+                member_predictions.append(baseline.validation_predictions)
+                continue
+            entry = by_name[str(member)]
+            score = graph_holdout_score(
+                entry.graph,
+                context.train_inputs,
+                context.train_y,
+                context.test_inputs,
+                context.test_y,
+                config=entry.score.splits[split_index].config,
+            )
+            member_predictions.append(score.validation_predictions)
+        predictions = np.mean(np.column_stack(member_predictions), axis=1)
+        auc = roc_auc_score(context.test_y, predictions)
+        rows.append(
+            {
+                "seed": int(context.seed),
+                "auc": float(auc),
+                "baseline_auc": float(baseline.validation_auc),
+                "delta_vs_baseline": float(auc) - float(baseline.validation_auc),
+            }
+        )
+    aucs = np.asarray([row["auc"] for row in rows], dtype=np.float64)
+    deltas = np.asarray([row["delta_vs_baseline"] for row in rows], dtype=np.float64)
+    return {
+        "selection_used": False,
+        "test_used_for_selection": False,
+        "selected_ensemble": ensemble["name"],
+        "members": list(ensemble["members"]),
+        "mean_auc": float(np.mean(aucs)) if aucs.size else 0.5,
+        "min_auc": float(np.min(aucs)) if aucs.size else 0.5,
+        "mean_delta_vs_baseline": float(np.mean(deltas)) if deltas.size else 0.0,
+        "min_delta_vs_baseline": float(np.min(deltas)) if deltas.size else 0.0,
+        "splits": rows,
+    }
+
+
 def validation_split_group_overlap(contexts: tuple[RowSplitContext, ...]) -> dict[str, Any]:
     rows: list[dict[str, Any]] = []
     for left_index, left in enumerate(contexts):
@@ -696,9 +965,22 @@ def markdown_report(payload: dict[str, Any]) -> str:
         ]
         for row in payload["pruning"]["rows"]
     ]
+    ensemble_rows = [
+        [
+            row["name"],
+            ", ".join(row["members"]),
+            fmt_float(row["mean_validation_auc"]),
+            fmt_float(row["mean_delta_vs_baseline"]),
+            fmt_float(row["min_validation_auc"]),
+            fmt_float(row["objective"]),
+        ]
+        for row in payload["ensembles"]["rows"]
+    ]
     dataset = payload["dataset"]
     internal = payload["internal_test"]
     best_internal = payload.get("internal_tests", {}).get(payload["summary"]["best_graph_by_objective"])
+    best_ensemble = payload["ensembles"]["best"] or {}
+    ensemble_internal = payload["ensembles"].get("internal_test") or {}
     return "\n\n".join(
         [
             "# Competition Row Multi-Split Benchmark",
@@ -722,7 +1004,18 @@ def markdown_report(payload: dict[str, Any]) -> str:
                 f"Internal non-selection test audit for best objective graph `{payload['summary']['best_graph_by_objective']}`: "
                 f"mean graph AUC `{fmt_float(best_internal['mean_graph_auc']) if best_internal else 'n/a'}`."
             ),
+            (
+                f"Best archive/OOF ensemble `{best_ensemble.get('name', 'n/a')}` mean validation AUC "
+                f"`{fmt_float(best_ensemble.get('mean_validation_auc'))}`, mean delta "
+                f"`{fmt_float(best_ensemble.get('mean_delta_vs_baseline'))}`."
+            ),
+            (
+                f"Internal non-selection test audit for selected ensemble: mean AUC "
+                f"`{fmt_float(ensemble_internal.get('mean_auc'))}`, mean delta "
+                f"`{fmt_float(ensemble_internal.get('mean_delta_vs_baseline'))}`."
+            ),
             markdown_table(["Graph", "Mean Val AUC", "Mean Delta", "Min Val AUC", "Objective"], graph_rows),
+            markdown_table(["Ensemble", "Members", "Mean Val AUC", "Mean Delta", "Min Val AUC", "Objective"], ensemble_rows),
             markdown_table(["Pruned Alternative", "Removed", "Objective Before", "Objective After", "Delta"], prune_rows),
         ]
     )

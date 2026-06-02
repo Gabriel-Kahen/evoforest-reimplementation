@@ -27,6 +27,8 @@ class HoldoutResult:
     alpha: float
     n_features: int
     feature_names: list[str]
+    train_predictions: np.ndarray
+    validation_predictions: np.ndarray
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -244,6 +246,8 @@ def fit_holdout_readout(
         alpha=alpha,
         n_features=int(train_z.shape[1]),
         feature_names=list(names),
+        train_predictions=train_pred,
+        validation_predictions=validation_pred,
     )
 
 
