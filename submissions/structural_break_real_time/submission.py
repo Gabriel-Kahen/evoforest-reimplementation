@@ -36,7 +36,7 @@ def train(
         online = _as_1d(x_online)
         if online.size == 0:
             continue
-        for idx in _training_indices(online.size, tau_index, DEFAULT_MAX_ROWS_PER_SERIES):
+        for idx in _training_indices(online.size, tau_index, 32):
             features, names = extract_streaming_features(
                 historical,
                 online[: idx + 1],
@@ -55,12 +55,12 @@ def train(
 
     model["metadata"] = {
         "model": "evoforest_realtime_streaming_ridge",
-        "series_length": DEFAULT_SERIES_LENGTH,
-        "max_rows_per_series": DEFAULT_MAX_ROWS_PER_SERIES,
-        "tail_windows": list(TAIL_WINDOWS),
+        "series_length": 480,
+        "max_rows_per_series": 32,
+        "tail_windows": [4, 8, 16, 32, 64, 128, 240],
         "score_transform": "sigmoid(raw_ridge_prediction)",
     }
-    with open(os.path.join(model_directory_path, MODEL_FILE), "wb") as handle:
+    with open(os.path.join(model_directory_path, "evoforest_realtime_model.pkl"), "wb") as handle:
         pickle.dump(model, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
 
@@ -77,7 +77,7 @@ def infer(
         historical, x_online = _unpack_infer_item(item)
         historical = _as_1d(historical)
         online_length = _safe_len(x_online)
-        capacity = max(int(online_length) if online_length else DEFAULT_MAX_ONLINE_LENGTH, 1)
+        capacity = max(int(online_length) if online_length else 1000, 1)
         prefix = np.empty(capacity, dtype=np.float64)
         for online_index, point in enumerate(x_online):
             if online_index >= prefix.shape[0]:
@@ -96,7 +96,7 @@ def infer(
 
 
 def load_model(model_directory_path: str) -> dict[str, object]:
-    path = os.path.join(model_directory_path, MODEL_FILE)
+    path = os.path.join(model_directory_path, "evoforest_realtime_model.pkl")
     if not os.path.exists(path):
         return _fallback_model()
     with open(path, "rb") as handle:
@@ -108,9 +108,9 @@ def fit_streaming_ridge(x: np.ndarray, y: np.ndarray, names: list[str]) -> dict[
     y = np.asarray(y, dtype=np.float64)
     mean = np.mean(x, axis=0)
     scale = np.std(x, axis=0)
-    scale = np.where(scale < EPS, 1.0, scale)
+    scale = np.where(scale < 1e-8, 1.0, scale)
     z = np.nan_to_num((x - mean) / scale, nan=0.0, posinf=0.0, neginf=0.0)
-    alpha = select_alpha(z, y, ALPHAS)
+    alpha = select_alpha(z, y, np.logspace(-4, 4, 17))
     coef, intercept = fit_ridge(z, y, alpha)
     return {
         "feature_names": list(names),
@@ -165,19 +165,19 @@ def extract_streaming_features(
     peak_abs = float(np.max(np.abs(cumulative))) if cumulative.size else 0.0
     last = float(online[-1])
     n_online = int(online.size)
-    denom = max(int(online_length) - 1, 1) if online_length else DEFAULT_MAX_ONLINE_LENGTH
+    denom = max(int(online_length) - 1, 1) if online_length else 1000
     time_norm = min(max(float(online_index) / float(denom), 0.0), 1.0)
-    observed_fraction = min(float(n_online) / float(DEFAULT_MAX_ONLINE_LENGTH), 1.0)
+    observed_fraction = min(float(n_online) / 1000.0, 1.0)
 
     values = [
         last,
         (last - hist_mean) / hist_std,
         (last - online_mean) / online_std,
         (online_mean - hist_mean) / hist_std,
-        math.log((online_std + EPS) / (hist_std + EPS)),
+        math.log((online_std + 1e-8) / (hist_std + 1e-8)),
         online_absdiff - hist_absdiff,
-        math.log((online_absdiff + EPS) / (hist_absdiff + EPS)),
-        math.log((online_diff_std + EPS) / (hist_diff_std + EPS)),
+        math.log((online_absdiff + 1e-8) / (hist_absdiff + 1e-8)),
+        math.log((online_diff_std + 1e-8) / (hist_diff_std + 1e-8)),
         online_slope,
         online_slope - hist_slope,
         online_autocorr - hist_autocorr,
@@ -187,11 +187,11 @@ def extract_streaming_features(
         online_drawup - hist_drawup,
         peak_abs / hist_std,
         float(np.argmax(np.abs(cumulative)) / max(cumulative.size - 1, 1)) if cumulative.size else 0.0,
-        float(cumulative[-1] / max(peak_abs, EPS)) if cumulative.size else 0.0,
+        float(cumulative[-1] / max(peak_abs, 1e-8)) if cumulative.size else 0.0,
         float(np.mean(np.abs(online_q - hist_q))),
         float(np.max(np.abs(online_q - hist_q))),
         time_norm,
-        math.log1p(max(float(online_index), 0.0)) / math.log1p(DEFAULT_MAX_ONLINE_LENGTH),
+        math.log1p(max(float(online_index), 0.0)) / math.log1p(1000),
         time_norm * time_norm,
         time_norm * time_norm * time_norm,
         math.sqrt(max(time_norm, 0.0)),
@@ -238,7 +238,7 @@ def extract_streaming_features(
         "time_observed_interaction",
     ]
 
-    for width in TAIL_WINDOWS:
+    for width in (4, 8, 16, 32, 64, 128, 240):
         tail_values, tail_names = _tail_feature_values(historical, online, width, hist_mean, hist_std)
         values.extend(tail_values)
         names.extend(tail_names)
@@ -277,14 +277,14 @@ def _tail_feature_values(
         tail_slope = _slope_1d(tail)
         previous_slope = _slope_1d(previous)
         values = [
-            (float(tail[-1]) - tail_mean) / max(tail_std, EPS),
-            (tail_mean - previous_mean) / max(hist_std, EPS),
-            (tail_mean - old_mean) / max(hist_std, EPS),
-            math.log((tail_std + EPS) / (previous_std + EPS)),
-            math.log((tail_std + EPS) / (old_std + EPS)),
+            (float(tail[-1]) - tail_mean) / max(tail_std, 1e-8),
+            (tail_mean - previous_mean) / max(hist_std, 1e-8),
+            (tail_mean - old_mean) / max(hist_std, 1e-8),
+            math.log((tail_std + 1e-8) / (previous_std + 1e-8)),
+            math.log((tail_std + 1e-8) / (old_std + 1e-8)),
             tail_absdiff - previous_absdiff,
-            math.log((tail_absdiff + EPS) / (previous_absdiff + EPS)),
-            math.log((tail_absdiff + EPS) / (old_absdiff + EPS)),
+            math.log((tail_absdiff + 1e-8) / (previous_absdiff + 1e-8)),
+            math.log((tail_absdiff + 1e-8) / (old_absdiff + 1e-8)),
             tail_slope,
             tail_slope - previous_slope,
             drawdown,
@@ -321,7 +321,7 @@ def select_alpha(x: np.ndarray, y: np.ndarray, alphas: np.ndarray) -> float:
         coef = vt.T @ ((s / (s * s + alpha)) * (u.T @ yc))
         pred = x @ coef + y_mean
         leverage = np.sum((u**2) * ((s * s) / (s * s + alpha)), axis=1)
-        residual = (y - pred) / np.maximum(1.0 - leverage, EPS)
+        residual = (y - pred) / np.maximum(1.0 - leverage, 1e-8)
         mse = float(np.mean(residual**2))
         if mse < best_mse:
             best_mse = mse
@@ -359,7 +359,7 @@ def _as_1d(values: Sequence[float] | np.ndarray) -> np.ndarray:
 def _safe_std_1d(values: np.ndarray) -> float:
     if values.size < 2:
         return 1.0
-    return max(float(np.std(values)), EPS)
+    return max(float(np.std(values)), 1e-8)
 
 
 def _slope_1d(values: np.ndarray) -> float:
@@ -368,7 +368,7 @@ def _slope_1d(values: np.ndarray) -> float:
     t = np.linspace(-1.0, 1.0, values.size)
     centered_t = t - float(np.mean(t))
     centered_x = values - float(np.mean(values))
-    denom = max(float(np.sum(centered_t**2)), EPS)
+    denom = max(float(np.sum(centered_t**2)), 1e-8)
     return float(centered_x @ centered_t / denom)
 
 
@@ -385,7 +385,7 @@ def _autocorr1_1d(values: np.ndarray) -> float:
     if values.size < 3:
         return 0.0
     centered = values - float(np.mean(values))
-    denom = max(float(np.sum(centered[:-1] ** 2)), EPS)
+    denom = max(float(np.sum(centered[:-1] ** 2)), 1e-8)
     return float(np.sum(centered[1:] * centered[:-1]) / denom)
 
 

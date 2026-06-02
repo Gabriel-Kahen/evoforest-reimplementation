@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import numpy as np
 
 from submissions.structural_break_real_time import submission
@@ -34,6 +35,44 @@ def test_realtime_submission_gets_signal_on_simple_mean_shift(tmp_path) -> None:
         labels.extend(float(tau is not None and idx >= tau) for idx in range(len(online)))
 
     assert auc(np.asarray(labels), np.asarray(predictions)) > 0.65
+
+
+def test_realtime_submission_survives_crunch_export_without_top_level_constants(tmp_path) -> None:
+    """Crunch's notebook converter preserves functions but can drop assignments."""
+
+    source_path = submission.__file__
+    assert source_path is not None
+    source = open(source_path, encoding="utf-8").read()
+    tree = ast.parse(source)
+    dropped_names = {
+        "MODEL_FILE",
+        "DEFAULT_MAX_ROWS_PER_SERIES",
+        "DEFAULT_SERIES_LENGTH",
+        "DEFAULT_MAX_ONLINE_LENGTH",
+        "ALPHAS",
+        "TAIL_WINDOWS",
+        "EPS",
+    }
+    tree.body = [
+        node
+        for node in tree.body
+        if not (
+            isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Name) and target.id in dropped_names for target in node.targets)
+        )
+    ]
+    ast.fix_missing_locations(tree)
+    namespace: dict[str, object] = {}
+    exec(compile(tree, str(source_path), "exec"), namespace)
+
+    train_data = make_realtime_series(n_series=12, seed=11)
+    namespace["train"](train_data, str(tmp_path))  # type: ignore[index,operator]
+    generator = namespace["infer"]([(row[1], row[2]) for row in train_data[:3]], str(tmp_path))  # type: ignore[index,operator]
+    assert next(generator) is None
+    scores = list(generator)
+
+    assert len(scores) == sum(len(row[2]) for row in train_data[:3])
+    assert all(0.0 <= score <= 1.0 for score in scores)
 
 
 def make_realtime_series(*, n_series: int, seed: int) -> list[tuple[int, np.ndarray, np.ndarray, int | None]]:
