@@ -124,6 +124,42 @@ labeled test files are not read by `evolve`, `inspect`, `data-summary`, or defau
 `recheck`; they are read only when `recheck --include-test` is explicitly used.
 Run full-data parquet jobs on the PC over SSH rather than on a MacBook Air.
 
+For the row/time-level target table, use `competition-parquet-row`. This creates
+one graph sample per `(id, time)` label row from `y_train.parquet`, keeps all
+rows for an id in the same split, and represents each row as period-1 reference
+features plus the causal period-2 prefix available at that target time:
+
+```bash
+evoforest-arch data-summary \
+  --row-level \
+  --data-dir /Users/gabrielkahen/Downloads/data \
+  --competition-series-length 64 \
+  --max-ids 120 \
+  --max-rows-per-id 16
+
+evoforest-arch evolve \
+  --dataset competition-parquet-row \
+  --data-dir /Users/gabrielkahen/Downloads/data \
+  --competition-series-length 64 \
+  --max-ids 120 \
+  --max-rows-per-id 16 \
+  --steps 8 \
+  --output runs/competition-row-smoke
+```
+
+The row-level benchmark compares a fixed non-evolved baseline to validation-only
+graph evolution on held-out ids:
+
+```bash
+python -m benchmarks.competition_row_benchmark \
+  --data-dir /Users/gabrielkahen/Downloads/data \
+  --series-length 64 \
+  --max-ids 120 \
+  --max-rows-per-id 16 \
+  --steps 8 \
+  --output benchmark_reports/competition-row
+```
+
 To check whether mutations are useful on capped parquet data without touching the
 reduced test files:
 

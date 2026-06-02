@@ -60,6 +60,12 @@ Each command writes paired JSON and Markdown reports. The top-level
   - Measures evaluation time while varying configuration caps, dataset size, and
     output-feature growth. Timing varies by machine; the report includes cache
     hits/misses, config counts, and feature counts so results are interpretable.
+- `competition_row_benchmark`
+  - Optional external-data benchmark for the Crunch parquet files. It loads
+    `y_train.parquet` at row/time granularity, splits by id, fits a fixed
+    non-evolved row-local baseline on train ids, and compares validation-only
+    graph evolution on held-out ids. It is not part of `benchmarks.run_all`
+    because it requires the downloaded parquet bundle.
 
 ## Interpreting Results
 
@@ -85,6 +91,15 @@ python -m benchmarks.synthetic_suite --output benchmark_reports
 python -m benchmarks.ablation_suite --output benchmark_reports
 python -m benchmarks.search_dynamics --output benchmark_reports
 python -m benchmarks.runtime_scaling --output benchmark_reports
+python -m benchmarks.competition_row_benchmark \
+  --data-dir /Users/gabrielkahen/Downloads/data \
+  --series-length 64 \
+  --max-ids 120 \
+  --max-rows-per-id 16 \
+  --steps 8 \
+  --output benchmark_reports/competition-row
 ```
 
-All benchmark scripts accept `--seed`, `--output`, and `--quick`.
+The default suite scripts accept `--seed`, `--output`, and `--quick`. The
+external parquet benchmark accepts `--seed` and `--output` plus data-capping
+arguments such as `--max-ids` and `--max-rows-per-id`.

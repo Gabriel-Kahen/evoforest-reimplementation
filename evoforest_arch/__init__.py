@@ -3,10 +3,12 @@
 from evoforest_arch.agents import EngineerAgent, Hypothesis, ScientistAgent
 from evoforest_arch.competition import (
     COMPETITION_DATASET_NAME,
+    COMPETITION_ROW_DATASET_NAME,
     DEFAULT_COMPETITION_DATA_DIR,
     CompetitionEventDataset,
     competition_data_summary,
     load_competition_event_dataset,
+    load_competition_row_dataset,
 )
 from evoforest_arch.evaluator import EvaluationResult, RidgeEvaluator
 from evoforest_arch.evolution import EvolutionLoop
@@ -43,6 +45,7 @@ __all__ = [
     "DEFAULT_ISLAND_TEMPERATURES",
     "DEFAULT_COMPETITION_DATA_DIR",
     "COMPETITION_DATASET_NAME",
+    "COMPETITION_ROW_DATASET_NAME",
     "CompetitionEventDataset",
     "HTTPJSONLLMClient",
     "Hypothesis",
@@ -75,6 +78,7 @@ __all__ = [
     "export_best_graph",
     "inspect_run",
     "load_competition_event_dataset",
+    "load_competition_row_dataset",
     "make_structural_break_data",
     "recheck_run",
 ]

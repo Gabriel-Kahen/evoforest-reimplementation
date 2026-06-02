@@ -20,9 +20,13 @@ class SplitManifest:
     train_indices: tuple[int, ...]
     validation_indices: tuple[int, ...]
     test_indices: tuple[int, ...]
+    group_key: str | None = None
+    train_groups: tuple[int, ...] = ()
+    validation_groups: tuple[int, ...] = ()
+    test_groups: tuple[int, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "dataset_fingerprint": self.dataset_fingerprint,
             "n_samples": int(self.n_samples),
             "seed": int(self.seed),
@@ -33,6 +37,16 @@ class SplitManifest:
             "validation_indices": list(self.validation_indices),
             "test_indices": list(self.test_indices),
         }
+        if self.group_key is not None:
+            payload.update(
+                {
+                    "group_key": self.group_key,
+                    "train_groups": list(self.train_groups),
+                    "validation_groups": list(self.validation_groups),
+                    "test_groups": list(self.test_groups),
+                }
+            )
+        return payload
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "SplitManifest":
@@ -46,6 +60,10 @@ class SplitManifest:
             train_indices=tuple(int(index) for index in payload["train_indices"]),
             validation_indices=tuple(int(index) for index in payload["validation_indices"]),
             test_indices=tuple(int(index) for index in payload["test_indices"]),
+            group_key=str(payload["group_key"]) if payload.get("group_key") is not None else None,
+            train_groups=tuple(int(group) for group in payload.get("train_groups", [])),
+            validation_groups=tuple(int(group) for group in payload.get("validation_groups", [])),
+            test_groups=tuple(int(group) for group in payload.get("test_groups", [])),
         )
 
 
@@ -108,6 +126,85 @@ def make_split_manifest(
     return manifest
 
 
+def make_grouped_split_manifest(
+    inputs: dict[str, object],
+    y: np.ndarray,
+    *,
+    groups: np.ndarray,
+    group_key: str = "sample_id",
+    seed: int,
+    validation_fraction: float = 0.2,
+    test_fraction: float = 0.2,
+    method: str = "group_stratified_random",
+) -> SplitManifest:
+    y_array = np.asarray(y)
+    group_array = np.asarray(groups)
+    if y_array.ndim != 1:
+        raise ValueError("Split manifests require a 1-D target array.")
+    if group_array.ndim != 1 or group_array.shape[0] != y_array.shape[0]:
+        raise ValueError("groups must be a 1-D array with the same length as y.")
+    if not 0.0 <= validation_fraction < 1.0:
+        raise ValueError("validation_fraction must be in [0, 1).")
+    if not 0.0 <= test_fraction < 1.0:
+        raise ValueError("test_fraction must be in [0, 1).")
+    if validation_fraction + test_fraction >= 1.0:
+        raise ValueError("validation_fraction + test_fraction must be less than 1.")
+    n_samples = int(y_array.shape[0])
+    if n_samples < 6:
+        raise ValueError("At least 6 samples are required for train/validation/test splits.")
+    unique_groups, inverse = np.unique(group_array, return_inverse=True)
+    if unique_groups.shape[0] < 6:
+        raise ValueError("At least 6 groups are required for grouped train/validation/test splits.")
+
+    group_labels = np.zeros(unique_groups.shape[0], dtype=np.float64)
+    for group_index in range(unique_groups.shape[0]):
+        group_y = y_array[inverse == group_index]
+        group_labels[group_index] = float(np.max(group_y))
+
+    rng = np.random.default_rng(seed)
+    if method == "group_stratified_random":
+        train_group_idx, validation_group_idx, test_group_idx = _group_split_indices(
+            group_labels,
+            rng,
+            validation_fraction,
+            test_fraction,
+        )
+    elif method == "group_random":
+        shuffled = np.arange(unique_groups.shape[0])
+        rng.shuffle(shuffled)
+        test_count, validation_count = _split_counts(unique_groups.shape[0], validation_fraction, test_fraction)
+        test_group_idx = shuffled[:test_count]
+        validation_group_idx = shuffled[test_count : test_count + validation_count]
+        train_group_idx = shuffled[test_count + validation_count :]
+    else:
+        raise ValueError("method must be 'group_stratified_random' or 'group_random'.")
+
+    train_groups = unique_groups[train_group_idx]
+    validation_groups = unique_groups[validation_group_idx]
+    test_groups = unique_groups[test_group_idx]
+    train = np.flatnonzero(np.isin(group_array, train_groups))
+    validation = np.flatnonzero(np.isin(group_array, validation_groups))
+    test = np.flatnonzero(np.isin(group_array, test_groups))
+    manifest = SplitManifest(
+        dataset_fingerprint=dataset_fingerprint(inputs, y_array),
+        n_samples=n_samples,
+        seed=int(seed),
+        method=method,
+        validation_fraction=float(validation_fraction),
+        test_fraction=float(test_fraction),
+        train_indices=tuple(int(index) for index in sorted(train.tolist())),
+        validation_indices=tuple(int(index) for index in sorted(validation.tolist())),
+        test_indices=tuple(int(index) for index in sorted(test.tolist())),
+        group_key=group_key,
+        train_groups=tuple(int(group) for group in sorted(train_groups.tolist())),
+        validation_groups=tuple(int(group) for group in sorted(validation_groups.tolist())),
+        test_groups=tuple(int(group) for group in sorted(test_groups.tolist())),
+    )
+    validate_split_manifest(manifest)
+    validate_grouped_split_manifest(manifest)
+    return manifest
+
+
 def validate_split_manifest(manifest: SplitManifest) -> None:
     train = set(manifest.train_indices)
     validation = set(manifest.validation_indices)
@@ -122,6 +219,18 @@ def validate_split_manifest(manifest: SplitManifest) -> None:
         missing = sorted(expected - combined)[:5]
         extra = sorted(combined - expected)[:5]
         raise ValueError(f"Split indices must cover every sample exactly once; missing={missing}, extra={extra}.")
+
+
+def validate_grouped_split_manifest(manifest: SplitManifest) -> None:
+    if manifest.group_key is None:
+        return
+    train = set(manifest.train_groups)
+    validation = set(manifest.validation_groups)
+    test = set(manifest.test_groups)
+    if not train or not validation or not test:
+        raise ValueError("Grouped split manifests must have non-empty train, validation, and test groups.")
+    if train & validation or train & test or validation & test:
+        raise ValueError("Grouped split group values must be disjoint.")
 
 
 def subset_inputs(inputs: dict[str, object], indices: tuple[int, ...] | list[int] | np.ndarray, *, n_samples: int) -> dict[str, object]:
@@ -189,6 +298,24 @@ def _stratified_indices(
         validation_parts.append(indices[test_count : test_count + validation_count])
         train_parts.append(indices[test_count + validation_count :])
     return np.concatenate(train_parts), np.concatenate(validation_parts), np.concatenate(test_parts)
+
+
+def _group_split_indices(
+    group_labels: np.ndarray,
+    rng: np.random.Generator,
+    validation_fraction: float,
+    test_fraction: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    labels, counts = np.unique(group_labels, return_counts=True)
+    if labels.shape[0] > 1 and np.all(counts >= 3):
+        return _stratified_indices(group_labels, rng, validation_fraction, test_fraction)
+    shuffled = np.arange(group_labels.shape[0])
+    rng.shuffle(shuffled)
+    test_count, validation_count = _split_counts(group_labels.shape[0], validation_fraction, test_fraction)
+    test = shuffled[:test_count]
+    validation = shuffled[test_count : test_count + validation_count]
+    train = shuffled[test_count + validation_count :]
+    return train, validation, test
 
 
 def _split_counts(n_samples: int, validation_fraction: float, test_fraction: float) -> tuple[int, int]:

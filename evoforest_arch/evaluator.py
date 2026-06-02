@@ -6,7 +6,7 @@ from itertools import product
 import numpy as np
 
 from evoforest_arch.graph import EvalContext, Graph, ResidualWeightRule
-from evoforest_arch.metrics import roc_auc_score, stratified_folds
+from evoforest_arch.metrics import roc_auc_score, stratified_folds, stratified_group_folds
 from evoforest_arch.readout import DEFAULT_ALPHAS, RidgeModel, Standardizer, combine_sample_weights, fit_ridge, normalize_sample_weight, select_alpha
 
 
@@ -79,6 +79,7 @@ class RidgeEvaluator:
         refine_steps: int = 20,
         refine_backend: str = "auto",
         irls_steps: int = 2,
+        group_key: str | None = None,
     ) -> None:
         self.n_splits = int(n_splits)
         self.seed = int(seed)
@@ -88,6 +89,7 @@ class RidgeEvaluator:
         self.refine_steps = int(refine_steps)
         self.refine_backend = refine_backend
         self.irls_steps = max(0, int(irls_steps))
+        self.group_key = group_key
 
     def evaluate(
         self,
@@ -191,7 +193,8 @@ class RidgeEvaluator:
         coefs: list[np.ndarray] = []
         fold_aucs: list[float] = []
         fold_irls: list[dict[str, object]] = []
-        for fold_index, (train_idx, val_idx) in enumerate(stratified_folds(y, self.n_splits, self.seed)):
+        folds, fold_diagnostics = self._folds(inputs, y)
+        for fold_index, (train_idx, val_idx) in enumerate(folds):
             std = Standardizer.fit(x[train_idx])
             x_train = std.transform(x[train_idx])
             x_val = std.transform(x[val_idx])
@@ -233,6 +236,7 @@ class RidgeEvaluator:
             "auc_mean": float(np.mean(fold_aucs)) if fold_aucs else 0.0,
             "auc_std": float(np.std(fold_aucs)) if fold_aucs else 0.0,
             "alphas": alphas,
+            **fold_diagnostics,
         }
         diagnostics["fitting"] = fitting_diagnostics
         if isinstance(diagnostics["fitting"].get("ridge_g"), dict):
@@ -258,6 +262,34 @@ class RidgeEvaluator:
             alphas=alphas,
             diagnostics=diagnostics,
         )
+
+    def _folds(self, inputs: dict[str, object], y: np.ndarray) -> tuple[list[tuple[np.ndarray, np.ndarray]], dict[str, object]]:
+        if self.group_key is None or self.group_key not in inputs:
+            return stratified_folds(y, self.n_splits, self.seed), {"method": "stratified_random", "group_key": None}
+        groups = np.asarray(inputs[self.group_key])
+        if groups.ndim != 1 or groups.shape[0] != y.shape[0]:
+            return stratified_folds(y, self.n_splits, self.seed), {
+                "method": "stratified_random",
+                "group_key": self.group_key,
+                "grouped": False,
+                "reason": "group array shape did not match y",
+            }
+        folds = stratified_group_folds(y, groups, self.n_splits, self.seed)
+        overlap_count = 0
+        validation_group_counts: list[int] = []
+        for train_idx, val_idx in folds:
+            train_groups = set(np.asarray(groups)[train_idx].tolist())
+            val_groups = set(np.asarray(groups)[val_idx].tolist())
+            overlap_count += len(train_groups & val_groups)
+            validation_group_counts.append(len(val_groups))
+        return folds, {
+            "method": "stratified_group_random",
+            "group_key": self.group_key,
+            "grouped": True,
+            "fold_group_overlap_count": int(overlap_count),
+            "validation_group_counts": validation_group_counts,
+            "n_groups": int(np.unique(groups).shape[0]),
+        }
 
     def _fit_global_diagnostic_model(
         self,

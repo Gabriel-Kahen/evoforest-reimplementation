@@ -27,6 +27,11 @@ class PrimitiveRegistry:
         registry.register("segment_late_shift", segment_late_shift_factory)
         registry.register("shape_drawdown", shape_drawdown_factory)
         registry.register("shape_post_concentration", shape_post_concentration_factory)
+        registry.register("row_recent_change", row_recent_change_factory)
+        registry.register("row_volatility_burst", row_volatility_burst_factory)
+        registry.register("row_cusum_local", row_cusum_local_factory)
+        registry.register("row_context_outputs", row_context_outputs_factory)
+        registry.register("row_local_outputs", row_local_outputs_factory)
         registry.register("identity_callable", identity_callable_factory)
         registry.register("sigmoid_gate_callable", sigmoid_gate_callable_factory)
         registry.register("clipped_linear_callable", clipped_linear_callable_factory)
@@ -307,6 +312,169 @@ def shape_post_concentration_factory(alternative_id: str, parents: tuple[str, ..
         return FeatureBlock(block, ["post_tail_energy_share", "tail_energy_delta", "post_energy_centroid", "post_peak_location", "late_centroid_excess"])
 
     return NodeAlternative(alternative_id, parents, fn, "Concentration of post-period movement near the late horizon.")
+
+
+def row_recent_change_factory(alternative_id: str, parents: tuple[str, ...]) -> NodeAlternative:
+    def fn(ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
+        series = np.asarray(values[parents[0]], dtype=np.float64)
+        boundary = int(ctx.read_input("boundary"))
+        older, recent = split_segments(series, boundary)
+        older_tail = _tail_window(older)
+        recent_head = _head_window(recent)
+        recent_tail = _tail_window(recent)
+        older_tail_mean = np.mean(older_tail, axis=1)
+        recent_head_mean = np.mean(recent_head, axis=1)
+        recent_tail_mean = np.mean(recent_tail, axis=1)
+        recent_full_mean = np.mean(recent, axis=1)
+        older_full_mean = np.mean(older, axis=1)
+        jump = recent_head_mean - older_tail_mean
+        drift = recent_tail_mean - recent_head_mean
+        block = np.column_stack(
+            [
+                recent_full_mean - older_full_mean,
+                np.abs(recent_full_mean - older_full_mean),
+                jump,
+                np.abs(jump),
+                drift,
+                np.abs(drift),
+                series[:, -1] - older_tail_mean,
+                series[:, -1] - recent_head_mean,
+            ]
+        )
+        return FeatureBlock(
+            block,
+            [
+                "recent_mean_delta",
+                "recent_mean_delta_abs",
+                "recent_entry_jump",
+                "recent_entry_jump_abs",
+                "recent_tail_drift",
+                "recent_tail_drift_abs",
+                "last_vs_older_tail",
+                "last_vs_recent_head",
+            ],
+        )
+
+    return NodeAlternative(alternative_id, parents, fn, "Row-local older-vs-recent level-change features for causal target rows.")
+
+
+def row_volatility_burst_factory(alternative_id: str, parents: tuple[str, ...]) -> NodeAlternative:
+    def fn(ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
+        series = np.asarray(values[parents[0]], dtype=np.float64)
+        boundary = int(ctx.read_input("boundary"))
+        older, recent = split_segments(series, boundary)
+        older_diff = np.diff(older, axis=1)
+        recent_diff = np.diff(recent, axis=1)
+        older_abs = np.abs(older_diff)
+        recent_abs = np.abs(recent_diff)
+        older_abs_mean = np.mean(older_abs, axis=1)
+        recent_abs_mean = np.mean(recent_abs, axis=1)
+        older_diff_std = safe_std(older_diff)
+        recent_diff_std = safe_std(recent_diff)
+        tail = max(2, recent.shape[1] // 4)
+        recent_tail_abs = np.mean(np.abs(np.diff(recent[:, -tail:], axis=1)), axis=1)
+        older_tail_abs = np.mean(np.abs(np.diff(older[:, -tail:], axis=1)), axis=1)
+        burst = np.log((recent_abs_mean + 1e-8) / (older_abs_mean + 1e-8))
+        burst_std = np.log(recent_diff_std / older_diff_std)
+        tail_burst = np.log((recent_tail_abs + 1e-8) / (older_tail_abs + 1e-8))
+        block = np.column_stack([burst, np.abs(burst), burst_std, np.abs(burst_std), tail_burst, np.abs(tail_burst)])
+        return FeatureBlock(block, ["absdiff_log_ratio", "absdiff_log_ratio_abs", "diff_std_log_ratio", "diff_std_log_ratio_abs", "tail_absdiff_log_ratio", "tail_absdiff_log_ratio_abs"])
+
+    return NodeAlternative(alternative_id, parents, fn, "Row-local volatility burst features from recent lookback increments.")
+
+
+def row_cusum_local_factory(alternative_id: str, parents: tuple[str, ...]) -> NodeAlternative:
+    def fn(ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
+        series = np.asarray(values[parents[0]], dtype=np.float64)
+        boundary = int(ctx.read_input("boundary"))
+        centered = series - np.mean(series, axis=1, keepdims=True)
+        cumulative = np.cumsum(centered, axis=1)
+        peak_abs = np.max(np.abs(cumulative), axis=1)
+        scale = np.maximum(safe_std(series), 1e-8)
+        peak_location = np.argmax(np.abs(cumulative), axis=1).astype(np.float64) / max(series.shape[1] - 1, 1)
+        recent_peak = np.max(np.abs(cumulative[:, boundary:]), axis=1)
+        recent_share = recent_peak / np.maximum(peak_abs, 1e-8)
+        terminal = cumulative[:, -1] / np.maximum(peak_abs, 1e-8)
+        block = np.column_stack(
+            [
+                peak_abs / scale,
+                peak_location,
+                recent_share,
+                terminal,
+                np.maximum(peak_location - 0.5, 0.0),
+            ]
+        )
+        return FeatureBlock(block, ["local_cusum_peak", "local_cusum_peak_location", "recent_cusum_share", "terminal_cusum_balance", "late_cusum_excess"])
+
+    return NodeAlternative(alternative_id, parents, fn, "Row-local CUSUM profile features over the causal lookback window.")
+
+
+def row_context_outputs_factory(alternative_id: str, parents: tuple[str, ...]) -> NodeAlternative:
+    def fn(ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
+        series = np.asarray(values[parents[0]], dtype=np.float64)
+        block, names = _row_context_features(ctx, series.shape[0], series.shape[1])
+        return FeatureBlock(block, names)
+
+    return NodeAlternative(alternative_id, parents, fn, "Optional row metadata features such as sample time, period, and observed lookback length.")
+
+
+def row_local_outputs_factory(alternative_id: str, parents: tuple[str, ...]) -> NodeAlternative:
+    def fn(ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
+        series = np.asarray(values[parents[0]], dtype=np.float64)
+        boundary = int(ctx.read_input("boundary"))
+        older, recent = split_segments(series, boundary)
+        recent_tail = _tail_window(recent)
+        older_tail = _tail_window(older)
+        full_slope = slope(series)
+        older_slope = slope(older)
+        recent_slope = slope(recent)
+        recent_tail_slope = slope(recent_tail)
+        drawdown, drawup = _drawdown_drawup(recent)
+        recent_std = safe_std(recent)
+        older_std = safe_std(older)
+        last = series[:, -1]
+        older_mean = np.mean(older, axis=1)
+        recent_mean = np.mean(recent, axis=1)
+        tail_delta = np.mean(recent_tail, axis=1) - np.mean(older_tail, axis=1)
+        std_delta = np.log(recent_std / older_std)
+        context_block, context_names = _row_context_features(ctx, series.shape[0], series.shape[1])
+        block = np.column_stack(
+            [
+                last,
+                last - older_mean,
+                last - recent_mean,
+                recent_mean - older_mean,
+                tail_delta,
+                np.abs(tail_delta),
+                std_delta,
+                np.abs(std_delta),
+                full_slope,
+                recent_slope - older_slope,
+                recent_tail_slope - recent_slope,
+                drawdown,
+                drawup,
+                context_block,
+            ]
+        )
+        names = [
+            "last_value",
+            "last_vs_older_mean",
+            "last_vs_recent_mean",
+            "recent_vs_older_mean",
+            "recent_tail_vs_older_tail",
+            "recent_tail_vs_older_tail_abs",
+            "recent_std_log_ratio",
+            "recent_std_log_ratio_abs",
+            "full_window_slope",
+            "recent_slope_delta",
+            "recent_tail_slope_delta",
+            "recent_drawdown",
+            "recent_drawup",
+            *context_names,
+        ]
+        return FeatureBlock(block, names)
+
+    return NodeAlternative(alternative_id, parents, fn, "Always-evaluated row-local features for target-time lookback windows.")
 
 
 def spectral_basic_factory(alternative_id: str, parents: tuple[str, ...]) -> NodeAlternative:
@@ -609,3 +777,27 @@ def _drawdown_drawup(x: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     drawup = np.max(x - cumulative_min, axis=1)
     scale = np.maximum(safe_std(x), 1e-8)
     return drawdown / scale, drawup / scale
+
+
+def _row_context_features(ctx: EvalContext, n_rows: int, series_length: int) -> tuple[np.ndarray, list[str]]:
+    sample_time = _optional_input_vector(ctx, "sample_time", n_rows)
+    sample_period = _optional_input_vector(ctx, "sample_period", n_rows)
+    observed = _optional_input_vector(ctx, "lookback_observed", n_rows)
+    time_scale = max(float(np.max(sample_time)) if sample_time.size else 0.0, 1.0)
+    time_norm = sample_time / time_scale
+    log_time_norm = np.log1p(np.maximum(sample_time, 0.0)) / max(float(np.log1p(time_scale)), 1.0)
+    period_two = (sample_period >= 2.0).astype(np.float64)
+    observed_fraction = np.clip(observed / max(float(series_length), 1.0), 0.0, 1.0)
+    return (
+        np.column_stack([time_norm, log_time_norm, period_two, observed_fraction]),
+        ["sample_time_norm", "sample_time_log_norm", "sample_period_two", "lookback_observed_fraction"],
+    )
+
+
+def _optional_input_vector(ctx: EvalContext, name: str, n_rows: int) -> np.ndarray:
+    if name not in ctx.inputs:
+        return np.zeros(n_rows, dtype=np.float64)
+    value = np.asarray(ctx.inputs[name], dtype=np.float64).reshape(-1)
+    if value.shape[0] != n_rows:
+        return np.zeros(n_rows, dtype=np.float64)
+    return np.nan_to_num(value, nan=0.0, posinf=0.0, neginf=0.0)

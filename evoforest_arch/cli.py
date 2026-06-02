@@ -6,7 +6,7 @@ import pathlib
 
 from evoforest_arch.evaluator import RidgeEvaluator
 from evoforest_arch.evolution import EvolutionLoop
-from evoforest_arch.competition import COMPETITION_DATASET_NAME, DEFAULT_COMPETITION_DATA_DIR, competition_data_summary
+from evoforest_arch.competition import COMPETITION_DATASET_NAME, COMPETITION_ROW_DATASET_NAME, DEFAULT_COMPETITION_DATA_DIR, competition_data_summary
 from evoforest_arch.llm import (
     DEFAULT_ISLAND_TEMPERATURES,
     HTTPJSONLLMClient,
@@ -70,13 +70,16 @@ def main(argv: list[str] | None = None) -> int:
 
     evolve = sub.add_parser("evolve", help="Run resume-safe production evolution with fixed split manifests.")
     evolve.add_argument("--steps", type=int, default=4, help="New steps to run. With --resume, this is additional steps.")
-    evolve.add_argument("--dataset", choices=("synthetic-structural-break", COMPETITION_DATASET_NAME), default="synthetic-structural-break")
+    evolve.add_argument("--dataset", choices=("synthetic-structural-break", COMPETITION_DATASET_NAME, COMPETITION_ROW_DATASET_NAME), default="synthetic-structural-break")
     evolve.add_argument("--data-dir", type=pathlib.Path, default=DEFAULT_COMPETITION_DATA_DIR)
     evolve.add_argument("--n-series", type=int, default=240)
     evolve.add_argument("--length", type=int, default=160)
     evolve.add_argument("--boundary", type=int, default=None)
     evolve.add_argument("--competition-series-length", type=int, default=160)
     evolve.add_argument("--max-samples", type=int, default=None)
+    evolve.add_argument("--max-ids", type=int, default=None)
+    evolve.add_argument("--max-rows-per-id", type=int, default=None)
+    evolve.add_argument("--row-stride", type=int, default=1)
     evolve.add_argument("--seed", type=int, default=17)
     evolve.add_argument("--split-seed", type=int, default=None)
     evolve.add_argument("--validation-fraction", type=float, default=0.2)
@@ -114,6 +117,10 @@ def main(argv: list[str] | None = None) -> int:
     data_parser.add_argument("--data-dir", type=pathlib.Path, default=DEFAULT_COMPETITION_DATA_DIR)
     data_parser.add_argument("--competition-series-length", type=int, default=160)
     data_parser.add_argument("--max-samples", type=int, default=None)
+    data_parser.add_argument("--row-level", action="store_true")
+    data_parser.add_argument("--max-ids", type=int, default=None)
+    data_parser.add_argument("--max-rows-per-id", type=int, default=None)
+    data_parser.add_argument("--row-stride", type=int, default=1)
     data_parser.add_argument("--include-reduced-test", action="store_true")
     data_parser.set_defaults(func=run_data_summary)
     args = parser.parse_args(argv)
@@ -194,6 +201,9 @@ def run_evolve(args: argparse.Namespace) -> int:
         boundary=args.boundary,
         competition_series_length=args.competition_series_length,
         max_samples=args.max_samples,
+        competition_max_ids=args.max_ids,
+        competition_max_rows_per_id=args.max_rows_per_id,
+        competition_row_stride=args.row_stride,
         validation_fraction=args.validation_fraction,
         test_fraction=args.test_fraction,
         split_seed=args.split_seed,
@@ -234,6 +244,10 @@ def run_data_summary(args: argparse.Namespace) -> int:
         series_length=args.competition_series_length,
         max_samples=args.max_samples,
         include_reduced_test=args.include_reduced_test,
+        row_level=args.row_level,
+        max_ids=args.max_ids,
+        max_rows_per_id=args.max_rows_per_id,
+        row_stride=args.row_stride,
     )
     print(json.dumps(summary, indent=2), flush=True)
     return 0

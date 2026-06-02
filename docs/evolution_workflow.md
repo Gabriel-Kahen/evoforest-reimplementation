@@ -102,6 +102,41 @@ That benchmark is validation-focused and train-only. It reports whether validati
 improved separately from whether the mutation machinery produced diverse,
 non-duplicate graph changes.
 
+## Row-Level Competition Benchmark
+
+Use `competition-parquet-row` for the official row/time target table. It loads
+`y_train.parquet` rows as individual samples, stores `sample_id` and
+`sample_time` in the graph inputs, and builds each sequence as:
+
+- pre-boundary half: period-1 reference values for the id
+- post-boundary half: period-2 prefix available at the target row time
+
+Production runs use grouped split manifests keyed by `sample_id`, so no id can
+appear in more than one of train/validation/test. `RidgeEvaluator` also uses
+grouped folds for this dataset when selecting graph configurations on the train
+split.
+
+```bash
+evoforest-arch data-summary \
+  --row-level \
+  --data-dir /Users/gabrielkahen/Downloads/data \
+  --competition-series-length 64 \
+  --max-ids 120 \
+  --max-rows-per-id 16
+
+python -m benchmarks.competition_row_benchmark \
+  --data-dir /Users/gabrielkahen/Downloads/data \
+  --series-length 64 \
+  --max-ids 120 \
+  --max-rows-per-id 16 \
+  --steps 8 \
+  --output benchmark_reports/competition-row
+```
+
+The benchmark fits a fixed non-evolved row-local baseline on train ids, scores
+validation ids without refitting, then runs candidate graph evolution using the
+same grouped train/validation split. The reduced test parquet files are not read.
+
 ## Staged Execution Rules
 
 1. Run `evolve` on synthetic data with source mutations disabled.
