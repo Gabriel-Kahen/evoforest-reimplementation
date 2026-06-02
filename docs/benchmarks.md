@@ -66,6 +66,11 @@ Each command writes paired JSON and Markdown reports. The top-level
     non-evolved row-local baseline on train ids, and compares validation-only
     graph evolution on held-out ids. It is not part of `benchmarks.run_all`
     because it requires the downloaded parquet bundle.
+- `competition_row_multisplit_benchmark`
+  - Stronger row/time-level benchmark. It uses one fixed grouped outer test
+    holdout, multiple grouped validation splits inside the development pool,
+    embeds the deterministic row-local baseline as a graph output primitive, and
+    reports both seed-output-plus-baseline and output-only graph variants.
 - `competition_event_benchmark`
   - Optional external-data benchmark for the paper's likely id-level ADIA
     protocol. It loads one structural-break label per id from the index parquet,
@@ -166,6 +171,19 @@ python -m benchmarks.competition_event_source_suite_benchmark \
   --include-builtins \
   --disable-source-screen \
   --output benchmark_reports/competition-event-template-suite
+```
+
+```bash
+python -m benchmarks.competition_row_multisplit_benchmark \
+  --data-dir /Users/gabrielkahen/Downloads/data \
+  --split-seeds 113,127,149 \
+  --series-length 480 \
+  --max-ids 1000 \
+  --max-rows-per-id 32 \
+  --max-configurations 16 \
+  --objective-mode auc \
+  --disable-builtins \
+  --output benchmark_reports/competition-row-multisplit
 ```
 
 The default suite scripts accept `--seed`, `--output`, and `--quick`. The

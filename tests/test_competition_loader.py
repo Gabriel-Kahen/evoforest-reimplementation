@@ -15,7 +15,11 @@ from benchmarks.competition_event_multisplit_benchmark import build_report as bu
 from benchmarks.competition_event_readout_benchmark import run as run_event_readout_benchmark
 from benchmarks.competition_event_source_suite_benchmark import build_report as build_source_suite_event_report
 from benchmarks.competition_row_benchmark import build_report as build_row_benchmark_report
+from benchmarks.competition_row_benchmark import row_local_baseline_features
+from benchmarks.competition_row_multisplit_benchmark import ROW_BASELINE_SPEC
+from benchmarks.competition_row_multisplit_benchmark import build_report as build_row_multisplit_report
 from evoforest_arch.competition import COMPETITION_DATASET_NAME, COMPETITION_ROW_DATASET_NAME, competition_data_summary, load_competition_event_dataset, load_competition_row_dataset
+from evoforest_arch.mutations import MutationEngine
 from evoforest_arch.production import ProductionConfig, ProductionEvolutionRunner, recheck_run
 from evoforest_arch.seed import build_seed_graph
 from evoforest_arch.source_mutations import structural_break_source_mutations, validate_source_mutations
@@ -343,6 +347,44 @@ def test_competition_event_source_suite_benchmark_prunes_all_source_candidates(t
     assert Path(report["source_suite_graph"]["path"]).exists()
     assert Path(report["pruned_source_suite_graph"]["path"]).exists()
     assert report["pruning"]["attempted"] == report["source_mutations"]["templates"]
+    assert "mean_delta_vs_baseline" in report["internal_test"]
+
+
+def test_row_baseline_output_primitive_matches_fixed_row_baseline(tmp_path) -> None:
+    data_dir = write_competition_bundle(tmp_path, include_reduced=False, n_train=24)
+    dataset = load_competition_row_dataset(data_dir, split="train", series_length=20, max_ids=8, max_rows_per_id=3)
+    graph = MutationEngine().apply(build_seed_graph(), ROW_BASELINE_SPEC)
+
+    expected_x, expected_names = row_local_baseline_features(dataset.inputs)
+    x, names, _ctx = graph.evaluate_features(dataset.inputs, config=graph.default_config())
+    baseline_columns = [idx for idx, name in enumerate(names) if name.startswith("output.adia_row_baseline_output.")]
+
+    assert [names[idx].removeprefix("output.adia_row_baseline_output.") for idx in baseline_columns] == expected_names
+    assert np.allclose(x[:, baseline_columns], expected_x)
+
+
+def test_competition_row_multisplit_benchmark_writes_pruned_graph_and_avoids_reduced(tmp_path) -> None:
+    data_dir = write_competition_bundle(tmp_path, include_reduced=False, n_train=48)
+
+    report = build_row_multisplit_report(
+        tmp_path / "row_multisplit",
+        data_dir=data_dir,
+        seed=13,
+        split_seeds=(13, 17),
+        series_length=20,
+        max_ids=None,
+        max_rows_per_id=3,
+        folds=2,
+        max_configurations=4,
+        include_builtin_templates=False,
+    )
+
+    assert report["benchmark"] == "competition_row_multisplit_benchmark"
+    assert report["reduced_test_access"]["accessed"] is False
+    assert all(row["audit"]["no_group_overlap"] for row in report["split_audits"])
+    assert Path(report["row_baseline_graph"]["path"]).exists()
+    assert Path(report["pruned_row_template_suite_graph"]["path"]).exists()
+    assert report["template_suite"]["added_templates"] >= 1
     assert "mean_delta_vs_baseline" in report["internal_test"]
 
 

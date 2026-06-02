@@ -377,6 +377,14 @@ def built_in_mutations() -> list[MutationSpec]:
         MutationSpec(
             kind="add_alternative",
             target_node="output",
+            primitive="adia_row_baseline_outputs",
+            alternative_id="adia_row_baseline_output_mutation",
+            parents=("series",),
+            description="Add the full deterministic ADIA row-level baseline feature block as graph outputs.",
+        ),
+        MutationSpec(
+            kind="add_alternative",
+            target_node="output",
             primitive="row_context_outputs",
             alternative_id="row_context_output_mutation",
             parents=("series",),

@@ -247,6 +247,23 @@ python -m benchmarks.competition_event_source_suite_benchmark \
   --output benchmark_reports/competition-event-template-suite
 ```
 
+For the row/time-level parquet labels, use the grouped row multi-split benchmark.
+This embeds the deterministic row-local baseline as a graph output primitive and
+can build an output-only graph by pruning the seed output alternatives:
+
+```bash
+python -m benchmarks.competition_row_multisplit_benchmark \
+  --data-dir /Users/gabrielkahen/Downloads/data \
+  --split-seeds 113,127,149 \
+  --series-length 480 \
+  --max-ids 1000 \
+  --max-rows-per-id 32 \
+  --max-configurations 16 \
+  --objective-mode auc \
+  --disable-builtins \
+  --output benchmark_reports/competition-row-multisplit
+```
+
 ## Run Benchmarks
 
 The benchmark suite generates reproducible JSON and Markdown reports that show

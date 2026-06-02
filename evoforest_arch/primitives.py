@@ -32,6 +32,7 @@ class PrimitiveRegistry:
         registry.register("row_cusum_local", row_cusum_local_factory)
         registry.register("row_context_outputs", row_context_outputs_factory)
         registry.register("row_local_outputs", row_local_outputs_factory)
+        registry.register("adia_row_baseline_outputs", adia_row_baseline_outputs_factory)
         registry.register("identity_callable", identity_callable_factory)
         registry.register("sigmoid_gate_callable", sigmoid_gate_callable_factory)
         registry.register("clipped_linear_callable", clipped_linear_callable_factory)
@@ -476,6 +477,72 @@ def row_local_outputs_factory(alternative_id: str, parents: tuple[str, ...]) -> 
         return FeatureBlock(block, names)
 
     return NodeAlternative(alternative_id, parents, fn, "Always-evaluated row-local features for target-time lookback windows.")
+
+
+def adia_row_baseline_outputs_factory(alternative_id: str, parents: tuple[str, ...]) -> NodeAlternative:
+    def fn(ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
+        series = np.asarray(values[parents[0]], dtype=np.float64)
+        boundary = int(ctx.read_input("boundary"))
+        older, recent = split_segments(series, boundary)
+        older_tail = _tail_window(older)
+        recent_head = _head_window(recent)
+        recent_tail = _tail_window(recent)
+        older_mean = np.mean(older, axis=1)
+        recent_mean = np.mean(recent, axis=1)
+        older_std = safe_std(older)
+        recent_std = safe_std(recent)
+        older_diff = np.diff(older, axis=1)
+        recent_diff = np.diff(recent, axis=1)
+        recent_drawdown, recent_drawup = _drawdown_drawup(recent)
+        centered = series - np.mean(series, axis=1, keepdims=True)
+        cumulative = np.cumsum(centered, axis=1)
+        peak_abs = np.maximum(np.max(np.abs(cumulative), axis=1), 1e-8)
+        context_block, context_names = _row_context_features(ctx, series.shape[0], series.shape[1])
+        features = np.column_stack(
+            [
+                series[:, -1],
+                series[:, -1] - older_mean,
+                series[:, -1] - recent_mean,
+                recent_mean - older_mean,
+                np.mean(recent_head, axis=1) - np.mean(older_tail, axis=1),
+                np.mean(recent_tail, axis=1) - np.mean(recent_head, axis=1),
+                np.log(recent_std / older_std),
+                np.mean(np.abs(recent_diff), axis=1) - np.mean(np.abs(older_diff), axis=1),
+                np.log((np.mean(np.abs(recent_diff), axis=1) + 1e-8) / (np.mean(np.abs(older_diff), axis=1) + 1e-8)),
+                slope(series),
+                slope(recent) - slope(older),
+                slope(recent_tail),
+                recent_drawdown,
+                recent_drawup,
+                peak_abs / np.maximum(safe_std(series), 1e-8),
+                np.argmax(np.abs(cumulative), axis=1).astype(np.float64) / max(series.shape[1] - 1, 1),
+                np.max(np.abs(cumulative[:, boundary:]), axis=1) / peak_abs,
+                context_block,
+            ]
+        )
+        names = [
+            "last_value",
+            "last_vs_older_mean",
+            "last_vs_recent_mean",
+            "recent_vs_older_mean",
+            "recent_entry_jump",
+            "recent_tail_drift",
+            "recent_std_log_ratio",
+            "absdiff_delta",
+            "absdiff_log_ratio",
+            "full_window_slope",
+            "recent_slope_delta",
+            "recent_tail_slope",
+            "recent_drawdown",
+            "recent_drawup",
+            "local_cusum_peak",
+            "local_cusum_peak_location",
+            "recent_cusum_share",
+            *context_names,
+        ]
+        return FeatureBlock(features, names)
+
+    return NodeAlternative(alternative_id, parents, fn, "Always-evaluated ADIA row-level baseline feature block.")
 
 
 def spectral_basic_factory(alternative_id: str, parents: tuple[str, ...]) -> NodeAlternative:
