@@ -85,8 +85,22 @@ Use `recheck --include-test` only after the graph and search procedure are froze
 Full-data parquet jobs should run over SSH on the PC, for example:
 
 ```bash
-ssh gabe@gabepc 'cd /home/gabe/evoforest-reimplementation-run && .venv/bin/evoforest-arch evolve --dataset competition-parquet-event --data-dir /home/gabe/evoforest-crunch-open-benchmark/data --steps 1 --output runs/competition-full'
+ssh gabe@gabepc 'cd /home/gabe/evoforest-reimplementation-run && .venv/bin/evoforest-arch evolve --dataset competition-parquet-event --data-dir /home/gabe/evoforest-competition-data --steps 1 --max-configurations 96 --min-train-improvement -0.005 --output runs/competition-full'
 ```
+
+For mutation usefulness checks on capped parquet data:
+
+```bash
+python -m benchmarks.competition_mutation_usefulness \
+  --data-dir /Users/gabrielkahen/Downloads/data \
+  --max-samples 1000 \
+  --max-configurations 96 \
+  --output benchmark_reports/competition
+```
+
+That benchmark is validation-focused and train-only. It reports whether validation
+improved separately from whether the mutation machinery produced diverse,
+non-duplicate graph changes.
 
 ## Staged Execution Rules
 

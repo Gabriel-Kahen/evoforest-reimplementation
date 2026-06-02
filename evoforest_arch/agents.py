@@ -130,7 +130,7 @@ class EngineerAgent:
         rng: np.random.Generator,
     ) -> MutationDocument:
         del result
-        selected = self._select_template(hypotheses, rng)
+        selected = self._select_template(graph, hypotheses, step, rng)
         suffix = f"{step}" if island is None else f"i{island}_{step}"
         spec = MutationSpec(
             kind=selected.kind,
@@ -148,12 +148,44 @@ class EngineerAgent:
             add=(spec,),
         )
 
-    def _select_template(self, hypotheses: tuple[Hypothesis, ...], rng: np.random.Generator) -> MutationSpec:
-        for hypothesis in hypotheses:
-            for template in self.templates:
-                if template.target_node == hypothesis.target_node:
-                    return template
-        return self.templates[int(rng.integers(0, len(self.templates)))]
+    def _select_template(
+        self,
+        graph: Graph,
+        hypotheses: tuple[Hypothesis, ...],
+        step: int,
+        rng: np.random.Generator,
+    ) -> MutationSpec:
+        target_order = [hypothesis.target_node for hypothesis in hypotheses]
+        target_rank = {target: index for index, target in enumerate(target_order)}
+        candidates = [
+            template
+            for template in self.templates
+            if template.target_node in graph.nodes and not self._template_already_present(graph, template)
+        ]
+        if not candidates:
+            candidates = [template for template in self.templates if template.target_node in graph.nodes]
+        if not candidates:
+            return self.templates[int(rng.integers(0, len(self.templates)))]
+        candidates = sorted(
+            candidates,
+            key=lambda template: (
+                target_rank.get(template.target_node, len(target_rank) + 1),
+                template.target_node,
+                template.primitive,
+                template.alternative_id,
+            ),
+        )
+        return candidates[(max(1, int(step)) - 1) % len(candidates)]
+
+    @staticmethod
+    def _template_already_present(graph: Graph, template: MutationSpec) -> bool:
+        node = graph.nodes.get(template.target_node)
+        if node is None:
+            return False
+        for alternative in node.alternatives:
+            if alternative.primitive == template.primitive and alternative.parents == template.parents:
+                return True
+        return False
 
     @staticmethod
     def _safe_redundancy_removals(graph: Graph) -> list[RemoveSpec]:

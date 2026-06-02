@@ -21,16 +21,23 @@ class PrimitiveRegistry:
         registry.register("segment_basic", segment_basic_factory)
         registry.register("segment_robust", segment_robust_factory)
         registry.register("trend_basic", trend_basic_factory)
+        registry.register("trend_late_window", trend_late_window_factory)
         registry.register("cusum_basic", cusum_basic_factory)
         registry.register("spectral_basic", spectral_basic_factory)
+        registry.register("segment_late_shift", segment_late_shift_factory)
+        registry.register("shape_drawdown", shape_drawdown_factory)
+        registry.register("shape_post_concentration", shape_post_concentration_factory)
         registry.register("identity_callable", identity_callable_factory)
         registry.register("sigmoid_gate_callable", sigmoid_gate_callable_factory)
         registry.register("clipped_linear_callable", clipped_linear_callable_factory)
         registry.register("pass_outputs", pass_outputs_factory)
         registry.register("activated_outputs", activated_outputs_factory)
         registry.register("projection_outputs", projection_outputs_factory)
+        registry.register("competition_event_outputs", competition_event_outputs_factory)
+        registry.register("interaction_outputs", interaction_outputs_factory)
         registry.register("uniform_sample_weight", uniform_sample_weight_factory)
         registry.register("boundary_energy_weight", boundary_energy_weight_factory)
+        registry.register("late_energy_weight", late_energy_weight_factory)
         registry.register("identity_residual_weight", identity_residual_weight_factory)
         registry.register("huber_residual_weight", huber_residual_weight_factory)
         return registry
@@ -172,6 +179,30 @@ def trend_basic_factory(alternative_id: str, parents: tuple[str, ...]) -> NodeAl
     return NodeAlternative(alternative_id, parents, fn, "Linear trend summaries before and after boundary.", torch_fn=tfn)
 
 
+def trend_late_window_factory(alternative_id: str, parents: tuple[str, ...]) -> NodeAlternative:
+    def fn(ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
+        series = np.asarray(values[parents[0]], dtype=np.float64)
+        boundary = int(ctx.read_input("boundary"))
+        pre, post = split_segments(series, boundary)
+        pre_tail = _tail_window(pre)
+        post_head = _head_window(post)
+        post_tail = _tail_window(post)
+        pre_tail_slope = slope(pre_tail)
+        post_head_slope = slope(post_head)
+        post_tail_slope = slope(post_tail)
+        block = np.column_stack(
+            [
+                post_tail_slope,
+                post_tail_slope - pre_tail_slope,
+                post_tail_slope - post_head_slope,
+                np.abs(post_tail_slope - post_head_slope),
+            ]
+        )
+        return FeatureBlock(block, ["post_tail_slope", "tail_pre_slope_delta", "post_slope_accel", "post_slope_accel_abs"])
+
+    return NodeAlternative(alternative_id, parents, fn, "Late-window trend and acceleration summaries.")
+
+
 def cusum_basic_factory(alternative_id: str, parents: tuple[str, ...]) -> NodeAlternative:
     def fn(ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
         series = np.asarray(values[parents[0]], dtype=np.float64)
@@ -194,6 +225,88 @@ def cusum_basic_factory(alternative_id: str, parents: tuple[str, ...]) -> NodeAl
         return torch.column_stack([peak, boundary_strength])
 
     return NodeAlternative(alternative_id, parents, fn, "CUSUM profile statistics.", torch_fn=tfn)
+
+
+def segment_late_shift_factory(alternative_id: str, parents: tuple[str, ...]) -> NodeAlternative:
+    def fn(ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
+        series = np.asarray(values[parents[0]], dtype=np.float64)
+        boundary = int(ctx.read_input("boundary"))
+        pre, post = split_segments(series, boundary)
+        pre_tail = _tail_window(pre)
+        post_head = _head_window(post)
+        post_tail = _tail_window(post)
+        pre_tail_mean = np.mean(pre_tail, axis=1)
+        post_head_mean = np.mean(post_head, axis=1)
+        post_tail_mean = np.mean(post_tail, axis=1)
+        pre_tail_std = safe_std(pre_tail)
+        post_tail_std = safe_std(post_tail)
+        tail_jump = post_head_mean - pre_tail_mean
+        late_drift = post_tail_mean - post_head_mean
+        block = np.column_stack(
+            [
+                tail_jump,
+                np.abs(tail_jump),
+                late_drift,
+                np.abs(late_drift),
+                np.log(post_tail_std / pre_tail_std),
+            ]
+        )
+        return FeatureBlock(block, ["tail_jump", "tail_jump_abs", "post_late_drift", "post_late_drift_abs", "tail_std_log_ratio"])
+
+    return NodeAlternative(alternative_id, parents, fn, "Competition-style late shift statistics around the period boundary.")
+
+
+def shape_drawdown_factory(alternative_id: str, parents: tuple[str, ...]) -> NodeAlternative:
+    def fn(ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
+        series = np.asarray(values[parents[0]], dtype=np.float64)
+        boundary = int(ctx.read_input("boundary"))
+        pre, post = split_segments(series, boundary)
+        post_drawdown, post_drawup = _drawdown_drawup(post)
+        pre_drawdown, pre_drawup = _drawdown_drawup(pre)
+        block = np.column_stack(
+            [
+                post_drawdown,
+                post_drawup,
+                post_drawdown - pre_drawdown,
+                post_drawup - pre_drawup,
+                np.abs(post_drawdown - pre_drawdown),
+                np.abs(post_drawup - pre_drawup),
+            ]
+        )
+        return FeatureBlock(block, ["post_drawdown", "post_drawup", "drawdown_delta", "drawup_delta", "drawdown_delta_abs", "drawup_delta_abs"])
+
+    return NodeAlternative(alternative_id, parents, fn, "Post-period drawdown and drawup profile statistics.")
+
+
+def shape_post_concentration_factory(alternative_id: str, parents: tuple[str, ...]) -> NodeAlternative:
+    def fn(ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
+        series = np.asarray(values[parents[0]], dtype=np.float64)
+        boundary = int(ctx.read_input("boundary"))
+        pre, post = split_segments(series, boundary)
+        post_centered = post - np.mean(post, axis=1, keepdims=True)
+        pre_centered = pre - np.mean(pre, axis=1, keepdims=True)
+        post_energy = np.abs(post_centered)
+        pre_energy = np.abs(pre_centered)
+        post_total = np.maximum(np.sum(post_energy, axis=1), 1e-8)
+        pre_total = np.maximum(np.sum(pre_energy, axis=1), 1e-8)
+        tail = max(2, post.shape[1] // 4)
+        post_tail_share = np.sum(post_energy[:, -tail:], axis=1) / post_total
+        pre_tail_share = np.sum(pre_energy[:, -tail:], axis=1) / pre_total
+        time = np.linspace(0.0, 1.0, post.shape[1])
+        post_centroid = np.sum(post_energy * time.reshape(1, -1), axis=1) / post_total
+        post_peak = np.argmax(post_energy, axis=1).astype(np.float64) / max(post.shape[1] - 1, 1)
+        block = np.column_stack(
+            [
+                post_tail_share,
+                post_tail_share - pre_tail_share,
+                post_centroid,
+                post_peak,
+                np.maximum(post_centroid - 0.5, 0.0),
+            ]
+        )
+        return FeatureBlock(block, ["post_tail_energy_share", "tail_energy_delta", "post_energy_centroid", "post_peak_location", "late_centroid_excess"])
+
+    return NodeAlternative(alternative_id, parents, fn, "Concentration of post-period movement near the late horizon.")
 
 
 def spectral_basic_factory(alternative_id: str, parents: tuple[str, ...]) -> NodeAlternative:
@@ -332,6 +445,96 @@ def projection_outputs_factory(alternative_id: str, parents: tuple[str, ...]) ->
     return NodeAlternative(alternative_id, parents, fn, "Projection using persistent global parameters.", global_refs=("projection_vector",), torch_fn=tfn)
 
 
+def competition_event_outputs_factory(alternative_id: str, parents: tuple[str, ...]) -> NodeAlternative:
+    def fn(ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
+        series = np.asarray(values[parents[0]], dtype=np.float64)
+        boundary = int(ctx.read_input("boundary"))
+        pre, post = split_segments(series, boundary)
+        pre_tail = _tail_window(pre)
+        post_head = _head_window(post)
+        post_tail = _tail_window(post)
+        pre_tail_mean = np.mean(pre_tail, axis=1)
+        post_head_mean = np.mean(post_head, axis=1)
+        post_tail_mean = np.mean(post_tail, axis=1)
+        tail_jump = post_head_mean - pre_tail_mean
+        late_drift = post_tail_mean - post_head_mean
+        post_drawdown, post_drawup = _drawdown_drawup(post)
+        pre_drawdown, pre_drawup = _drawdown_drawup(pre)
+        post_centered = post - np.mean(post, axis=1, keepdims=True)
+        pre_centered = pre - np.mean(pre, axis=1, keepdims=True)
+        post_energy = np.abs(post_centered)
+        pre_energy = np.abs(pre_centered)
+        post_total = np.maximum(np.sum(post_energy, axis=1), 1e-8)
+        pre_total = np.maximum(np.sum(pre_energy, axis=1), 1e-8)
+        tail = max(2, post.shape[1] // 4)
+        post_tail_share = np.sum(post_energy[:, -tail:], axis=1) / post_total
+        pre_tail_share = np.sum(pre_energy[:, -tail:], axis=1) / pre_total
+        post_time = np.linspace(0.0, 1.0, post.shape[1])
+        post_centroid = np.sum(post_energy * post_time.reshape(1, -1), axis=1) / post_total
+        block = np.column_stack(
+            [
+                tail_jump,
+                np.abs(tail_jump),
+                late_drift,
+                np.abs(late_drift),
+                post_drawdown,
+                post_drawup,
+                post_drawdown - pre_drawdown,
+                post_drawup - pre_drawup,
+                post_tail_share,
+                post_tail_share - pre_tail_share,
+                post_centroid,
+                np.maximum(post_centroid - 0.5, 0.0),
+            ]
+        )
+        return FeatureBlock(
+            block,
+            [
+                "tail_jump",
+                "tail_jump_abs",
+                "post_late_drift",
+                "post_late_drift_abs",
+                "post_drawdown",
+                "post_drawup",
+                "drawdown_delta",
+                "drawup_delta",
+                "post_tail_energy_share",
+                "tail_energy_delta",
+                "post_energy_centroid",
+                "late_centroid_excess",
+            ],
+        )
+
+    return NodeAlternative(alternative_id, parents, fn, "Always-evaluated competition event detection output features.")
+
+
+def interaction_outputs_factory(alternative_id: str, parents: tuple[str, ...]) -> NodeAlternative:
+    def fn(_ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
+        block = combine_blocks(values, parents)
+        x = block.values
+        if x.shape[1] == 0:
+            return FeatureBlock(x, [])
+        centered = x - np.mean(x, axis=0, keepdims=True)
+        std = np.maximum(np.std(centered, axis=0, keepdims=True), 1e-8)
+        z = np.clip(centered / std, -5.0, 5.0)
+        k = min(6, z.shape[1])
+        selected = z[:, :k]
+        aggregate = np.column_stack(
+            [
+                np.mean(selected, axis=1),
+                np.max(selected, axis=1),
+                np.min(selected, axis=1),
+                np.mean(np.abs(selected), axis=1),
+            ]
+        )
+        columns = [selected[:, idx] * selected[:, idx + 1] for idx in range(k - 1)]
+        names = [f"z_interaction_{idx}_{idx + 1}" for idx in range(k - 1)]
+        values_out = np.column_stack([aggregate, *columns]) if columns else aggregate
+        return FeatureBlock(values_out, ["z_mean", "z_max", "z_min", "z_abs_mean", *names])
+
+    return NodeAlternative(alternative_id, parents, fn, "Standardized aggregate and pairwise interaction output features.")
+
+
 def uniform_sample_weight_factory(alternative_id: str, parents: tuple[str, ...]) -> NodeAlternative:
     def fn(ctx: EvalContext, _values: dict[str, object]) -> np.ndarray:
         series = np.asarray(ctx.read_input("series"), dtype=np.float64)
@@ -354,6 +557,21 @@ def boundary_energy_weight_factory(alternative_id: str, parents: tuple[str, ...]
     return NodeAlternative(alternative_id, parents, fn, "Emphasize samples whose CUSUM energy concentrates near the boundary.")
 
 
+def late_energy_weight_factory(alternative_id: str, parents: tuple[str, ...]) -> NodeAlternative:
+    def fn(ctx: EvalContext, values: dict[str, object]) -> np.ndarray:
+        series = np.asarray(values[parents[0]], dtype=np.float64)
+        boundary = int(ctx.read_input("boundary"))
+        _pre, post = split_segments(series, boundary)
+        tail = max(2, post.shape[1] // 4)
+        centered = post - np.mean(post, axis=1, keepdims=True)
+        total = np.maximum(np.sum(np.abs(centered), axis=1), 1e-8)
+        late_share = np.sum(np.abs(centered[:, -tail:]), axis=1) / total
+        weights = 0.75 + late_share
+        return np.clip(weights, 0.5, 2.5)
+
+    return NodeAlternative(alternative_id, parents, fn, "Emphasize samples with movement concentrated late in the post period.")
+
+
 def identity_residual_weight_factory(alternative_id: str, parents: tuple[str, ...]) -> NodeAlternative:
     def fn(_ctx: EvalContext, _values: dict[str, object]) -> ResidualWeightRule:
         return ResidualWeightRule("identity", lambda residual: np.ones_like(residual, dtype=np.float64), "No residual reweighting.")
@@ -372,3 +590,22 @@ def huber_residual_weight_factory(alternative_id: str, parents: tuple[str, ...])
         return ResidualWeightRule("huber", apply, "Huber-style residual downweighting.")
 
     return NodeAlternative(alternative_id, parents, fn, "Huber-style residual weighting rule.", global_refs=("residual_huber_scale",))
+
+
+def _head_window(x: np.ndarray) -> np.ndarray:
+    width = max(2, x.shape[1] // 4)
+    return x[:, :width]
+
+
+def _tail_window(x: np.ndarray) -> np.ndarray:
+    width = max(2, x.shape[1] // 4)
+    return x[:, -width:]
+
+
+def _drawdown_drawup(x: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    cumulative_max = np.maximum.accumulate(x, axis=1)
+    cumulative_min = np.minimum.accumulate(x, axis=1)
+    drawdown = np.max(cumulative_max - x, axis=1)
+    drawup = np.max(x - cumulative_min, axis=1)
+    scale = np.maximum(safe_std(x), 1e-8)
+    return drawdown / scale, drawup / scale

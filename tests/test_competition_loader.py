@@ -7,6 +7,7 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from benchmarks.competition_mutation_usefulness import build_report as build_mutation_usefulness_report
 from evoforest_arch.competition import COMPETITION_DATASET_NAME, competition_data_summary, load_competition_event_dataset
 from evoforest_arch.production import ProductionConfig, ProductionEvolutionRunner, recheck_run
 
@@ -60,6 +61,27 @@ def test_competition_include_test_recheck_reads_reduced_test_explicitly(tmp_path
     assert state["test_recheck_count"] == 1
 
 
+def test_competition_mutation_usefulness_benchmark_uses_diverse_train_only_candidates(tmp_path) -> None:
+    data_dir = write_competition_bundle(tmp_path, include_reduced=True, n_train=48, n_reduced=8)
+
+    report = build_mutation_usefulness_report(
+        tmp_path,
+        data_dir=data_dir,
+        seed=9,
+        max_samples=None,
+        series_length=20,
+        steps=4,
+        folds=2,
+        max_configurations=4,
+    )
+
+    primitives = [row["primitive"] for row in report["candidates"]]
+    assert report["reduced_test_accessed"] is False
+    assert len(primitives) == len(set(primitives))
+    assert "reduced_test" not in report["dataset"]["split"]
+    assert report["summary"]["duplicate_proposals"] is False
+
+
 def competition_config(tmp_path: Path, data_dir: Path, *, steps: int) -> ProductionConfig:
     return ProductionConfig(
         output_dir=tmp_path / f"run_{steps}",
@@ -76,14 +98,14 @@ def competition_config(tmp_path: Path, data_dir: Path, *, steps: int) -> Product
     )
 
 
-def write_competition_bundle(tmp_path: Path, *, include_reduced: bool) -> Path:
+def write_competition_bundle(tmp_path: Path, *, include_reduced: bool, n_train: int = 12, n_reduced: int = 4) -> Path:
     data_dir = tmp_path / "data"
     data_dir.mkdir()
-    write_x(data_dir / "X_train.parquet", ids=range(12))
-    write_index(data_dir / "y_train_index.parquet", ids=range(12))
+    write_x(data_dir / "X_train.parquet", ids=range(n_train))
+    write_index(data_dir / "y_train_index.parquet", ids=range(n_train))
     if include_reduced:
-        write_x(data_dir / "X_test.reduced.parquet", ids=range(100, 104))
-        write_index(data_dir / "y_test_index.reduced.parquet", ids=range(100, 104))
+        write_x(data_dir / "X_test.reduced.parquet", ids=range(100, 100 + n_reduced))
+        write_index(data_dir / "y_test_index.reduced.parquet", ids=range(100, 100 + n_reduced))
     return data_dir
 
 

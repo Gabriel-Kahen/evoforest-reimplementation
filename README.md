@@ -124,6 +124,17 @@ labeled test files are not read by `evolve`, `inspect`, `data-summary`, or defau
 `recheck`; they are read only when `recheck --include-test` is explicitly used.
 Run full-data parquet jobs on the PC over SSH rather than on a MacBook Air.
 
+To check whether mutations are useful on capped parquet data without touching the
+reduced test files:
+
+```bash
+python -m benchmarks.competition_mutation_usefulness \
+  --data-dir /Users/gabrielkahen/Downloads/data \
+  --max-samples 1000 \
+  --max-configurations 96 \
+  --output benchmark_reports/competition
+```
+
 ## Run Benchmarks
 
 The benchmark suite generates reproducible JSON and Markdown reports that show

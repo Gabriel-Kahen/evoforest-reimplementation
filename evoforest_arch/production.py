@@ -346,7 +346,11 @@ class ProductionEvolutionRunner:
             "evaluator": self.config.evaluator_config(),
             "mutation": {"allow_source_mutations": bool(self.config.allow_source_mutations)},
             "acceptance": {
-                "policy": "train_improvement_and_validation_improvement",
+                "policy": (
+                    "validation_improvement_with_train_regression_floor"
+                    if self.config.min_train_improvement < 0.0
+                    else "train_improvement_and_validation_improvement"
+                ),
                 "min_train_improvement": float(self.config.min_train_improvement),
                 "min_validation_improvement": float(self.config.min_validation_improvement),
                 "validation_config": "candidate_train_best_config",
