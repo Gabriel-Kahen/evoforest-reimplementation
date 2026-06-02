@@ -13,6 +13,7 @@ from evoforest_arch.graph import CallableFamily, EvalContext, FeatureBlock, Grap
 from evoforest_arch.llm import LLMEngineerAgent, LLMScientistAgent, PromptBuilder, StaticLLMClient
 from evoforest_arch.maintenance import GraphMaintenance
 from evoforest_arch.mutations import GlobalSpec, MutationDocument, MutationEngine, MutationSpec, NodeSpec, RemoveSpec
+from evoforest_arch.rank_readout import fit_rank_feature_expansion, select_rank_ensemble
 from evoforest_arch.seed import build_seed_graph
 from evoforest_arch.synthetic import make_structural_break_data
 
@@ -188,6 +189,24 @@ def test_ridge_g_runs_iterative_reweighted_least_squares() -> None:
     assert result.diagnostics["global_ridge"]["residual_reweighted"] is True
     assert result.diagnostics["global_ridge"]["irls_steps_used"] == 3
     assert len(result.diagnostics["global_ridge"]["irls_iterations"]) == 3
+
+
+def test_rank_interaction_readout_selects_oof_features() -> None:
+    dataset = make_structural_break_data(n_series=96, length=80, seed=31)
+    graph = build_seed_graph()
+    config = graph.default_config()
+    x, names, _ctx = graph.evaluate_features(dataset.inputs(), config=config)
+    expansion = fit_rank_feature_expansion(x, dataset.y, names, max_interaction_base=6)
+    expanded = expansion.transform(x)
+    groups = np.arange(dataset.y.shape[0])
+
+    selection = select_rank_ensemble(expanded, dataset.y, groups, n_splits=3, seed=31)
+    predictions = selection.model.predict(expanded)
+
+    assert expanded.shape[1] > x.shape[1]
+    assert selection.oof_auc > 0.7
+    assert predictions.shape == dataset.y.shape
+    assert selection.model.feature_indices.size > 0
 
 
 def test_update_graph_persists_alternative_statistics_and_age() -> None:

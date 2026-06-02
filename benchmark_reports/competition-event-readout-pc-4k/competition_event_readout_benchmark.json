@@ -1,0 +1,1240 @@
+{
+  "benchmark": "competition_event_readout_benchmark",
+  "benchmark_config": {
+    "folds": 3,
+    "graph_path": "benchmark_reports/competition-event-multisplit-pc-4k-48-auc/pruned_consensus_graph.json",
+    "max_configurations": 32,
+    "max_interaction_base": 12,
+    "max_samples": 4000,
+    "readouts": [
+      "ridge",
+      "rank_interaction",
+      "ridge_rank_blend"
+    ],
+    "series_length": 160,
+    "split_seeds": [
+      211,
+      223,
+      307
+    ]
+  },
+  "dataset": {
+    "data_dir": "/home/gabe/evoforest-competition-data",
+    "ids_max": 3999,
+    "ids_min": 0,
+    "mapping": "period_1_resampled_to_pre_boundary_and_period_2_resampled_to_post_boundary",
+    "max_samples": 4000,
+    "n_samples": 4000,
+    "name": "competition-parquet-event",
+    "negative_count": 2012,
+    "official_metric_note": "This is an id-level event-detection surrogate for the graph interface, not the official row-level competition metric.",
+    "positive_count": 1988,
+    "read_paths": [
+      "/home/gabe/evoforest-competition-data/X_train.parquet",
+      "/home/gabe/evoforest-competition-data/y_train_index.parquet"
+    ],
+    "series_length": 160,
+    "split": "train",
+    "target_source": "tau_index >= 0 from y_train_index.parquet",
+    "tau_max": 5857,
+    "tau_min": 1025
+  },
+  "dataset_config": {
+    "data_dir": "/home/gabe/evoforest-competition-data",
+    "max_ids": null,
+    "max_rows_per_id": null,
+    "max_samples": 4000,
+    "name": "competition-parquet-event",
+    "row_stride": 1,
+    "series_length": 160
+  },
+  "graph": {
+    "alternatives": 19,
+    "alternatives_by_kind": {
+      "callable": 3,
+      "fitting": 4,
+      "input": 0,
+      "intermediate": 5,
+      "output": 7
+    },
+    "configuration_nodes": [
+      "activation",
+      "ridge_g",
+      "ridge_w",
+      "segment_stats",
+      "shape_stats",
+      "trend_stats"
+    ],
+    "fitting_nodes": [
+      "ridge_w",
+      "ridge_g"
+    ],
+    "globals": {
+      "gate_scale": {
+        "description": "Shared scale for callable gate families.",
+        "name": "gate_scale",
+        "shape": [
+          1
+        ],
+        "trainable": true,
+        "value": [
+          1.0
+        ]
+      },
+      "projection_vector": {
+        "description": "Low-dimensional global vector used by projection outputs.",
+        "name": "projection_vector",
+        "shape": [
+          16
+        ],
+        "trainable": true,
+        "value": [
+          0.2,
+          0.25333333333333335,
+          0.3066666666666667,
+          0.36,
+          0.41333333333333333,
+          0.4666666666666667,
+          0.52,
+          0.5733333333333334,
+          0.6266666666666667,
+          0.68,
+          0.7333333333333334,
+          0.7866666666666666,
+          0.8400000000000001,
+          0.8933333333333333,
+          0.9466666666666668,
+          1.0
+        ]
+      },
+      "residual_huber_scale": {
+        "description": "Shared threshold for residual-based Ridge reweighting.",
+        "name": "residual_huber_scale",
+        "shape": [
+          1
+        ],
+        "trainable": true,
+        "value": [
+          1.0
+        ]
+      }
+    },
+    "name": "evoforest_seed",
+    "node_kinds": {
+      "callable": 1,
+      "fitting": 2,
+      "input": 2,
+      "intermediate": 3,
+      "output": 1
+    },
+    "nodes": 9,
+    "output_nodes": [
+      "output"
+    ],
+    "total_configurations": 48
+  },
+  "outer_split": {
+    "development_groups": 3200,
+    "development_samples": 3200,
+    "group_key": "sample_id",
+    "manifest_method": "group_stratified_random",
+    "seed": 211,
+    "test_groups": 800,
+    "test_samples": 800
+  },
+  "reduced_test_access": {
+    "accessed": false,
+    "checked_paths": [
+      "X_test.reduced.parquet",
+      "y_test_index.reduced.parquet"
+    ],
+    "read_paths": [
+      "/home/gabe/evoforest-competition-data/X_train.parquet",
+      "/home/gabe/evoforest-competition-data/y_train_index.parquet"
+    ],
+    "reduced_read_paths": []
+  },
+  "scope": "These benchmarks validate architecture-level behavior of this clean-room reimplementation. They do not claim to reproduce the authors' private evolved graph, private code-generation stack, competition pipeline, or reported ROC-AUC.",
+  "seed": 211,
+  "splits": [
+    {
+      "baseline": {
+        "test_auc": 0.5214067851696292,
+        "validation_auc": 0.5282628227665143
+      },
+      "graph_config": {
+        "activation": "identity",
+        "ridge_g": "huber",
+        "ridge_w": "boundary_energy",
+        "segment_stats": "basic",
+        "shape_stats": "cusum",
+        "trend_stats": "linear"
+      },
+      "n_graph_features": 48,
+      "rank_expansion": {
+        "n_features": 126,
+        "names": [
+          "output.raw_concat.mean_delta",
+          "output.raw_concat.mean_delta_abs",
+          "output.raw_concat.std_log_ratio",
+          "output.raw_concat.std_log_ratio_abs",
+          "output.raw_concat.pre_slope",
+          "output.raw_concat.post_slope",
+          "output.raw_concat.slope_delta",
+          "output.raw_concat.slope_delta_abs",
+          "output.raw_concat.cusum_peak",
+          "output.raw_concat.boundary_alignment",
+          "output.activated.identity_mean_delta",
+          "output.activated.identity_mean_delta_abs",
+          "output.activated.identity_std_log_ratio",
+          "output.activated.identity_std_log_ratio_abs",
+          "output.activated.identity_pre_slope",
+          "output.activated.identity_post_slope",
+          "output.activated.identity_slope_delta",
+          "output.activated.identity_slope_delta_abs",
+          "output.activated.identity_cusum_peak",
+          "output.activated.identity_boundary_alignment",
+          "output.projection.global_projection",
+          "output.source_autocorr_volatility_shift_3.src_absdiff_delta",
+          "output.source_autocorr_volatility_shift_3.src_diff_std_log_ratio",
+          "output.source_autocorr_volatility_shift_3.src_autocorr_delta",
+          "output.source_autocorr_volatility_shift_3.src_post_cusum_peak",
+          "output.source_autocorr_volatility_shift_3.src_pre_cusum_peak",
+          "output.source_autocorr_volatility_shift_3.src_cusum_peak_ratio",
+          "output.source_spectral_entropy_shift_10.src_spectral_centroid_delta",
+          "output.source_spectral_entropy_shift_10.src_spectral_entropy_delta",
+          "output.source_spectral_entropy_shift_10.src_spectral_peak_share_delta",
+          "output.source_spectral_entropy_shift_10.src_spectral_low_share_delta",
+          "output.source_spectral_entropy_shift_10.src_spectral_high_share_delta",
+          "output.interaction_output_mutation_13.z_mean",
+          "output.interaction_output_mutation_13.z_max",
+          "output.interaction_output_mutation_13.z_min",
+          "output.interaction_output_mutation_13.z_abs_mean",
+          "output.interaction_output_mutation_13.z_interaction_0_1",
+          "output.interaction_output_mutation_13.z_interaction_1_2",
+          "output.interaction_output_mutation_13.z_interaction_2_3",
+          "output.interaction_output_mutation_13.z_interaction_3_4",
+          "output.interaction_output_mutation_13.z_interaction_4_5",
+          "output.source_distribution_shift_22.src_mean_delta",
+          "output.source_distribution_shift_22.src_mean_delta_abs",
+          "output.source_distribution_shift_22.src_scaled_median_delta",
+          "output.source_distribution_shift_22.src_std_log_ratio",
+          "output.source_distribution_shift_22.src_iqr_delta",
+          "output.source_distribution_shift_22.src_sorted_l1_distance",
+          "output.source_distribution_shift_22.src_quantile_max_distance",
+          "abs::output.source_distribution_shift_22.src_std_log_ratio",
+          "abs::output.raw_concat.std_log_ratio",
+          "abs::output.activated.identity_std_log_ratio",
+          "abs::output.source_autocorr_volatility_shift_3.src_diff_std_log_ratio",
+          "abs::output.source_autocorr_volatility_shift_3.src_absdiff_delta",
+          "abs::output.source_distribution_shift_22.src_iqr_delta",
+          "abs::output.interaction_output_mutation_13.z_interaction_2_3",
+          "abs::output.source_distribution_shift_22.src_sorted_l1_distance",
+          "abs::output.source_autocorr_volatility_shift_3.src_cusum_peak_ratio",
+          "abs::output.interaction_output_mutation_13.z_interaction_0_1",
+          "abs::output.source_distribution_shift_22.src_quantile_max_distance",
+          "abs::output.source_spectral_entropy_shift_10.src_spectral_high_share_delta",
+          "interaction::output.source_distribution_shift_22.src_std_log_ratio*output.raw_concat.std_log_ratio",
+          "interaction::output.source_distribution_shift_22.src_std_log_ratio*output.activated.identity_std_log_ratio",
+          "interaction::output.source_distribution_shift_22.src_std_log_ratio*output.source_autocorr_volatility_shift_3.src_diff_std_log_ratio",
+          "interaction::output.source_distribution_shift_22.src_std_log_ratio*output.source_autocorr_volatility_shift_3.src_absdiff_delta",
+          "interaction::output.source_distribution_shift_22.src_std_log_ratio*output.source_distribution_shift_22.src_iqr_delta",
+          "interaction::output.source_distribution_shift_22.src_std_log_ratio*output.interaction_output_mutation_13.z_interaction_2_3",
+          "interaction::output.source_distribution_shift_22.src_std_log_ratio*output.source_distribution_shift_22.src_sorted_l1_distance",
+          "interaction::output.source_distribution_shift_22.src_std_log_ratio*output.source_autocorr_volatility_shift_3.src_cusum_peak_ratio",
+          "interaction::output.source_distribution_shift_22.src_std_log_ratio*output.interaction_output_mutation_13.z_interaction_0_1",
+          "interaction::output.source_distribution_shift_22.src_std_log_ratio*output.source_distribution_shift_22.src_quantile_max_distance",
+          "interaction::output.source_distribution_shift_22.src_std_log_ratio*output.source_spectral_entropy_shift_10.src_spectral_high_share_delta",
+          "interaction::output.raw_concat.std_log_ratio*output.activated.identity_std_log_ratio",
+          "interaction::output.raw_concat.std_log_ratio*output.source_autocorr_volatility_shift_3.src_diff_std_log_ratio",
+          "interaction::output.raw_concat.std_log_ratio*output.source_autocorr_volatility_shift_3.src_absdiff_delta",
+          "interaction::output.raw_concat.std_log_ratio*output.source_distribution_shift_22.src_iqr_delta",
+          "interaction::output.raw_concat.std_log_ratio*output.interaction_output_mutation_13.z_interaction_2_3",
+          "interaction::output.raw_concat.std_log_ratio*output.source_distribution_shift_22.src_sorted_l1_distance",
+          "interaction::output.raw_concat.std_log_ratio*output.source_autocorr_volatility_shift_3.src_cusum_peak_ratio",
+          "interaction::output.raw_concat.std_log_ratio*output.interaction_output_mutation_13.z_interaction_0_1",
+          "interaction::output.raw_concat.std_log_ratio*output.source_distribution_shift_22.src_quantile_max_distance",
+          "interaction::output.raw_concat.std_log_ratio*output.source_spectral_entropy_shift_10.src_spectral_high_share_delta",
+          "interaction::output.activated.identity_std_log_ratio*output.source_autocorr_volatility_shift_3.src_diff_std_log_ratio",
+          "interaction::output.activated.identity_std_log_ratio*output.source_autocorr_volatility_shift_3.src_absdiff_delta",
+          "interaction::output.activated.identity_std_log_ratio*output.source_distribution_shift_22.src_iqr_delta",
+          "interaction::output.activated.identity_std_log_ratio*output.interaction_output_mutation_13.z_interaction_2_3",
+          "interaction::output.activated.identity_std_log_ratio*output.source_distribution_shift_22.src_sorted_l1_distance",
+          "interaction::output.activated.identity_std_log_ratio*output.source_autocorr_volatility_shift_3.src_cusum_peak_ratio",
+          "interaction::output.activated.identity_std_log_ratio*output.interaction_output_mutation_13.z_interaction_0_1",
+          "interaction::output.activated.identity_std_log_ratio*output.source_distribution_shift_22.src_quantile_max_distance",
+          "interaction::output.activated.identity_std_log_ratio*output.source_spectral_entropy_shift_10.src_spectral_high_share_delta",
+          "interaction::output.source_autocorr_volatility_shift_3.src_diff_std_log_ratio*output.source_autocorr_volatility_shift_3.src_absdiff_delta",
+          "interaction::output.source_autocorr_volatility_shift_3.src_diff_std_log_ratio*output.source_distribution_shift_22.src_iqr_delta",
+          "interaction::output.source_autocorr_volatility_shift_3.src_diff_std_log_ratio*output.interaction_output_mutation_13.z_interaction_2_3",
+          "interaction::output.source_autocorr_volatility_shift_3.src_diff_std_log_ratio*output.source_distribution_shift_22.src_sorted_l1_distance",
+          "interaction::output.source_autocorr_volatility_shift_3.src_diff_std_log_ratio*output.source_autocorr_volatility_shift_3.src_cusum_peak_ratio",
+          "interaction::output.source_autocorr_volatility_shift_3.src_diff_std_log_ratio*output.interaction_output_mutation_13.z_interaction_0_1",
+          "interaction::output.source_autocorr_volatility_shift_3.src_diff_std_log_ratio*output.source_distribution_shift_22.src_quantile_max_distance",
+          "interaction::output.source_autocorr_volatility_shift_3.src_diff_std_log_ratio*output.source_spectral_entropy_shift_10.src_spectral_high_share_delta",
+          "interaction::output.source_autocorr_volatility_shift_3.src_absdiff_delta*output.source_distribution_shift_22.src_iqr_delta",
+          "interaction::output.source_autocorr_volatility_shift_3.src_absdiff_delta*output.interaction_output_mutation_13.z_interaction_2_3",
+          "interaction::output.source_autocorr_volatility_shift_3.src_absdiff_delta*output.source_distribution_shift_22.src_sorted_l1_distance",
+          "interaction::output.source_autocorr_volatility_shift_3.src_absdiff_delta*output.source_autocorr_volatility_shift_3.src_cusum_peak_ratio",
+          "interaction::output.source_autocorr_volatility_shift_3.src_absdiff_delta*output.interaction_output_mutation_13.z_interaction_0_1",
+          "interaction::output.source_autocorr_volatility_shift_3.src_absdiff_delta*output.source_distribution_shift_22.src_quantile_max_distance",
+          "interaction::output.source_autocorr_volatility_shift_3.src_absdiff_delta*output.source_spectral_entropy_shift_10.src_spectral_high_share_delta",
+          "interaction::output.source_distribution_shift_22.src_iqr_delta*output.interaction_output_mutation_13.z_interaction_2_3",
+          "interaction::output.source_distribution_shift_22.src_iqr_delta*output.source_distribution_shift_22.src_sorted_l1_distance",
+          "interaction::output.source_distribution_shift_22.src_iqr_delta*output.source_autocorr_volatility_shift_3.src_cusum_peak_ratio",
+          "interaction::output.source_distribution_shift_22.src_iqr_delta*output.interaction_output_mutation_13.z_interaction_0_1",
+          "interaction::output.source_distribution_shift_22.src_iqr_delta*output.source_distribution_shift_22.src_quantile_max_distance",
+          "interaction::output.source_distribution_shift_22.src_iqr_delta*output.source_spectral_entropy_shift_10.src_spectral_high_share_delta",
+          "interaction::output.interaction_output_mutation_13.z_interaction_2_3*output.source_distribution_shift_22.src_sorted_l1_distance",
+          "interaction::output.interaction_output_mutation_13.z_interaction_2_3*output.source_autocorr_volatility_shift_3.src_cusum_peak_ratio",
+          "interaction::output.interaction_output_mutation_13.z_interaction_2_3*output.interaction_output_mutation_13.z_interaction_0_1",
+          "interaction::output.interaction_output_mutation_13.z_interaction_2_3*output.source_distribution_shift_22.src_quantile_max_distance",
+          "interaction::output.interaction_output_mutation_13.z_interaction_2_3*output.source_spectral_entropy_shift_10.src_spectral_high_share_delta",
+          "interaction::output.source_distribution_shift_22.src_sorted_l1_distance*output.source_autocorr_volatility_shift_3.src_cusum_peak_ratio",
+          "interaction::output.source_distribution_shift_22.src_sorted_l1_distance*output.interaction_output_mutation_13.z_interaction_0_1",
+          "interaction::output.source_distribution_shift_22.src_sorted_l1_distance*output.source_distribution_shift_22.src_quantile_max_distance",
+          "interaction::output.source_distribution_shift_22.src_sorted_l1_distance*output.source_spectral_entropy_shift_10.src_spectral_high_share_delta",
+          "interaction::output.source_autocorr_volatility_shift_3.src_cusum_peak_ratio*output.interaction_output_mutation_13.z_interaction_0_1",
+          "interaction::output.source_autocorr_volatility_shift_3.src_cusum_peak_ratio*output.source_distribution_shift_22.src_quantile_max_distance",
+          "interaction::output.source_autocorr_volatility_shift_3.src_cusum_peak_ratio*output.source_spectral_entropy_shift_10.src_spectral_high_share_delta",
+          "interaction::output.interaction_output_mutation_13.z_interaction_0_1*output.source_distribution_shift_22.src_quantile_max_distance",
+          "interaction::output.interaction_output_mutation_13.z_interaction_0_1*output.source_spectral_entropy_shift_10.src_spectral_high_share_delta",
+          "interaction::output.source_distribution_shift_22.src_quantile_max_distance*output.source_spectral_entropy_shift_10.src_spectral_high_share_delta"
+        ],
+        "selected_for_interactions": [
+          44,
+          2,
+          12,
+          22,
+          21,
+          45,
+          38,
+          46,
+          26,
+          36,
+          47,
+          31
+        ]
+      },
+      "rank_interaction": {
+        "selection": {
+          "candidates": [
+            {
+              "max_features": 8,
+              "oof_auc": 0.536976542052424,
+              "power": 1.0
+            },
+            {
+              "max_features": 8,
+              "oof_auc": 0.5367848841751631,
+              "power": 1.5
+            },
+            {
+              "max_features": 8,
+              "oof_auc": 0.5365596556506114,
+              "power": 2.0
+            },
+            {
+              "max_features": 16,
+              "oof_auc": 0.520967615922497,
+              "power": 1.0
+            },
+            {
+              "max_features": 16,
+              "oof_auc": 0.5222353656392827,
+              "power": 1.5
+            },
+            {
+              "max_features": 16,
+              "oof_auc": 0.5237307853822415,
+              "power": 2.0
+            },
+            {
+              "max_features": 32,
+              "oof_auc": 0.5257108431969999,
+              "power": 1.0
+            },
+            {
+              "max_features": 32,
+              "oof_auc": 0.5253342415719364,
+              "power": 1.5
+            },
+            {
+              "max_features": 32,
+              "oof_auc": 0.5255100296886597,
+              "power": 2.0
+            },
+            {
+              "max_features": 64,
+              "oof_auc": 0.5184162467283878,
+              "power": 1.0
+            },
+            {
+              "max_features": 64,
+              "oof_auc": 0.5214583577483496,
+              "power": 1.5
+            },
+            {
+              "max_features": 64,
+              "oof_auc": 0.5234249873041916,
+              "power": 2.0
+            },
+            {
+              "max_features": 128,
+              "oof_auc": 0.5157122836829564,
+              "power": 1.0
+            },
+            {
+              "max_features": 128,
+              "oof_auc": 0.5202577493261455,
+              "power": 1.5
+            },
+            {
+              "max_features": 128,
+              "oof_auc": 0.5227230555881089,
+              "power": 2.0
+            }
+          ],
+          "config": {
+            "max_features": 8,
+            "power": 1.0
+          },
+          "model": {
+            "directions": [
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "feature_indices": [
+              2,
+              44,
+              12,
+              22,
+              21,
+              45,
+              38,
+              46
+            ],
+            "max_features": 8,
+            "power": 1.0,
+            "weights": [
+              0.14316427535558152,
+              0.14316427535558152,
+              0.14316427535558152,
+              0.12286025663022099,
+              0.11627436640400439,
+              0.11509444632417991,
+              0.1099549406637266,
+              0.10632316391112359
+            ]
+          },
+          "oof_auc": 0.536976542052424
+        },
+        "test_auc": 0.5398572464311607,
+        "test_delta_vs_baseline": 0.018450461261531492,
+        "train_oof_auc": 0.536976542052424,
+        "validation_auc": 0.5202937614750576,
+        "validation_delta_vs_baseline": -0.007969061291456692
+      },
+      "ridge": {
+        "alpha": 3162.2776601683795,
+        "test_auc": 0.5295069876746918,
+        "test_delta_vs_baseline": 0.008100202505062604,
+        "train_oof_auc": 0.5465350208992539,
+        "validation_auc": 0.5356556896753779,
+        "validation_delta_vs_baseline": 0.007392866908863649
+      },
+      "ridge_rank_blend": {
+        "ridge_weight": 0.875,
+        "test_auc": 0.5310445261131528,
+        "test_delta_vs_baseline": 0.009637740943523543,
+        "train_oof_auc": 0.5466790694949022,
+        "validation_auc": 0.5321692253603656,
+        "validation_delta_vs_baseline": 0.0039064025938513325,
+        "weight_candidates": [
+          {
+            "ridge_weight": 0.0,
+            "train_oof_auc": 0.536976542052424
+          },
+          {
+            "ridge_weight": 0.125,
+            "train_oof_auc": 0.5388516152974726
+          },
+          {
+            "ridge_weight": 0.25,
+            "train_oof_auc": 0.5406229247236221
+          },
+          {
+            "ridge_weight": 0.375,
+            "train_oof_auc": 0.5423771436384234
+          },
+          {
+            "ridge_weight": 0.5,
+            "train_oof_auc": 0.5438249540997695
+          },
+          {
+            "ridge_weight": 0.625,
+            "train_oof_auc": 0.5451580139849213
+          },
+          {
+            "ridge_weight": 0.75,
+            "train_oof_auc": 0.5462249501933669
+          },
+          {
+            "ridge_weight": 0.875,
+            "train_oof_auc": 0.5466790694949022
+          },
+          {
+            "ridge_weight": 1.0,
+            "train_oof_auc": 0.5465350208992539
+          }
+        ]
+      },
+      "seed": 211
+    },
+    {
+      "baseline": {
+        "test_auc": 0.5295694892372309,
+        "validation_auc": 0.5951599671862182
+      },
+      "graph_config": {
+        "activation": "clipped_linear",
+        "ridge_g": "identity",
+        "ridge_w": "boundary_energy",
+        "segment_stats": "basic",
+        "shape_stats": "spectral",
+        "trend_stats": "linear"
+      },
+      "n_graph_features": 48,
+      "rank_expansion": {
+        "n_features": 126,
+        "names": [
+          "output.raw_concat.mean_delta",
+          "output.raw_concat.mean_delta_abs",
+          "output.raw_concat.std_log_ratio",
+          "output.raw_concat.std_log_ratio_abs",
+          "output.raw_concat.pre_slope",
+          "output.raw_concat.post_slope",
+          "output.raw_concat.slope_delta",
+          "output.raw_concat.slope_delta_abs",
+          "output.raw_concat.high_low_delta",
+          "output.raw_concat.high_low_delta_abs",
+          "output.activated.clipped_linear_mean_delta",
+          "output.activated.clipped_linear_mean_delta_abs",
+          "output.activated.clipped_linear_std_log_ratio",
+          "output.activated.clipped_linear_std_log_ratio_abs",
+          "output.activated.clipped_linear_pre_slope",
+          "output.activated.clipped_linear_post_slope",
+          "output.activated.clipped_linear_slope_delta",
+          "output.activated.clipped_linear_slope_delta_abs",
+          "output.activated.clipped_linear_high_low_delta",
+          "output.activated.clipped_linear_high_low_delta_abs",
+          "output.projection.global_projection",
+          "output.source_autocorr_volatility_shift_3.src_absdiff_delta",
+          "output.source_autocorr_volatility_shift_3.src_diff_std_log_ratio",
+          "output.source_autocorr_volatility_shift_3.src_autocorr_delta",
+          "output.source_autocorr_volatility_shift_3.src_post_cusum_peak",
+          "output.source_autocorr_volatility_shift_3.src_pre_cusum_peak",
+          "output.source_autocorr_volatility_shift_3.src_cusum_peak_ratio",
+          "output.source_spectral_entropy_shift_10.src_spectral_centroid_delta",
+          "output.source_spectral_entropy_shift_10.src_spectral_entropy_delta",
+          "output.source_spectral_entropy_shift_10.src_spectral_peak_share_delta",
+          "output.source_spectral_entropy_shift_10.src_spectral_low_share_delta",
+          "output.source_spectral_entropy_shift_10.src_spectral_high_share_delta",
+          "output.interaction_output_mutation_13.z_mean",
+          "output.interaction_output_mutation_13.z_max",
+          "output.interaction_output_mutation_13.z_min",
+          "output.interaction_output_mutation_13.z_abs_mean",
+          "output.interaction_output_mutation_13.z_interaction_0_1",
+          "output.interaction_output_mutation_13.z_interaction_1_2",
+          "output.interaction_output_mutation_13.z_interaction_2_3",
+          "output.interaction_output_mutation_13.z_interaction_3_4",
+          "output.interaction_output_mutation_13.z_interaction_4_5",
+          "output.source_distribution_shift_22.src_mean_delta",
+          "output.source_distribution_shift_22.src_mean_delta_abs",
+          "output.source_distribution_shift_22.src_scaled_median_delta",
+          "output.source_distribution_shift_22.src_std_log_ratio",
+          "output.source_distribution_shift_22.src_iqr_delta",
+          "output.source_distribution_shift_22.src_sorted_l1_distance",
+          "output.source_distribution_shift_22.src_quantile_max_distance",
+          "abs::output.source_distribution_shift_22.src_sorted_l1_distance",
+          "abs::output.interaction_output_mutation_13.z_interaction_2_3",
+          "abs::output.source_distribution_shift_22.src_std_log_ratio",
+          "abs::output.raw_concat.std_log_ratio",
+          "abs::output.activated.clipped_linear_std_log_ratio",
+          "abs::output.source_autocorr_volatility_shift_3.src_cusum_peak_ratio",
+          "abs::output.source_autocorr_volatility_shift_3.src_diff_std_log_ratio",
+          "abs::output.source_distribution_shift_22.src_quantile_max_distance",
+          "abs::output.source_autocorr_volatility_shift_3.src_absdiff_delta",
+          "abs::output.interaction_output_mutation_13.z_interaction_0_1",
+          "abs::output.raw_concat.std_log_ratio_abs",
+          "abs::output.interaction_output_mutation_13.z_abs_mean",
+          "interaction::output.source_distribution_shift_22.src_sorted_l1_distance*output.interaction_output_mutation_13.z_interaction_2_3",
+          "interaction::output.source_distribution_shift_22.src_sorted_l1_distance*output.source_distribution_shift_22.src_std_log_ratio",
+          "interaction::output.source_distribution_shift_22.src_sorted_l1_distance*output.raw_concat.std_log_ratio",
+          "interaction::output.source_distribution_shift_22.src_sorted_l1_distance*output.activated.clipped_linear_std_log_ratio",
+          "interaction::output.source_distribution_shift_22.src_sorted_l1_distance*output.source_autocorr_volatility_shift_3.src_cusum_peak_ratio",
+          "interaction::output.source_distribution_shift_22.src_sorted_l1_distance*output.source_autocorr_volatility_shift_3.src_diff_std_log_ratio",
+          "interaction::output.source_distribution_shift_22.src_sorted_l1_distance*output.source_distribution_shift_22.src_quantile_max_distance",
+          "interaction::output.source_distribution_shift_22.src_sorted_l1_distance*output.source_autocorr_volatility_shift_3.src_absdiff_delta",
+          "interaction::output.source_distribution_shift_22.src_sorted_l1_distance*output.interaction_output_mutation_13.z_interaction_0_1",
+          "interaction::output.source_distribution_shift_22.src_sorted_l1_distance*output.raw_concat.std_log_ratio_abs",
+          "interaction::output.source_distribution_shift_22.src_sorted_l1_distance*output.interaction_output_mutation_13.z_abs_mean",
+          "interaction::output.interaction_output_mutation_13.z_interaction_2_3*output.source_distribution_shift_22.src_std_log_ratio",
+          "interaction::output.interaction_output_mutation_13.z_interaction_2_3*output.raw_concat.std_log_ratio",
+          "interaction::output.interaction_output_mutation_13.z_interaction_2_3*output.activated.clipped_linear_std_log_ratio",
+          "interaction::output.interaction_output_mutation_13.z_interaction_2_3*output.source_autocorr_volatility_shift_3.src_cusum_peak_ratio",
+          "interaction::output.interaction_output_mutation_13.z_interaction_2_3*output.source_autocorr_volatility_shift_3.src_diff_std_log_ratio",
+          "interaction::output.interaction_output_mutation_13.z_interaction_2_3*output.source_distribution_shift_22.src_quantile_max_distance",
+          "interaction::output.interaction_output_mutation_13.z_interaction_2_3*output.source_autocorr_volatility_shift_3.src_absdiff_delta",
+          "interaction::output.interaction_output_mutation_13.z_interaction_2_3*output.interaction_output_mutation_13.z_interaction_0_1",
+          "interaction::output.interaction_output_mutation_13.z_interaction_2_3*output.raw_concat.std_log_ratio_abs",
+          "interaction::output.interaction_output_mutation_13.z_interaction_2_3*output.interaction_output_mutation_13.z_abs_mean",
+          "interaction::output.source_distribution_shift_22.src_std_log_ratio*output.raw_concat.std_log_ratio",
+          "interaction::output.source_distribution_shift_22.src_std_log_ratio*output.activated.clipped_linear_std_log_ratio",
+          "interaction::output.source_distribution_shift_22.src_std_log_ratio*output.source_autocorr_volatility_shift_3.src_cusum_peak_ratio",
+          "interaction::output.source_distribution_shift_22.src_std_log_ratio*output.source_autocorr_volatility_shift_3.src_diff_std_log_ratio",
+          "interaction::output.source_distribution_shift_22.src_std_log_ratio*output.source_distribution_shift_22.src_quantile_max_distance",
+          "interaction::output.source_distribution_shift_22.src_std_log_ratio*output.source_autocorr_volatility_shift_3.src_absdiff_delta",
+          "interaction::output.source_distribution_shift_22.src_std_log_ratio*output.interaction_output_mutation_13.z_interaction_0_1",
+          "interaction::output.source_distribution_shift_22.src_std_log_ratio*output.raw_concat.std_log_ratio_abs",
+          "interaction::output.source_distribution_shift_22.src_std_log_ratio*output.interaction_output_mutation_13.z_abs_mean",
+          "interaction::output.raw_concat.std_log_ratio*output.activated.clipped_linear_std_log_ratio",
+          "interaction::output.raw_concat.std_log_ratio*output.source_autocorr_volatility_shift_3.src_cusum_peak_ratio",
+          "interaction::output.raw_concat.std_log_ratio*output.source_autocorr_volatility_shift_3.src_diff_std_log_ratio",
+          "interaction::output.raw_concat.std_log_ratio*output.source_distribution_shift_22.src_quantile_max_distance",
+          "interaction::output.raw_concat.std_log_ratio*output.source_autocorr_volatility_shift_3.src_absdiff_delta",
+          "interaction::output.raw_concat.std_log_ratio*output.interaction_output_mutation_13.z_interaction_0_1",
+          "interaction::output.raw_concat.std_log_ratio*output.raw_concat.std_log_ratio_abs",
+          "interaction::output.raw_concat.std_log_ratio*output.interaction_output_mutation_13.z_abs_mean",
+          "interaction::output.activated.clipped_linear_std_log_ratio*output.source_autocorr_volatility_shift_3.src_cusum_peak_ratio",
+          "interaction::output.activated.clipped_linear_std_log_ratio*output.source_autocorr_volatility_shift_3.src_diff_std_log_ratio",
+          "interaction::output.activated.clipped_linear_std_log_ratio*output.source_distribution_shift_22.src_quantile_max_distance",
+          "interaction::output.activated.clipped_linear_std_log_ratio*output.source_autocorr_volatility_shift_3.src_absdiff_delta",
+          "interaction::output.activated.clipped_linear_std_log_ratio*output.interaction_output_mutation_13.z_interaction_0_1",
+          "interaction::output.activated.clipped_linear_std_log_ratio*output.raw_concat.std_log_ratio_abs",
+          "interaction::output.activated.clipped_linear_std_log_ratio*output.interaction_output_mutation_13.z_abs_mean",
+          "interaction::output.source_autocorr_volatility_shift_3.src_cusum_peak_ratio*output.source_autocorr_volatility_shift_3.src_diff_std_log_ratio",
+          "interaction::output.source_autocorr_volatility_shift_3.src_cusum_peak_ratio*output.source_distribution_shift_22.src_quantile_max_distance",
+          "interaction::output.source_autocorr_volatility_shift_3.src_cusum_peak_ratio*output.source_autocorr_volatility_shift_3.src_absdiff_delta",
+          "interaction::output.source_autocorr_volatility_shift_3.src_cusum_peak_ratio*output.interaction_output_mutation_13.z_interaction_0_1",
+          "interaction::output.source_autocorr_volatility_shift_3.src_cusum_peak_ratio*output.raw_concat.std_log_ratio_abs",
+          "interaction::output.source_autocorr_volatility_shift_3.src_cusum_peak_ratio*output.interaction_output_mutation_13.z_abs_mean",
+          "interaction::output.source_autocorr_volatility_shift_3.src_diff_std_log_ratio*output.source_distribution_shift_22.src_quantile_max_distance",
+          "interaction::output.source_autocorr_volatility_shift_3.src_diff_std_log_ratio*output.source_autocorr_volatility_shift_3.src_absdiff_delta",
+          "interaction::output.source_autocorr_volatility_shift_3.src_diff_std_log_ratio*output.interaction_output_mutation_13.z_interaction_0_1",
+          "interaction::output.source_autocorr_volatility_shift_3.src_diff_std_log_ratio*output.raw_concat.std_log_ratio_abs",
+          "interaction::output.source_autocorr_volatility_shift_3.src_diff_std_log_ratio*output.interaction_output_mutation_13.z_abs_mean",
+          "interaction::output.source_distribution_shift_22.src_quantile_max_distance*output.source_autocorr_volatility_shift_3.src_absdiff_delta",
+          "interaction::output.source_distribution_shift_22.src_quantile_max_distance*output.interaction_output_mutation_13.z_interaction_0_1",
+          "interaction::output.source_distribution_shift_22.src_quantile_max_distance*output.raw_concat.std_log_ratio_abs",
+          "interaction::output.source_distribution_shift_22.src_quantile_max_distance*output.interaction_output_mutation_13.z_abs_mean",
+          "interaction::output.source_autocorr_volatility_shift_3.src_absdiff_delta*output.interaction_output_mutation_13.z_interaction_0_1",
+          "interaction::output.source_autocorr_volatility_shift_3.src_absdiff_delta*output.raw_concat.std_log_ratio_abs",
+          "interaction::output.source_autocorr_volatility_shift_3.src_absdiff_delta*output.interaction_output_mutation_13.z_abs_mean",
+          "interaction::output.interaction_output_mutation_13.z_interaction_0_1*output.raw_concat.std_log_ratio_abs",
+          "interaction::output.interaction_output_mutation_13.z_interaction_0_1*output.interaction_output_mutation_13.z_abs_mean",
+          "interaction::output.raw_concat.std_log_ratio_abs*output.interaction_output_mutation_13.z_abs_mean"
+        ],
+        "selected_for_interactions": [
+          46,
+          38,
+          44,
+          2,
+          12,
+          26,
+          22,
+          47,
+          21,
+          36,
+          3,
+          35
+        ]
+      },
+      "rank_interaction": {
+        "selection": {
+          "candidates": [
+            {
+              "max_features": 8,
+              "oof_auc": 0.5207259072620024,
+              "power": 1.0
+            },
+            {
+              "max_features": 8,
+              "oof_auc": 0.521132417281925,
+              "power": 1.5
+            },
+            {
+              "max_features": 8,
+              "oof_auc": 0.5218709715223251,
+              "power": 2.0
+            },
+            {
+              "max_features": 16,
+              "oof_auc": 0.5230508271807492,
+              "power": 1.0
+            },
+            {
+              "max_features": 16,
+              "oof_auc": 0.5229147134653698,
+              "power": 1.5
+            },
+            {
+              "max_features": 16,
+              "oof_auc": 0.52303129516778,
+              "power": 2.0
+            },
+            {
+              "max_features": 32,
+              "oof_auc": 0.5181959012070784,
+              "power": 1.0
+            },
+            {
+              "max_features": 32,
+              "oof_auc": 0.5190870492988008,
+              "power": 1.5
+            },
+            {
+              "max_features": 32,
+              "oof_auc": 0.519775552755967,
+              "power": 2.0
+            },
+            {
+              "max_features": 64,
+              "oof_auc": 0.5154534845111137,
+              "power": 1.0
+            },
+            {
+              "max_features": 64,
+              "oof_auc": 0.5162884780655494,
+              "power": 1.5
+            },
+            {
+              "max_features": 64,
+              "oof_auc": 0.5173834915426384,
+              "power": 2.0
+            },
+            {
+              "max_features": 128,
+              "oof_auc": 0.5146941775069339,
+              "power": 1.0
+            },
+            {
+              "max_features": 128,
+              "oof_auc": 0.5152905142779015,
+              "power": 1.5
+            },
+            {
+              "max_features": 128,
+              "oof_auc": 0.5168219461697723,
+              "power": 2.0
+            }
+          ],
+          "config": {
+            "max_features": 16,
+            "power": 1.0
+          },
+          "model": {
+            "directions": [
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "feature_indices": [
+              114,
+              46,
+              121,
+              103,
+              38,
+              96,
+              88,
+              44,
+              2,
+              12,
+              115,
+              26,
+              57,
+              22,
+              47,
+              63
+            ],
+            "max_features": 16,
+            "power": 1.0,
+            "weights": [
+              0.08206081312243149,
+              0.07736821513433036,
+              0.07611669971876,
+              0.06822045619491353,
+              0.06715257434966529,
+              0.06714789578736399,
+              0.06714789578736399,
+              0.058754555019015345,
+              0.058754555019015345,
+              0.05854752863718738,
+              0.05720127233501785,
+              0.054859651903268365,
+              0.05296015560898216,
+              0.05179519359598399,
+              0.05136710514542439,
+              0.050545432641276485
+            ]
+          },
+          "oof_auc": 0.5230508271807492
+        },
+        "test_auc": 0.5176504412610315,
+        "test_delta_vs_baseline": -0.01191904797619936,
+        "train_oof_auc": 0.5230508271807492,
+        "validation_auc": 0.5730008984725966,
+        "validation_delta_vs_baseline": -0.02215906871362161
+      },
+      "ridge": {
+        "alpha": 10000.0,
+        "test_auc": 0.5448261206530163,
+        "test_delta_vs_baseline": 0.015256631415785371,
+        "train_oof_auc": 0.525719388452674,
+        "validation_auc": 0.605043165748662,
+        "validation_delta_vs_baseline": 0.009883198562443796
+      },
+      "ridge_rank_blend": {
+        "ridge_weight": 0.625,
+        "test_auc": 0.5355946398659966,
+        "test_delta_vs_baseline": 0.006025150628765741,
+        "train_oof_auc": 0.5259317990937146,
+        "validation_auc": 0.6000429704285324,
+        "validation_delta_vs_baseline": 0.004883003242314166,
+        "weight_candidates": [
+          {
+            "ridge_weight": 0.0,
+            "train_oof_auc": 0.5230508271807492
+          },
+          {
+            "ridge_weight": 0.125,
+            "train_oof_auc": 0.5232955877182702
+          },
+          {
+            "ridge_weight": 0.25,
+            "train_oof_auc": 0.5236679167154967
+          },
+          {
+            "ridge_weight": 0.375,
+            "train_oof_auc": 0.5245474676745185
+          },
+          {
+            "ridge_weight": 0.5,
+            "train_oof_auc": 0.5255283409508184
+          },
+          {
+            "ridge_weight": 0.625,
+            "train_oof_auc": 0.5259317990937146
+          },
+          {
+            "ridge_weight": 0.75,
+            "train_oof_auc": 0.5259171500839877
+          },
+          {
+            "ridge_weight": 0.875,
+            "train_oof_auc": 0.5259159293331771
+          },
+          {
+            "ridge_weight": 1.0,
+            "train_oof_auc": 0.525719388452674
+          }
+        ]
+      },
+      "seed": 223
+    },
+    {
+      "baseline": {
+        "test_auc": 0.5279319482987075,
+        "validation_auc": 0.538517129575374
+      },
+      "graph_config": {
+        "activation": "clipped_linear",
+        "ridge_g": "huber",
+        "ridge_w": "uniform",
+        "segment_stats": "basic",
+        "shape_stats": "spectral",
+        "trend_stats": "linear"
+      },
+      "n_graph_features": 48,
+      "rank_expansion": {
+        "n_features": 126,
+        "names": [
+          "output.raw_concat.mean_delta",
+          "output.raw_concat.mean_delta_abs",
+          "output.raw_concat.std_log_ratio",
+          "output.raw_concat.std_log_ratio_abs",
+          "output.raw_concat.pre_slope",
+          "output.raw_concat.post_slope",
+          "output.raw_concat.slope_delta",
+          "output.raw_concat.slope_delta_abs",
+          "output.raw_concat.high_low_delta",
+          "output.raw_concat.high_low_delta_abs",
+          "output.activated.clipped_linear_mean_delta",
+          "output.activated.clipped_linear_mean_delta_abs",
+          "output.activated.clipped_linear_std_log_ratio",
+          "output.activated.clipped_linear_std_log_ratio_abs",
+          "output.activated.clipped_linear_pre_slope",
+          "output.activated.clipped_linear_post_slope",
+          "output.activated.clipped_linear_slope_delta",
+          "output.activated.clipped_linear_slope_delta_abs",
+          "output.activated.clipped_linear_high_low_delta",
+          "output.activated.clipped_linear_high_low_delta_abs",
+          "output.projection.global_projection",
+          "output.source_autocorr_volatility_shift_3.src_absdiff_delta",
+          "output.source_autocorr_volatility_shift_3.src_diff_std_log_ratio",
+          "output.source_autocorr_volatility_shift_3.src_autocorr_delta",
+          "output.source_autocorr_volatility_shift_3.src_post_cusum_peak",
+          "output.source_autocorr_volatility_shift_3.src_pre_cusum_peak",
+          "output.source_autocorr_volatility_shift_3.src_cusum_peak_ratio",
+          "output.source_spectral_entropy_shift_10.src_spectral_centroid_delta",
+          "output.source_spectral_entropy_shift_10.src_spectral_entropy_delta",
+          "output.source_spectral_entropy_shift_10.src_spectral_peak_share_delta",
+          "output.source_spectral_entropy_shift_10.src_spectral_low_share_delta",
+          "output.source_spectral_entropy_shift_10.src_spectral_high_share_delta",
+          "output.interaction_output_mutation_13.z_mean",
+          "output.interaction_output_mutation_13.z_max",
+          "output.interaction_output_mutation_13.z_min",
+          "output.interaction_output_mutation_13.z_abs_mean",
+          "output.interaction_output_mutation_13.z_interaction_0_1",
+          "output.interaction_output_mutation_13.z_interaction_1_2",
+          "output.interaction_output_mutation_13.z_interaction_2_3",
+          "output.interaction_output_mutation_13.z_interaction_3_4",
+          "output.interaction_output_mutation_13.z_interaction_4_5",
+          "output.source_distribution_shift_22.src_mean_delta",
+          "output.source_distribution_shift_22.src_mean_delta_abs",
+          "output.source_distribution_shift_22.src_scaled_median_delta",
+          "output.source_distribution_shift_22.src_std_log_ratio",
+          "output.source_distribution_shift_22.src_iqr_delta",
+          "output.source_distribution_shift_22.src_sorted_l1_distance",
+          "output.source_distribution_shift_22.src_quantile_max_distance",
+          "abs::output.source_distribution_shift_22.src_std_log_ratio",
+          "abs::output.raw_concat.std_log_ratio",
+          "abs::output.activated.clipped_linear_std_log_ratio",
+          "abs::output.interaction_output_mutation_13.z_interaction_2_3",
+          "abs::output.source_autocorr_volatility_shift_3.src_cusum_peak_ratio",
+          "abs::output.source_autocorr_volatility_shift_3.src_diff_std_log_ratio",
+          "abs::output.source_distribution_shift_22.src_iqr_delta",
+          "abs::output.source_autocorr_volatility_shift_3.src_absdiff_delta",
+          "abs::output.source_distribution_shift_22.src_sorted_l1_distance",
+          "abs::output.interaction_output_mutation_13.z_interaction_0_1",
+          "abs::output.activated.clipped_linear_high_low_delta",
+          "abs::output.raw_concat.high_low_delta",
+          "interaction::output.source_distribution_shift_22.src_std_log_ratio*output.raw_concat.std_log_ratio",
+          "interaction::output.source_distribution_shift_22.src_std_log_ratio*output.activated.clipped_linear_std_log_ratio",
+          "interaction::output.source_distribution_shift_22.src_std_log_ratio*output.interaction_output_mutation_13.z_interaction_2_3",
+          "interaction::output.source_distribution_shift_22.src_std_log_ratio*output.source_autocorr_volatility_shift_3.src_cusum_peak_ratio",
+          "interaction::output.source_distribution_shift_22.src_std_log_ratio*output.source_autocorr_volatility_shift_3.src_diff_std_log_ratio",
+          "interaction::output.source_distribution_shift_22.src_std_log_ratio*output.source_distribution_shift_22.src_iqr_delta",
+          "interaction::output.source_distribution_shift_22.src_std_log_ratio*output.source_autocorr_volatility_shift_3.src_absdiff_delta",
+          "interaction::output.source_distribution_shift_22.src_std_log_ratio*output.source_distribution_shift_22.src_sorted_l1_distance",
+          "interaction::output.source_distribution_shift_22.src_std_log_ratio*output.interaction_output_mutation_13.z_interaction_0_1",
+          "interaction::output.source_distribution_shift_22.src_std_log_ratio*output.activated.clipped_linear_high_low_delta",
+          "interaction::output.source_distribution_shift_22.src_std_log_ratio*output.raw_concat.high_low_delta",
+          "interaction::output.raw_concat.std_log_ratio*output.activated.clipped_linear_std_log_ratio",
+          "interaction::output.raw_concat.std_log_ratio*output.interaction_output_mutation_13.z_interaction_2_3",
+          "interaction::output.raw_concat.std_log_ratio*output.source_autocorr_volatility_shift_3.src_cusum_peak_ratio",
+          "interaction::output.raw_concat.std_log_ratio*output.source_autocorr_volatility_shift_3.src_diff_std_log_ratio",
+          "interaction::output.raw_concat.std_log_ratio*output.source_distribution_shift_22.src_iqr_delta",
+          "interaction::output.raw_concat.std_log_ratio*output.source_autocorr_volatility_shift_3.src_absdiff_delta",
+          "interaction::output.raw_concat.std_log_ratio*output.source_distribution_shift_22.src_sorted_l1_distance",
+          "interaction::output.raw_concat.std_log_ratio*output.interaction_output_mutation_13.z_interaction_0_1",
+          "interaction::output.raw_concat.std_log_ratio*output.activated.clipped_linear_high_low_delta",
+          "interaction::output.raw_concat.std_log_ratio*output.raw_concat.high_low_delta",
+          "interaction::output.activated.clipped_linear_std_log_ratio*output.interaction_output_mutation_13.z_interaction_2_3",
+          "interaction::output.activated.clipped_linear_std_log_ratio*output.source_autocorr_volatility_shift_3.src_cusum_peak_ratio",
+          "interaction::output.activated.clipped_linear_std_log_ratio*output.source_autocorr_volatility_shift_3.src_diff_std_log_ratio",
+          "interaction::output.activated.clipped_linear_std_log_ratio*output.source_distribution_shift_22.src_iqr_delta",
+          "interaction::output.activated.clipped_linear_std_log_ratio*output.source_autocorr_volatility_shift_3.src_absdiff_delta",
+          "interaction::output.activated.clipped_linear_std_log_ratio*output.source_distribution_shift_22.src_sorted_l1_distance",
+          "interaction::output.activated.clipped_linear_std_log_ratio*output.interaction_output_mutation_13.z_interaction_0_1",
+          "interaction::output.activated.clipped_linear_std_log_ratio*output.activated.clipped_linear_high_low_delta",
+          "interaction::output.activated.clipped_linear_std_log_ratio*output.raw_concat.high_low_delta",
+          "interaction::output.interaction_output_mutation_13.z_interaction_2_3*output.source_autocorr_volatility_shift_3.src_cusum_peak_ratio",
+          "interaction::output.interaction_output_mutation_13.z_interaction_2_3*output.source_autocorr_volatility_shift_3.src_diff_std_log_ratio",
+          "interaction::output.interaction_output_mutation_13.z_interaction_2_3*output.source_distribution_shift_22.src_iqr_delta",
+          "interaction::output.interaction_output_mutation_13.z_interaction_2_3*output.source_autocorr_volatility_shift_3.src_absdiff_delta",
+          "interaction::output.interaction_output_mutation_13.z_interaction_2_3*output.source_distribution_shift_22.src_sorted_l1_distance",
+          "interaction::output.interaction_output_mutation_13.z_interaction_2_3*output.interaction_output_mutation_13.z_interaction_0_1",
+          "interaction::output.interaction_output_mutation_13.z_interaction_2_3*output.activated.clipped_linear_high_low_delta",
+          "interaction::output.interaction_output_mutation_13.z_interaction_2_3*output.raw_concat.high_low_delta",
+          "interaction::output.source_autocorr_volatility_shift_3.src_cusum_peak_ratio*output.source_autocorr_volatility_shift_3.src_diff_std_log_ratio",
+          "interaction::output.source_autocorr_volatility_shift_3.src_cusum_peak_ratio*output.source_distribution_shift_22.src_iqr_delta",
+          "interaction::output.source_autocorr_volatility_shift_3.src_cusum_peak_ratio*output.source_autocorr_volatility_shift_3.src_absdiff_delta",
+          "interaction::output.source_autocorr_volatility_shift_3.src_cusum_peak_ratio*output.source_distribution_shift_22.src_sorted_l1_distance",
+          "interaction::output.source_autocorr_volatility_shift_3.src_cusum_peak_ratio*output.interaction_output_mutation_13.z_interaction_0_1",
+          "interaction::output.source_autocorr_volatility_shift_3.src_cusum_peak_ratio*output.activated.clipped_linear_high_low_delta",
+          "interaction::output.source_autocorr_volatility_shift_3.src_cusum_peak_ratio*output.raw_concat.high_low_delta",
+          "interaction::output.source_autocorr_volatility_shift_3.src_diff_std_log_ratio*output.source_distribution_shift_22.src_iqr_delta",
+          "interaction::output.source_autocorr_volatility_shift_3.src_diff_std_log_ratio*output.source_autocorr_volatility_shift_3.src_absdiff_delta",
+          "interaction::output.source_autocorr_volatility_shift_3.src_diff_std_log_ratio*output.source_distribution_shift_22.src_sorted_l1_distance",
+          "interaction::output.source_autocorr_volatility_shift_3.src_diff_std_log_ratio*output.interaction_output_mutation_13.z_interaction_0_1",
+          "interaction::output.source_autocorr_volatility_shift_3.src_diff_std_log_ratio*output.activated.clipped_linear_high_low_delta",
+          "interaction::output.source_autocorr_volatility_shift_3.src_diff_std_log_ratio*output.raw_concat.high_low_delta",
+          "interaction::output.source_distribution_shift_22.src_iqr_delta*output.source_autocorr_volatility_shift_3.src_absdiff_delta",
+          "interaction::output.source_distribution_shift_22.src_iqr_delta*output.source_distribution_shift_22.src_sorted_l1_distance",
+          "interaction::output.source_distribution_shift_22.src_iqr_delta*output.interaction_output_mutation_13.z_interaction_0_1",
+          "interaction::output.source_distribution_shift_22.src_iqr_delta*output.activated.clipped_linear_high_low_delta",
+          "interaction::output.source_distribution_shift_22.src_iqr_delta*output.raw_concat.high_low_delta",
+          "interaction::output.source_autocorr_volatility_shift_3.src_absdiff_delta*output.source_distribution_shift_22.src_sorted_l1_distance",
+          "interaction::output.source_autocorr_volatility_shift_3.src_absdiff_delta*output.interaction_output_mutation_13.z_interaction_0_1",
+          "interaction::output.source_autocorr_volatility_shift_3.src_absdiff_delta*output.activated.clipped_linear_high_low_delta",
+          "interaction::output.source_autocorr_volatility_shift_3.src_absdiff_delta*output.raw_concat.high_low_delta",
+          "interaction::output.source_distribution_shift_22.src_sorted_l1_distance*output.interaction_output_mutation_13.z_interaction_0_1",
+          "interaction::output.source_distribution_shift_22.src_sorted_l1_distance*output.activated.clipped_linear_high_low_delta",
+          "interaction::output.source_distribution_shift_22.src_sorted_l1_distance*output.raw_concat.high_low_delta",
+          "interaction::output.interaction_output_mutation_13.z_interaction_0_1*output.activated.clipped_linear_high_low_delta",
+          "interaction::output.interaction_output_mutation_13.z_interaction_0_1*output.raw_concat.high_low_delta",
+          "interaction::output.activated.clipped_linear_high_low_delta*output.raw_concat.high_low_delta"
+        ],
+        "selected_for_interactions": [
+          44,
+          2,
+          12,
+          38,
+          26,
+          22,
+          45,
+          21,
+          46,
+          36,
+          18,
+          8
+        ]
+      },
+      "rank_interaction": {
+        "selection": {
+          "candidates": [
+            {
+              "max_features": 8,
+              "oof_auc": 0.5439171207859682,
+              "power": 1.0
+            },
+            {
+              "max_features": 8,
+              "oof_auc": 0.5440831428962069,
+              "power": 1.5
+            },
+            {
+              "max_features": 8,
+              "oof_auc": 0.5442198669869917,
+              "power": 2.0
+            },
+            {
+              "max_features": 16,
+              "oof_auc": 0.5413114281807883,
+              "power": 1.0
+            },
+            {
+              "max_features": 16,
+              "oof_auc": 0.5427024737294426,
+              "power": 1.5
+            },
+            {
+              "max_features": 16,
+              "oof_auc": 0.5438157984686902,
+              "power": 2.0
+            },
+            {
+              "max_features": 32,
+              "oof_auc": 0.5323315852181726,
+              "power": 1.0
+            },
+            {
+              "max_features": 32,
+              "oof_auc": 0.5365993300519551,
+              "power": 1.5
+            },
+            {
+              "max_features": 32,
+              "oof_auc": 0.540055275596703,
+              "power": 2.0
+            },
+            {
+              "max_features": 64,
+              "oof_auc": 0.5275541769209735,
+              "power": 1.0
+            },
+            {
+              "max_features": 64,
+              "oof_auc": 0.5333246660025782,
+              "power": 1.5
+            },
+            {
+              "max_features": 64,
+              "oof_auc": 0.5377450046876832,
+              "power": 2.0
+            },
+            {
+              "max_features": 128,
+              "oof_auc": 0.5254373950154303,
+              "power": 1.0
+            },
+            {
+              "max_features": 128,
+              "oof_auc": 0.5324957762021953,
+              "power": 1.5
+            },
+            {
+              "max_features": 128,
+              "oof_auc": 0.5376687077620219,
+              "power": 2.0
+            }
+          ],
+          "config": {
+            "max_features": 8,
+            "power": 2.0
+          },
+          "model": {
+            "directions": [
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "feature_indices": [
+              2,
+              44,
+              12,
+              38,
+              26,
+              22,
+              45,
+              21
+            ],
+            "max_features": 8,
+            "power": 2.0,
+            "weights": [
+              0.16565663862121285,
+              0.16565663862121285,
+              0.16489122662662203,
+              0.13872904338940495,
+              0.10353447643413484,
+              0.09716355877404749,
+              0.08499046668530746,
+              0.07937795084805747
+            ]
+          },
+          "oof_auc": 0.5442198669869917
+        },
+        "test_auc": 0.5381947048676217,
+        "test_delta_vs_baseline": 0.010262756568914178,
+        "train_oof_auc": 0.5442198669869917,
+        "validation_auc": 0.5230184772842689,
+        "validation_delta_vs_baseline": -0.015498652291105142
+      },
+      "ridge": {
+        "alpha": 10000.0,
+        "test_auc": 0.5369821745543638,
+        "test_delta_vs_baseline": 0.009050226255656324,
+        "train_oof_auc": 0.5524312473143482,
+        "validation_auc": 0.5426481503183718,
+        "validation_delta_vs_baseline": 0.00413102074299776
+      },
+      "ridge_rank_blend": {
+        "ridge_weight": 1.0,
+        "test_auc": 0.5369821745543638,
+        "test_delta_vs_baseline": 0.009050226255656324,
+        "train_oof_auc": 0.5524312473143482,
+        "validation_auc": 0.5426481503183718,
+        "validation_delta_vs_baseline": 0.00413102074299776,
+        "weight_candidates": [
+          {
+            "ridge_weight": 0.0,
+            "train_oof_auc": 0.5442198669869917
+          },
+          {
+            "ridge_weight": 0.125,
+            "train_oof_auc": 0.5453295294738075
+          },
+          {
+            "ridge_weight": 0.25,
+            "train_oof_auc": 0.5460863949763662
+          },
+          {
+            "ridge_weight": 0.375,
+            "train_oof_auc": 0.5472937175280285
+          },
+          {
+            "ridge_weight": 0.5,
+            "train_oof_auc": 0.5486078557756162
+          },
+          {
+            "ridge_weight": 0.625,
+            "train_oof_auc": 0.5501875073245048
+          },
+          {
+            "ridge_weight": 0.75,
+            "train_oof_auc": 0.551432673151295
+          },
+          {
+            "ridge_weight": 0.875,
+            "train_oof_auc": 0.5523244316184226
+          },
+          {
+            "ridge_weight": 1.0,
+            "train_oof_auc": 0.5524312473143482
+          }
+        ]
+      },
+      "seed": 307
+    }
+  ],
+  "summary": {
+    "best_by_validation_auc": "ridge",
+    "readouts": {
+      "rank_interaction": {
+        "mean_test_auc": 0.531900797519938,
+        "mean_test_delta_vs_baseline": 0.005598056618082103,
+        "mean_validation_auc": 0.5387710457439744,
+        "mean_validation_delta_vs_baseline": -0.015208927432061148,
+        "min_test_auc": 0.5176504412610315,
+        "min_test_delta_vs_baseline": -0.01191904797619936,
+        "min_validation_auc": 0.5202937614750576,
+        "min_validation_delta_vs_baseline": -0.02215906871362161
+      },
+      "ridge": {
+        "mean_test_auc": 0.537105094294024,
+        "mean_test_delta_vs_baseline": 0.010802353392168099,
+        "mean_validation_auc": 0.561115668580804,
+        "mean_validation_delta_vs_baseline": 0.007135695404768401,
+        "min_test_auc": 0.5295069876746918,
+        "min_test_delta_vs_baseline": 0.008100202505062604,
+        "min_validation_auc": 0.5356556896753779,
+        "min_validation_delta_vs_baseline": 0.00413102074299776
+      },
+      "ridge_rank_blend": {
+        "mean_test_auc": 0.5345404468445044,
+        "mean_test_delta_vs_baseline": 0.008237705942648535,
+        "mean_validation_auc": 0.5582867820357565,
+        "mean_validation_delta_vs_baseline": 0.004306808859721086,
+        "min_test_auc": 0.5310445261131528,
+        "min_test_delta_vs_baseline": 0.006025150628765741,
+        "min_validation_auc": 0.5321692253603656,
+        "min_validation_delta_vs_baseline": 0.0039064025938513325
+      }
+    }
+  }
+}

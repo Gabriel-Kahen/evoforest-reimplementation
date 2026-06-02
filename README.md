@@ -215,6 +215,38 @@ python -m benchmarks.competition_event_multisplit_benchmark \
   --output benchmark_reports/competition-event-multisplit
 ```
 
+To audit whether the graph is bottlenecked by the final readout, compare the
+standard Ridge readout to a train-only selected rank/interactions readout and an
+OOF-selected blend:
+
+```bash
+python -m benchmarks.competition_event_readout_benchmark \
+  --data-dir /Users/gabrielkahen/Downloads/data \
+  --graph benchmark_reports/competition-event-multisplit/pruned_consensus_graph.json \
+  --split-seeds 211,223,307 \
+  --series-length 160 \
+  --max-configurations 64 \
+  --output benchmark_reports/competition-event-readout
+```
+
+To test whether sequential acceptance is rejecting feature families that are
+useful only as a set, assemble all trusted source-backed alternatives first,
+then backward-prune them under the same grouped multi-split objective. Add
+`--include-builtins` to include the deterministic built-in mutation templates as
+well:
+
+```bash
+python -m benchmarks.competition_event_source_suite_benchmark \
+  --data-dir /Users/gabrielkahen/Downloads/data \
+  --split-seeds 211,223,307 \
+  --series-length 160 \
+  --max-configurations 64 \
+  --objective-mode auc \
+  --include-builtins \
+  --disable-source-screen \
+  --output benchmark_reports/competition-event-template-suite
+```
+
 ## Run Benchmarks
 
 The benchmark suite generates reproducible JSON and Markdown reports that show

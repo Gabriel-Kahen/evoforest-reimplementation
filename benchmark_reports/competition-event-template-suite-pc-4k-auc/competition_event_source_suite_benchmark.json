@@ -1,0 +1,945 @@
+{
+  "benchmark": "competition_event_source_suite_benchmark",
+  "benchmark_config": {
+    "folds": 3,
+    "include_builtin_templates": true,
+    "max_configurations": 32,
+    "objective": "mean_validation_auc + stability_weight * min_validation_auc",
+    "objective_mode": "auc",
+    "prune_tolerance": 0.001,
+    "screen_sources": false,
+    "split_seeds": [
+      211,
+      223,
+      307
+    ],
+    "stability_weight": 0.5
+  },
+  "dataset": {
+    "data_dir": "/home/gabe/evoforest-competition-data",
+    "ids_max": 3999,
+    "ids_min": 0,
+    "mapping": "period_1_resampled_to_pre_boundary_and_period_2_resampled_to_post_boundary",
+    "max_samples": 4000,
+    "n_samples": 4000,
+    "name": "competition-parquet-event",
+    "negative_count": 2012,
+    "official_metric_note": "This is an id-level event-detection surrogate for the graph interface, not the official row-level competition metric.",
+    "positive_count": 1988,
+    "read_paths": [
+      "/home/gabe/evoforest-competition-data/X_train.parquet",
+      "/home/gabe/evoforest-competition-data/y_train_index.parquet"
+    ],
+    "series_length": 160,
+    "split": "train",
+    "target_source": "tau_index >= 0 from y_train_index.parquet",
+    "tau_max": 5857,
+    "tau_min": 1025
+  },
+  "dataset_config": {
+    "data_dir": "/home/gabe/evoforest-competition-data",
+    "max_ids": null,
+    "max_rows_per_id": null,
+    "max_samples": 4000,
+    "name": "competition-parquet-event",
+    "row_stride": 1,
+    "series_length": 160
+  },
+  "internal_test": {
+    "mean_delta_vs_baseline": 0.0055751393784844545,
+    "mean_graph_auc": 0.5318778802803403,
+    "min_delta_vs_baseline": 0.003025075626890694,
+    "selection_used": false,
+    "splits": [
+      {
+        "baseline_auc": 0.5214067851696292,
+        "delta_vs_baseline": 0.008193954848871199,
+        "graph_auc": 0.5296007400185004,
+        "seed": 211
+      },
+      {
+        "baseline_auc": 0.5295694892372309,
+        "delta_vs_baseline": 0.003025075626890694,
+        "graph_auc": 0.5325945648641216,
+        "seed": 223
+      },
+      {
+        "baseline_auc": 0.5279319482987075,
+        "delta_vs_baseline": 0.00550638765969147,
+        "graph_auc": 0.533438335958399,
+        "seed": 307
+      }
+    ]
+  },
+  "outer_split": {
+    "development_groups": 3200,
+    "development_samples": 3200,
+    "group_key": "sample_id",
+    "manifest_method": "group_stratified_random",
+    "seed": 211,
+    "test_groups": 800,
+    "test_samples": 800
+  },
+  "pruned_source_suite_graph": {
+    "graph": {
+      "alternatives": 26,
+      "alternatives_by_kind": {
+        "callable": 3,
+        "fitting": 5,
+        "input": 0,
+        "intermediate": 9,
+        "output": 9
+      },
+      "configuration_nodes": [
+        "activation",
+        "ridge_g",
+        "ridge_w",
+        "segment_stats",
+        "shape_stats",
+        "trend_stats"
+      ],
+      "fitting_nodes": [
+        "ridge_w",
+        "ridge_g"
+      ],
+      "globals": {
+        "gate_scale": {
+          "description": "Shared scale for callable gate families.",
+          "name": "gate_scale",
+          "shape": [
+            1
+          ],
+          "trainable": true,
+          "value": [
+            1.0
+          ]
+        },
+        "projection_vector": {
+          "description": "Low-dimensional global vector used by projection outputs.",
+          "name": "projection_vector",
+          "shape": [
+            16
+          ],
+          "trainable": true,
+          "value": [
+            0.2,
+            0.25333333333333335,
+            0.3066666666666667,
+            0.36,
+            0.41333333333333333,
+            0.4666666666666667,
+            0.52,
+            0.5733333333333334,
+            0.6266666666666667,
+            0.68,
+            0.7333333333333334,
+            0.7866666666666666,
+            0.8400000000000001,
+            0.8933333333333333,
+            0.9466666666666668,
+            1.0
+          ]
+        },
+        "residual_huber_scale": {
+          "description": "Shared threshold for residual-based Ridge reweighting.",
+          "name": "residual_huber_scale",
+          "shape": [
+            1
+          ],
+          "trainable": true,
+          "value": [
+            1.0
+          ]
+        }
+      },
+      "name": "evoforest_seed",
+      "node_kinds": {
+        "callable": 1,
+        "fitting": 2,
+        "input": 2,
+        "intermediate": 3,
+        "output": 1
+      },
+      "nodes": 9,
+      "output_nodes": [
+        "output"
+      ],
+      "total_configurations": 288
+    },
+    "mean_delta_vs_baseline": -0.003470187637537888,
+    "mean_validation_auc": 0.5505097855384976,
+    "min_delta_vs_baseline": -0.027501074260713354,
+    "min_validation_auc": 0.5397378803859526,
+    "objective": 0.8203787257314739,
+    "path": "benchmark_reports/competition-event-template-suite-pc-4k-auc/pruned_source_suite_graph.json",
+    "splits": [
+      {
+        "alpha": 10000.0,
+        "config": {
+          "activation": "identity",
+          "ridge_g": "huber",
+          "ridge_w": "uniform",
+          "segment_stats": "late_shift_mutation",
+          "shape_stats": "row_volatility_burst_mutation",
+          "trend_stats": "linear"
+        },
+        "delta_vs_baseline": 0.011475057619438345,
+        "n_features": 98,
+        "seed": 211,
+        "train_auc": 0.5731461678190555,
+        "validation_auc": 0.5397378803859526
+      },
+      {
+        "alpha": 10000.0,
+        "config": {
+          "activation": "clipped_linear",
+          "ridge_g": "identity",
+          "ridge_w": "late_energy_weight_mutation",
+          "segment_stats": "late_shift_mutation",
+          "shape_stats": "spectral",
+          "trend_stats": "linear"
+        },
+        "delta_vs_baseline": -0.027501074260713354,
+        "n_features": 90,
+        "seed": 223,
+        "train_auc": 0.5662336663541545,
+        "validation_auc": 0.5676588929255049
+      },
+      {
+        "alpha": 10000.0,
+        "config": {
+          "activation": "identity",
+          "ridge_g": "huber",
+          "ridge_w": "boundary_energy",
+          "segment_stats": "basic",
+          "shape_stats": "cusum",
+          "trend_stats": "linear"
+        },
+        "delta_vs_baseline": 0.005615453728661346,
+        "n_features": 88,
+        "seed": 307,
+        "train_auc": 0.5708206375249033,
+        "validation_auc": 0.5441325833040354
+      }
+    ]
+  },
+  "pruning": {
+    "attempted": 29,
+    "removed": 18,
+    "rows": [
+      {
+        "alternative_id": "source_quantile_transport_shift",
+        "mean_delta_after": -0.012135890724898069,
+        "min_delta_after": -0.03309699597640536,
+        "objective_after": 0.8056385666106749,
+        "objective_before": 0.8047156789978775,
+        "objective_delta": 0.0009228876127973518,
+        "removed": true,
+        "step": 0,
+        "target_node": "output"
+      },
+      {
+        "alternative_id": "source_haar_scale_energy_shift",
+        "mean_delta_after": -0.011745250465512927,
+        "min_delta_after": -0.03398570256650646,
+        "objective_after": 0.8046814979751813,
+        "objective_before": 0.8056385666106749,
+        "objective_delta": -0.0009570686354936075,
+        "removed": true,
+        "step": 0,
+        "target_node": "output"
+      },
+      {
+        "alternative_id": "source_multiresolution_cusum_shift",
+        "mean_delta_after": -0.011146268734455752,
+        "min_delta_after": -0.03126098675729516,
+        "objective_after": 0.804821477401461,
+        "objective_before": 0.8046814979751813,
+        "objective_delta": 0.00013997942627974602,
+        "removed": true,
+        "step": 0,
+        "target_node": "output"
+      },
+      {
+        "alternative_id": "source_moment_shape_shift",
+        "mean_delta_after": -0.008551766345039477,
+        "min_delta_after": -0.02792101253955237,
+        "objective_after": 0.8095645012174955,
+        "objective_before": 0.804821477401461,
+        "objective_delta": 0.00474302381603442,
+        "removed": true,
+        "step": 0,
+        "target_node": "output"
+      },
+      {
+        "alternative_id": "source_tail_extrema_shift",
+        "mean_delta_after": -0.007565399690092067,
+        "min_delta_after": -0.027794054455252182,
+        "objective_after": 0.8115909475630558,
+        "objective_before": 0.8095645012174955,
+        "objective_delta": 0.002026446345560373,
+        "removed": true,
+        "step": 0,
+        "target_node": "output"
+      },
+      {
+        "alternative_id": "source_spectral_entropy_shift",
+        "mean_delta_after": -0.009127960727632556,
+        "min_delta_after": -0.028145630688698797,
+        "objective_after": 0.8087246246598174,
+        "objective_before": 0.8115909475630558,
+        "objective_delta": -0.0028663229032384052,
+        "removed": false,
+        "step": 0,
+        "target_node": "output"
+      },
+      {
+        "alternative_id": "source_rank_shape_shift",
+        "mean_delta_after": -0.007158482753232535,
+        "min_delta_after": -0.028633931012930214,
+        "objective_after": 0.8121297055874578,
+        "objective_before": 0.8115909475630558,
+        "objective_delta": 0.000538758024401953,
+        "removed": true,
+        "step": 0,
+        "target_node": "output"
+      },
+      {
+        "alternative_id": "source_multiscale_tail_shift",
+        "mean_delta_after": -0.006142818078831214,
+        "min_delta_after": -0.02805773663033717,
+        "objective_after": 0.8164267484406943,
+        "objective_before": 0.8121297055874578,
+        "objective_delta": 0.00429704285323651,
+        "removed": true,
+        "step": 0,
+        "target_node": "output"
+      },
+      {
+        "alternative_id": "source_autocorr_volatility_shift",
+        "mean_delta_after": -0.007415654257327746,
+        "min_delta_after": -0.02765733036446738,
+        "objective_after": 0.8117065119731239,
+        "objective_before": 0.8164267484406943,
+        "objective_delta": -0.00472023646757036,
+        "removed": false,
+        "step": 0,
+        "target_node": "output"
+      },
+      {
+        "alternative_id": "source_distribution_shift",
+        "mean_delta_after": -0.008502936312616338,
+        "min_delta_after": -0.02916129536310008,
+        "objective_after": 0.8112735523523055,
+        "objective_before": 0.8164267484406943,
+        "objective_delta": -0.005153196088388823,
+        "removed": false,
+        "step": 0,
+        "target_node": "output"
+      },
+      {
+        "alternative_id": "huber_residual_mutation",
+        "mean_delta_after": -0.006142818078831214,
+        "min_delta_after": -0.02805773663033717,
+        "objective_after": 0.8164267484406943,
+        "objective_before": 0.8164267484406943,
+        "objective_delta": 0.0,
+        "removed": true,
+        "step": 0,
+        "target_node": "ridge_g"
+      },
+      {
+        "alternative_id": "late_energy_weight_mutation",
+        "mean_delta_after": -0.007998359310910566,
+        "min_delta_after": -0.02805773663033717,
+        "objective_after": 0.8116560542729534,
+        "objective_before": 0.8164267484406943,
+        "objective_delta": -0.0047706941677408965,
+        "removed": false,
+        "step": 0,
+        "target_node": "ridge_w"
+      },
+      {
+        "alternative_id": "boundary_weight_mutation",
+        "mean_delta_after": -0.006142818078831214,
+        "min_delta_after": -0.02805773663033717,
+        "objective_after": 0.8164267484406943,
+        "objective_before": 0.8164267484406943,
+        "objective_delta": 0.0,
+        "removed": true,
+        "step": 0,
+        "target_node": "ridge_w"
+      },
+      {
+        "alternative_id": "post_concentration_mutation",
+        "mean_delta_after": -0.005667539096579281,
+        "min_delta_after": -0.02805773663033717,
+        "objective_after": 0.817614945896324,
+        "objective_before": 0.8164267484406943,
+        "objective_delta": 0.0011881974556297026,
+        "removed": true,
+        "step": 0,
+        "target_node": "shape_stats"
+      },
+      {
+        "alternative_id": "drawdown_mutation",
+        "mean_delta_after": -0.005667539096579281,
+        "min_delta_after": -0.02805773663033717,
+        "objective_after": 0.817614945896324,
+        "objective_before": 0.817614945896324,
+        "objective_delta": 0.0,
+        "removed": true,
+        "step": 0,
+        "target_node": "shape_stats"
+      },
+      {
+        "alternative_id": "projection_output_mutation",
+        "mean_delta_after": -0.005504772321835476,
+        "min_delta_after": -0.027706160396890556,
+        "objective_after": 0.8179144367618526,
+        "objective_before": 0.817614945896324,
+        "objective_delta": 0.0002994908655286066,
+        "removed": true,
+        "step": 0,
+        "target_node": "output"
+      },
+      {
+        "alternative_id": "row_context_output_mutation",
+        "mean_delta_after": -0.005504772321835476,
+        "min_delta_after": -0.027706160396890556,
+        "objective_after": 0.8179144367618526,
+        "objective_before": 0.8179144367618526,
+        "objective_delta": 0.0,
+        "removed": true,
+        "step": 0,
+        "target_node": "output"
+      },
+      {
+        "alternative_id": "row_local_output_mutation",
+        "mean_delta_after": -0.004570491034806001,
+        "min_delta_after": -0.03025508808937849,
+        "objective_after": 0.8190684531947863,
+        "objective_before": 0.8179144367618526,
+        "objective_delta": 0.0011540164329336688,
+        "removed": true,
+        "step": 0,
+        "target_node": "output"
+      },
+      {
+        "alternative_id": "interaction_output_mutation",
+        "mean_delta_after": -0.0034832089795174084,
+        "min_delta_after": -0.02286222118051484,
+        "objective_after": 0.8171331562430824,
+        "objective_before": 0.8190684531947863,
+        "objective_delta": -0.0019352969517039131,
+        "removed": false,
+        "step": 0,
+        "target_node": "output"
+      },
+      {
+        "alternative_id": "competition_event_output_mutation",
+        "mean_delta_after": -0.004856960558355124,
+        "min_delta_after": -0.015078714012266126,
+        "objective_after": 0.8139429274581038,
+        "objective_before": 0.8190684531947863,
+        "objective_delta": -0.005125525736682457,
+        "removed": false,
+        "step": 0,
+        "target_node": "output"
+      },
+      {
+        "alternative_id": "adia_baseline_output_mutation",
+        "mean_delta_after": -0.007728166464835873,
+        "min_delta_after": -0.030294152115317052,
+        "objective_after": 0.8099193327864369,
+        "objective_before": 0.8190684531947863,
+        "objective_delta": -0.009149120408349365,
+        "removed": false,
+        "step": 0,
+        "target_node": "output"
+      },
+      {
+        "alternative_id": "sigmoid_gate_mutation",
+        "mean_delta_after": -0.003512506998971284,
+        "min_delta_after": -0.027501074260713354,
+        "objective_after": 0.8203364063700405,
+        "objective_before": 0.8190684531947863,
+        "objective_delta": 0.0012679531752541884,
+        "removed": true,
+        "step": 0,
+        "target_node": "activation"
+      },
+      {
+        "alternative_id": "row_cusum_local_mutation",
+        "mean_delta_after": -0.0054624529604020795,
+        "min_delta_after": -0.027501074260713354,
+        "objective_after": 0.8169703894683387,
+        "objective_before": 0.8203364063700405,
+        "objective_delta": -0.003366016901701796,
+        "removed": false,
+        "step": 0,
+        "target_node": "shape_stats"
+      },
+      {
+        "alternative_id": "row_volatility_burst_mutation",
+        "mean_delta_after": -0.0054624529604020795,
+        "min_delta_after": -0.027501074260713354,
+        "objective_after": 0.8169703894683387,
+        "objective_before": 0.8203364063700405,
+        "objective_delta": -0.003366016901701796,
+        "removed": false,
+        "step": 0,
+        "target_node": "shape_stats"
+      },
+      {
+        "alternative_id": "row_recent_change_mutation",
+        "mean_delta_after": -0.006009349323541284,
+        "min_delta_after": -0.032598929645689334,
+        "objective_after": 0.8166432282511035,
+        "objective_before": 0.8203364063700405,
+        "objective_delta": -0.0036931781189369906,
+        "removed": false,
+        "step": 0,
+        "target_node": "segment_stats"
+      },
+      {
+        "alternative_id": "late_trend_mutation",
+        "mean_delta_after": -0.00355482636040468,
+        "min_delta_after": -0.03025508808937849,
+        "objective_after": 0.8202940870086071,
+        "objective_before": 0.8203364063700405,
+        "objective_delta": -4.2319361433396097e-05,
+        "removed": true,
+        "step": 0,
+        "target_node": "trend_stats"
+      },
+      {
+        "alternative_id": "late_shift_mutation",
+        "mean_delta_after": -0.004111488730028497,
+        "min_delta_after": -0.02648540958631196,
+        "objective_after": 0.8170175918330143,
+        "objective_before": 0.8202940870086071,
+        "objective_delta": -0.0032764951755928085,
+        "removed": false,
+        "step": 0,
+        "target_node": "segment_stats"
+      },
+      {
+        "alternative_id": "robust_mutation",
+        "mean_delta_after": -0.00355482636040468,
+        "min_delta_after": -0.03025508808937849,
+        "objective_after": 0.8202940870086071,
+        "objective_before": 0.8202940870086071,
+        "objective_delta": 0.0,
+        "removed": true,
+        "step": 0,
+        "target_node": "segment_stats"
+      },
+      {
+        "alternative_id": "spectral_mutation",
+        "mean_delta_after": -0.003470187637537888,
+        "min_delta_after": -0.027501074260713354,
+        "objective_after": 0.8203787257314739,
+        "objective_before": 0.8202940870086071,
+        "objective_delta": 8.463872286679219e-05,
+        "removed": true,
+        "step": 0,
+        "target_node": "shape_stats"
+      }
+    ]
+  },
+  "reduced_test_access": {
+    "accessed": false,
+    "checked_paths": [
+      "X_test.reduced.parquet",
+      "y_test_index.reduced.parquet"
+    ],
+    "read_paths": [
+      "/home/gabe/evoforest-competition-data/X_train.parquet",
+      "/home/gabe/evoforest-competition-data/y_train_index.parquet"
+    ],
+    "reduced_read_paths": []
+  },
+  "scope": "These benchmarks validate architecture-level behavior of this clean-room reimplementation. They do not claim to reproduce the authors' private evolved graph, private code-generation stack, competition pipeline, or reported ROC-AUC.",
+  "seed": 211,
+  "seed_graph": {
+    "mean_delta_vs_baseline": -0.011484823625922846,
+    "mean_validation_auc": 0.5424951495501126,
+    "min_delta_vs_baseline": -0.01706121332864563,
+    "min_validation_auc": 0.5119242939177312,
+    "objective": 0.7984572965089782,
+    "splits": [
+      {
+        "alpha": 3162.2776601683795,
+        "config": {
+          "activation": "clipped_linear",
+          "ridge_g": "huber",
+          "ridge_w": "boundary_energy",
+          "segment_stats": "basic",
+          "shape_stats": "cusum",
+          "trend_stats": "linear"
+        },
+        "delta_vs_baseline": -0.016338528848783063,
+        "n_features": 21,
+        "seed": 211,
+        "train_auc": 0.560288609906637,
+        "validation_auc": 0.5119242939177312
+      },
+      {
+        "alpha": 3162.2776601683795,
+        "config": {
+          "activation": "clipped_linear",
+          "ridge_g": "identity",
+          "ridge_w": "boundary_energy",
+          "segment_stats": "basic",
+          "shape_stats": "spectral",
+          "trend_stats": "linear"
+        },
+        "delta_vs_baseline": -0.0010547287003398464,
+        "n_features": 21,
+        "seed": 223,
+        "train_auc": 0.5466870043751709,
+        "validation_auc": 0.5941052384858784
+      },
+      {
+        "alpha": 1000.0,
+        "config": {
+          "activation": "identity",
+          "ridge_g": "identity",
+          "ridge_w": "uniform",
+          "segment_stats": "basic",
+          "shape_stats": "spectral",
+          "trend_stats": "linear"
+        },
+        "delta_vs_baseline": -0.01706121332864563,
+        "n_features": 21,
+        "seed": 307,
+        "train_auc": 0.5633319416774093,
+        "validation_auc": 0.5214559162467284
+      }
+    ]
+  },
+  "source_mutations": {
+    "best_isolated_source": null,
+    "checks": [
+      {
+        "alternative_id": "source_distribution_shift",
+        "error": "",
+        "n_features": 28,
+        "passed": true
+      },
+      {
+        "alternative_id": "source_autocorr_volatility_shift",
+        "error": "",
+        "n_features": 27,
+        "passed": true
+      },
+      {
+        "alternative_id": "source_multiscale_tail_shift",
+        "error": "",
+        "n_features": 28,
+        "passed": true
+      },
+      {
+        "alternative_id": "source_rank_shape_shift",
+        "error": "",
+        "n_features": 26,
+        "passed": true
+      },
+      {
+        "alternative_id": "source_spectral_entropy_shift",
+        "error": "",
+        "n_features": 26,
+        "passed": true
+      },
+      {
+        "alternative_id": "source_tail_extrema_shift",
+        "error": "",
+        "n_features": 26,
+        "passed": true
+      },
+      {
+        "alternative_id": "source_moment_shape_shift",
+        "error": "",
+        "n_features": 26,
+        "passed": true
+      },
+      {
+        "alternative_id": "source_multiresolution_cusum_shift",
+        "error": "",
+        "n_features": 26,
+        "passed": true
+      },
+      {
+        "alternative_id": "source_haar_scale_energy_shift",
+        "error": "",
+        "n_features": 27,
+        "passed": true
+      },
+      {
+        "alternative_id": "source_quantile_transport_shift",
+        "error": "",
+        "n_features": 27,
+        "passed": true
+      }
+    ],
+    "enabled": true,
+    "isolated_sources": [],
+    "passed_repair_checks": 10,
+    "templates": 10
+  },
+  "source_suite_graph": {
+    "graph": {
+      "alternatives": 44,
+      "alternatives_by_kind": {
+        "callable": 4,
+        "fitting": 7,
+        "input": 0,
+        "intermediate": 14,
+        "output": 19
+      },
+      "configuration_nodes": [
+        "activation",
+        "ridge_g",
+        "ridge_w",
+        "segment_stats",
+        "shape_stats",
+        "trend_stats"
+      ],
+      "fitting_nodes": [
+        "ridge_w",
+        "ridge_g"
+      ],
+      "globals": {
+        "gate_scale": {
+          "description": "Shared scale for callable gate families.",
+          "name": "gate_scale",
+          "shape": [
+            1
+          ],
+          "trainable": true,
+          "value": [
+            1.0
+          ]
+        },
+        "projection_vector": {
+          "description": "Low-dimensional global vector used by projection outputs.",
+          "name": "projection_vector",
+          "shape": [
+            16
+          ],
+          "trainable": true,
+          "value": [
+            0.2,
+            0.25333333333333335,
+            0.3066666666666667,
+            0.36,
+            0.41333333333333333,
+            0.4666666666666667,
+            0.52,
+            0.5733333333333334,
+            0.6266666666666667,
+            0.68,
+            0.7333333333333334,
+            0.7866666666666666,
+            0.8400000000000001,
+            0.8933333333333333,
+            0.9466666666666668,
+            1.0
+          ]
+        },
+        "residual_huber_scale": {
+          "description": "Shared threshold for residual-based Ridge reweighting.",
+          "name": "residual_huber_scale",
+          "shape": [
+            1
+          ],
+          "trainable": true,
+          "value": [
+            1.0
+          ]
+        }
+      },
+      "name": "evoforest_seed",
+      "node_kinds": {
+        "callable": 1,
+        "fitting": 2,
+        "input": 2,
+        "intermediate": 3,
+        "output": 1
+      },
+      "nodes": 9,
+      "output_nodes": [
+        "output"
+      ],
+      "total_configurations": 3360
+    },
+    "mean_delta_vs_baseline": -0.012819511178822074,
+    "mean_validation_auc": 0.5411604619972135,
+    "min_delta_vs_baseline": -0.0331262939958592,
+    "min_validation_auc": 0.5271104340013282,
+    "objective": 0.8047156789978775,
+    "path": "benchmark_reports/competition-event-template-suite-pc-4k-auc/source_suite_graph.json",
+    "splits": [
+      {
+        "alpha": 10000.0,
+        "config": {
+          "activation": "sigmoid_gate_mutation",
+          "ridge_g": "huber",
+          "ridge_w": "late_energy_weight_mutation",
+          "segment_stats": "late_shift_mutation",
+          "shape_stats": "row_cusum_local_mutation",
+          "trend_stats": "linear"
+        },
+        "delta_vs_baseline": -0.0011523887651860854,
+        "n_features": 157,
+        "seed": 211,
+        "train_auc": 0.5763396519395289,
+        "validation_auc": 0.5271104340013282
+      },
+      {
+        "alpha": 10000.0,
+        "config": {
+          "activation": "clipped_linear",
+          "ridge_g": "huber",
+          "ridge_w": "boundary_energy",
+          "segment_stats": "late_shift_mutation",
+          "shape_stats": "row_cusum_local_mutation",
+          "trend_stats": "linear"
+        },
+        "delta_vs_baseline": -0.0331262939958592,
+        "n_features": 157,
+        "seed": 223,
+        "train_auc": 0.5711477987421384,
+        "validation_auc": 0.562033673190359
+      },
+      {
+        "alpha": 10000.0,
+        "config": {
+          "activation": "sigmoid_gate_mutation",
+          "ridge_g": "huber",
+          "ridge_w": "boundary_weight_mutation",
+          "segment_stats": "basic",
+          "shape_stats": "spectral_mutation",
+          "trend_stats": "linear"
+        },
+        "delta_vs_baseline": -0.004179850775420935,
+        "n_features": 149,
+        "seed": 307,
+        "train_auc": 0.573788893120825,
+        "validation_auc": 0.5343372787999531
+      }
+    ]
+  },
+  "split_audits": [
+    {
+      "audit": {
+        "group_overlaps": {
+          "train_test": 0,
+          "train_validation": 0,
+          "validation_test": 0
+        },
+        "labels": {
+          "test": {
+            "n_groups": 800,
+            "n_samples": 800,
+            "negative_count": 402,
+            "positive_count": 398
+          },
+          "train": {
+            "n_groups": 2560,
+            "n_samples": 2560,
+            "negative_count": 1288,
+            "positive_count": 1272
+          },
+          "validation": {
+            "n_groups": 640,
+            "n_samples": 640,
+            "negative_count": 322,
+            "positive_count": 318
+          }
+        },
+        "no_group_overlap": true
+      },
+      "seed": 211
+    },
+    {
+      "audit": {
+        "group_overlaps": {
+          "train_test": 0,
+          "train_validation": 0,
+          "validation_test": 0
+        },
+        "labels": {
+          "test": {
+            "n_groups": 800,
+            "n_samples": 800,
+            "negative_count": 402,
+            "positive_count": 398
+          },
+          "train": {
+            "n_groups": 2560,
+            "n_samples": 2560,
+            "negative_count": 1288,
+            "positive_count": 1272
+          },
+          "validation": {
+            "n_groups": 640,
+            "n_samples": 640,
+            "negative_count": 322,
+            "positive_count": 318
+          }
+        },
+        "no_group_overlap": true
+      },
+      "seed": 223
+    },
+    {
+      "audit": {
+        "group_overlaps": {
+          "train_test": 0,
+          "train_validation": 0,
+          "validation_test": 0
+        },
+        "labels": {
+          "test": {
+            "n_groups": 800,
+            "n_samples": 800,
+            "negative_count": 402,
+            "positive_count": 398
+          },
+          "train": {
+            "n_groups": 2560,
+            "n_samples": 2560,
+            "negative_count": 1288,
+            "positive_count": 1272
+          },
+          "validation": {
+            "n_groups": 640,
+            "n_samples": 640,
+            "negative_count": 322,
+            "positive_count": 318
+          }
+        },
+        "no_group_overlap": true
+      },
+      "seed": 307
+    }
+  ],
+  "summary": {
+    "best_graph_by_objective": "pruned_source_suite_graph",
+    "best_mean_delta_vs_baseline": -0.003470187637537888,
+    "best_mean_validation_auc": 0.5505097855384976,
+    "best_objective": 0.8203787257314739,
+    "pruned_delta_vs_suite": 0.01566304673359631,
+    "source_suite_delta_vs_seed": 0.006258382488899317
+  },
+  "template_suite": {
+    "added_templates": 29,
+    "best_isolated_template": null,
+    "builtin_templates": 19,
+    "include_builtin_templates": true,
+    "isolated_templates": [],
+    "source_templates": 10
+  }
+}

@@ -81,6 +81,15 @@ Each command writes paired JSON and Markdown reports. The top-level
     evolves against multiple grouped validation splits inside the development
     pool, prunes accepted alternatives with the same robust objective, writes
     consensus graph artifacts, and reports archive/OOF validation ensembles.
+- `competition_event_readout_benchmark`
+  - Optional external-data audit for a serialized event graph. It keeps the same
+    fixed grouped outer test protocol and compares the standard Ridge readout to
+    a train-only selected rank/interactions readout plus an OOF-selected blend.
+- `competition_event_source_suite_benchmark`
+  - Optional external-data audit for graph assembly strategy. It adds every
+    repair-checked trusted source mutation as a set, optionally adds built-in
+    mutation templates with `--include-builtins`, then backward-prunes the added
+    alternatives under grouped multi-split validation.
 
 ## Interpreting Results
 
@@ -135,6 +144,28 @@ python -m benchmarks.competition_event_multisplit_benchmark \
   --max-configurations 64 \
   --objective-mode auc \
   --output benchmark_reports/competition-event-multisplit
+```
+
+```bash
+python -m benchmarks.competition_event_readout_benchmark \
+  --data-dir /Users/gabrielkahen/Downloads/data \
+  --graph benchmark_reports/competition-event-multisplit/pruned_consensus_graph.json \
+  --split-seeds 211,223,307 \
+  --series-length 160 \
+  --max-configurations 64 \
+  --output benchmark_reports/competition-event-readout
+```
+
+```bash
+python -m benchmarks.competition_event_source_suite_benchmark \
+  --data-dir /Users/gabrielkahen/Downloads/data \
+  --split-seeds 211,223,307 \
+  --series-length 160 \
+  --max-configurations 64 \
+  --objective-mode auc \
+  --include-builtins \
+  --disable-source-screen \
+  --output benchmark_reports/competition-event-template-suite
 ```
 
 The default suite scripts accept `--seed`, `--output`, and `--quick`. The

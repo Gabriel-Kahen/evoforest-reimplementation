@@ -1,0 +1,825 @@
+{
+  "graph_hash": "6a5d965ac5d3f5307682cf06dfb792f3d4f216a390655dd44caa8e5a9d415e2a",
+  "graph": {
+    "name": "evoforest_seed",
+    "globals": {
+      "gate_scale": {
+        "name": "gate_scale",
+        "shape": [
+          1
+        ],
+        "trainable": true,
+        "description": "Shared scale for callable gate families.",
+        "value": [
+          1.0
+        ]
+      },
+      "projection_vector": {
+        "name": "projection_vector",
+        "shape": [
+          16
+        ],
+        "trainable": true,
+        "description": "Low-dimensional global vector used by projection outputs.",
+        "value": [
+          0.2,
+          0.25333333333333335,
+          0.3066666666666667,
+          0.36,
+          0.41333333333333333,
+          0.4666666666666667,
+          0.52,
+          0.5733333333333334,
+          0.6266666666666667,
+          0.68,
+          0.7333333333333334,
+          0.7866666666666666,
+          0.8400000000000001,
+          0.8933333333333333,
+          0.9466666666666668,
+          1.0
+        ]
+      },
+      "residual_huber_scale": {
+        "name": "residual_huber_scale",
+        "shape": [
+          1
+        ],
+        "trainable": true,
+        "description": "Shared threshold for residual-based Ridge reweighting.",
+        "value": [
+          1.0
+        ]
+      }
+    },
+    "nodes": [
+      {
+        "name": "series",
+        "kind": "input",
+        "description": "Batch of univariate time series with shape (n_series, length).",
+        "alternatives": []
+      },
+      {
+        "name": "boundary",
+        "kind": "input",
+        "description": "Known boundary index separating pre and post segments.",
+        "alternatives": []
+      },
+      {
+        "name": "segment_stats",
+        "kind": "intermediate",
+        "description": "Segment-level change statistics.",
+        "alternatives": [
+          {
+            "id": "basic",
+            "parents": [
+              "series"
+            ],
+            "description": "Mean and variance segment statistics.",
+            "tags": [],
+            "primitive": "segment_basic",
+            "global_refs": [],
+            "has_torch": true,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          },
+          {
+            "id": "robust",
+            "parents": [
+              "series"
+            ],
+            "description": "Robust quantile segment statistics.",
+            "tags": [],
+            "primitive": "segment_robust",
+            "global_refs": [],
+            "has_torch": true,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          },
+          {
+            "id": "robust_mutation",
+            "parents": [
+              "series"
+            ],
+            "description": "Add a quantile-based robust segment alternative.",
+            "tags": [],
+            "primitive": "segment_robust",
+            "global_refs": [],
+            "has_torch": true,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          },
+          {
+            "id": "late_shift_mutation",
+            "parents": [
+              "series"
+            ],
+            "description": "Add period-boundary tail jump and late drift statistics.",
+            "tags": [],
+            "primitive": "segment_late_shift",
+            "global_refs": [],
+            "has_torch": false,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          },
+          {
+            "id": "row_recent_change_mutation",
+            "parents": [
+              "series"
+            ],
+            "description": "Add row-local older-vs-recent level-change features for target-time windows.",
+            "tags": [],
+            "primitive": "row_recent_change",
+            "global_refs": [],
+            "has_torch": false,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          }
+        ]
+      },
+      {
+        "name": "trend_stats",
+        "kind": "intermediate",
+        "description": "Trend summaries around the boundary.",
+        "alternatives": [
+          {
+            "id": "linear",
+            "parents": [
+              "series"
+            ],
+            "description": "Linear trend summaries before and after boundary.",
+            "tags": [],
+            "primitive": "trend_basic",
+            "global_refs": [],
+            "has_torch": true,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          },
+          {
+            "id": "late_trend_mutation",
+            "parents": [
+              "series"
+            ],
+            "description": "Add late-window trend and post-period acceleration statistics.",
+            "tags": [],
+            "primitive": "trend_late_window",
+            "global_refs": [],
+            "has_torch": false,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          }
+        ]
+      },
+      {
+        "name": "shape_stats",
+        "kind": "intermediate",
+        "description": "Profile and frequency shape statistics.",
+        "alternatives": [
+          {
+            "id": "cusum",
+            "parents": [
+              "series"
+            ],
+            "description": "CUSUM profile statistics.",
+            "tags": [],
+            "primitive": "cusum_basic",
+            "global_refs": [],
+            "has_torch": true,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          },
+          {
+            "id": "spectral",
+            "parents": [
+              "series"
+            ],
+            "description": "Frequency-band ratio change statistics.",
+            "tags": [],
+            "primitive": "spectral_basic",
+            "global_refs": [],
+            "has_torch": true,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          },
+          {
+            "id": "spectral_mutation",
+            "parents": [
+              "series"
+            ],
+            "description": "Add a frequency-ratio shape alternative.",
+            "tags": [],
+            "primitive": "spectral_basic",
+            "global_refs": [],
+            "has_torch": true,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          },
+          {
+            "id": "row_volatility_burst_mutation",
+            "parents": [
+              "series"
+            ],
+            "description": "Add row-local volatility burst features from causal lookback increments.",
+            "tags": [],
+            "primitive": "row_volatility_burst",
+            "global_refs": [],
+            "has_torch": false,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          },
+          {
+            "id": "row_cusum_local_mutation",
+            "parents": [
+              "series"
+            ],
+            "description": "Add row-local CUSUM profile features over causal lookback windows.",
+            "tags": [],
+            "primitive": "row_cusum_local",
+            "global_refs": [],
+            "has_torch": false,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          },
+          {
+            "id": "drawdown_mutation",
+            "parents": [
+              "series"
+            ],
+            "description": "Add post-period drawdown and drawup shape statistics.",
+            "tags": [],
+            "primitive": "shape_drawdown",
+            "global_refs": [],
+            "has_torch": false,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          },
+          {
+            "id": "post_concentration_mutation",
+            "parents": [
+              "series"
+            ],
+            "description": "Add late post-period energy concentration statistics.",
+            "tags": [],
+            "primitive": "shape_post_concentration",
+            "global_refs": [],
+            "has_torch": false,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          }
+        ]
+      },
+      {
+        "name": "activation",
+        "kind": "callable",
+        "description": "Reusable callable family node.",
+        "alternatives": [
+          {
+            "id": "identity",
+            "parents": [],
+            "description": "Identity callable.",
+            "tags": [],
+            "primitive": "identity_callable",
+            "global_refs": [],
+            "has_torch": true,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          },
+          {
+            "id": "sigmoid_gate",
+            "parents": [],
+            "description": "Sigmoid gate callable.",
+            "tags": [],
+            "primitive": "sigmoid_gate_callable",
+            "global_refs": [
+              "gate_scale"
+            ],
+            "has_torch": true,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          },
+          {
+            "id": "clipped_linear",
+            "parents": [],
+            "description": "Clipped linear callable.",
+            "tags": [],
+            "primitive": "clipped_linear_callable",
+            "global_refs": [
+              "gate_scale"
+            ],
+            "has_torch": true,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          },
+          {
+            "id": "sigmoid_gate_mutation",
+            "parents": [],
+            "description": "Add a sigmoid gate callable alternative.",
+            "tags": [],
+            "primitive": "sigmoid_gate_callable",
+            "global_refs": [
+              "gate_scale"
+            ],
+            "has_torch": true,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          }
+        ]
+      },
+      {
+        "name": "output",
+        "kind": "output",
+        "description": "Candidate predictive feature alternatives evaluated as an ensemble.",
+        "alternatives": [
+          {
+            "id": "raw_concat",
+            "parents": [
+              "segment_stats",
+              "trend_stats",
+              "shape_stats"
+            ],
+            "description": "Concatenate parent feature blocks.",
+            "tags": [],
+            "primitive": "pass_outputs",
+            "global_refs": [],
+            "has_torch": true,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          },
+          {
+            "id": "activated",
+            "parents": [
+              "segment_stats",
+              "trend_stats",
+              "shape_stats",
+              "activation"
+            ],
+            "description": "Apply callable family to parent features.",
+            "tags": [],
+            "primitive": "activated_outputs",
+            "global_refs": [],
+            "has_torch": true,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          },
+          {
+            "id": "projection",
+            "parents": [
+              "segment_stats",
+              "trend_stats",
+              "shape_stats"
+            ],
+            "description": "Projection using persistent global parameters.",
+            "tags": [],
+            "primitive": "projection_outputs",
+            "global_refs": [
+              "projection_vector"
+            ],
+            "has_torch": true,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          },
+          {
+            "id": "adia_baseline_output_mutation",
+            "parents": [
+              "series"
+            ],
+            "description": "Add the full deterministic ADIA structural-break baseline feature block as graph outputs.",
+            "tags": [],
+            "primitive": "adia_structural_break_baseline_outputs",
+            "global_refs": [],
+            "has_torch": false,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          },
+          {
+            "id": "competition_event_output_mutation",
+            "parents": [
+              "series"
+            ],
+            "description": "Add always-evaluated event-detection features directly from the parquet sequence.",
+            "tags": [],
+            "primitive": "competition_event_outputs",
+            "global_refs": [],
+            "has_torch": false,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          },
+          {
+            "id": "interaction_output_mutation",
+            "parents": [
+              "segment_stats",
+              "trend_stats",
+              "shape_stats"
+            ],
+            "description": "Add standardized aggregate and pairwise interaction output features.",
+            "tags": [],
+            "primitive": "interaction_outputs",
+            "global_refs": [],
+            "has_torch": false,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          },
+          {
+            "id": "row_local_output_mutation",
+            "parents": [
+              "series"
+            ],
+            "description": "Add always-evaluated row-local target-time lookback features.",
+            "tags": [],
+            "primitive": "row_local_outputs",
+            "global_refs": [],
+            "has_torch": false,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          },
+          {
+            "id": "row_context_output_mutation",
+            "parents": [
+              "series"
+            ],
+            "description": "Add optional row metadata features from target time, period, and observed lookback length.",
+            "tags": [],
+            "primitive": "row_context_outputs",
+            "global_refs": [],
+            "has_torch": false,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          },
+          {
+            "id": "projection_output_mutation",
+            "parents": [
+              "segment_stats",
+              "trend_stats",
+              "shape_stats"
+            ],
+            "description": "Add a projection output feature without increasing configuration count.",
+            "tags": [],
+            "primitive": "projection_outputs",
+            "global_refs": [
+              "projection_vector"
+            ],
+            "has_torch": true,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          },
+          {
+            "id": "source_distribution_shift",
+            "parents": [
+              "series"
+            ],
+            "description": "Source-backed robust distribution-shift features across the known boundary.",
+            "tags": [
+              "source"
+            ],
+            "primitive": "source",
+            "global_refs": [],
+            "has_torch": false,
+            "source": "lambda ctx, values: (\n    (lambda s, b: (\n        (lambda pre, post: FeatureBlock(\n            np.column_stack([\n                np.mean(post, axis=1) - np.mean(pre, axis=1),\n                np.abs(np.mean(post, axis=1) - np.mean(pre, axis=1)),\n                (np.median(post, axis=1) - np.median(pre, axis=1)) / (np.maximum(np.std(pre, axis=1), 1e-8)),\n                np.log((np.std(post, axis=1) + 1e-8) / (np.std(pre, axis=1) + 1e-8)),\n                (np.quantile(post, 0.75, axis=1) - np.quantile(post, 0.25, axis=1)) - (np.quantile(pre, 0.75, axis=1) - np.quantile(pre, 0.25, axis=1)),\n                np.mean(np.abs(np.sort(post, axis=1) - np.sort(pre, axis=1)), axis=1),\n                np.max(np.abs(np.quantile(post, np.linspace(0.1, 0.9, 9), axis=1).T - np.quantile(pre, np.linspace(0.1, 0.9, 9), axis=1).T), axis=1)\n            ]),\n            [\n                \"src_mean_delta\",\n                \"src_mean_delta_abs\",\n                \"src_scaled_median_delta\",\n                \"src_std_log_ratio\",\n                \"src_iqr_delta\",\n                \"src_sorted_l1_distance\",\n                \"src_quantile_max_distance\"\n            ]\n        ))(s[:, :b], s[:, b:])\n    ))(np.asarray(values[\"series\"], dtype=np.float64), int(ctx.read_input(\"boundary\")))\n)",
+            "age": 0,
+            "stats": {}
+          },
+          {
+            "id": "source_autocorr_volatility_shift",
+            "parents": [
+              "series"
+            ],
+            "description": "Source-backed autocorrelation, volatility, and increment-regime change features.",
+            "tags": [
+              "source"
+            ],
+            "primitive": "source",
+            "global_refs": [],
+            "has_torch": false,
+            "source": "lambda ctx, values: (\n    (lambda s, b: (\n        (lambda pre, post, pre_d, post_d: (\n            (lambda pre_c, post_c: FeatureBlock(\n                np.column_stack([\n                    np.mean(np.abs(post_d), axis=1) - np.mean(np.abs(pre_d), axis=1),\n                    np.log((np.std(post_d, axis=1) + 1e-8) / (np.std(pre_d, axis=1) + 1e-8)),\n                    (np.sum(post_c[:, 1:] * post_c[:, :-1], axis=1) / np.maximum(np.sum(post_c[:, :-1] ** 2, axis=1), 1e-8))\n                        - (np.sum(pre_c[:, 1:] * pre_c[:, :-1], axis=1) / np.maximum(np.sum(pre_c[:, :-1] ** 2, axis=1), 1e-8)),\n                    np.max(np.abs(np.cumsum(post - np.mean(post, axis=1, keepdims=True), axis=1)), axis=1) / np.maximum(np.std(post, axis=1), 1e-8),\n                    np.max(np.abs(np.cumsum(pre - np.mean(pre, axis=1, keepdims=True), axis=1)), axis=1) / np.maximum(np.std(pre, axis=1), 1e-8),\n                    np.max(np.abs(np.cumsum(post - np.mean(post, axis=1, keepdims=True), axis=1)), axis=1) / np.maximum(np.max(np.abs(np.cumsum(pre - np.mean(pre, axis=1, keepdims=True), axis=1)), axis=1), 1e-8)\n                ]),\n                [\n                    \"src_absdiff_delta\",\n                    \"src_diff_std_log_ratio\",\n                    \"src_autocorr_delta\",\n                    \"src_post_cusum_peak\",\n                    \"src_pre_cusum_peak\",\n                    \"src_cusum_peak_ratio\"\n                ]\n            ))(pre - np.mean(pre, axis=1, keepdims=True), post - np.mean(post, axis=1, keepdims=True))\n        ))(s[:, :b], s[:, b:], np.diff(s[:, :b], axis=1), np.diff(s[:, b:], axis=1))\n    ))(np.asarray(values[\"series\"], dtype=np.float64), int(ctx.read_input(\"boundary\")))\n)",
+            "age": 0,
+            "stats": {}
+          },
+          {
+            "id": "source_multiscale_tail_shift",
+            "parents": [
+              "series"
+            ],
+            "description": "Source-backed multiscale tail/head structural-break features.",
+            "tags": [
+              "source"
+            ],
+            "primitive": "source",
+            "global_refs": [],
+            "has_torch": false,
+            "source": "lambda ctx, values: (\n    (lambda s, b: (\n        (lambda pre, post, w1, w2: FeatureBlock(\n            np.column_stack([\n                np.mean(post[:, :w1], axis=1) - np.mean(pre[:, -w1:], axis=1),\n                np.mean(post[:, -w1:], axis=1) - np.mean(post[:, :w1], axis=1),\n                np.mean(post[:, -w2:], axis=1) - np.mean(pre[:, -w2:], axis=1),\n                np.std(post[:, -w1:], axis=1) - np.std(pre[:, -w1:], axis=1),\n                np.max(post, axis=1) - np.max(pre, axis=1),\n                np.min(post, axis=1) - np.min(pre, axis=1),\n                (s[:, -1] - np.mean(pre[:, -w2:], axis=1)) / np.maximum(np.std(pre[:, -w2:], axis=1), 1e-8)\n            ]),\n            [\n                \"src_boundary_jump\",\n                \"src_post_tail_drift\",\n                \"src_wide_tail_delta\",\n                \"src_tail_std_delta\",\n                \"src_max_delta\",\n                \"src_min_delta\",\n                \"src_last_pre_tail_z\"\n            ]\n        ))(s[:, :b], s[:, b:], max(2, (s.shape[1] - b) // 4), max(3, (s.shape[1] - b) // 2))\n    ))(np.asarray(values[\"series\"], dtype=np.float64), int(ctx.read_input(\"boundary\")))\n)",
+            "age": 0,
+            "stats": {}
+          },
+          {
+            "id": "source_rank_shape_shift",
+            "parents": [
+              "series"
+            ],
+            "description": "Source-backed rank and ordinal-shape shift features.",
+            "tags": [
+              "source"
+            ],
+            "primitive": "source",
+            "global_refs": [],
+            "has_torch": false,
+            "source": "lambda ctx, values: (\n    (lambda s, b: (\n        (lambda pre, post: (\n            (lambda combined, pre_rank, post_rank: FeatureBlock(\n                np.column_stack([\n                    np.mean(post_rank, axis=1) - np.mean(pre_rank, axis=1),\n                    np.std(post_rank, axis=1) - np.std(pre_rank, axis=1),\n                    np.mean(np.maximum(post_rank - 0.75, 0.0), axis=1) - np.mean(np.maximum(pre_rank - 0.75, 0.0), axis=1),\n                    np.mean(np.maximum(0.25 - post_rank, 0.0), axis=1) - np.mean(np.maximum(0.25 - pre_rank, 0.0), axis=1),\n                    np.mean(np.abs(np.diff(post_rank, axis=1)), axis=1) - np.mean(np.abs(np.diff(pre_rank, axis=1)), axis=1)\n                ]),\n                [\n                    \"src_rank_mean_delta\",\n                    \"src_rank_std_delta\",\n                    \"src_upper_rank_excess_delta\",\n                    \"src_lower_rank_excess_delta\",\n                    \"src_rank_path_variation_delta\"\n                ]\n            ))(\n                np.concatenate([pre, post], axis=1),\n                np.argsort(np.argsort(np.concatenate([pre, post], axis=1), axis=1), axis=1)[:, :pre.shape[1]] / np.maximum(np.concatenate([pre, post], axis=1).shape[1] - 1, 1),\n                np.argsort(np.argsort(np.concatenate([pre, post], axis=1), axis=1), axis=1)[:, pre.shape[1]:] / np.maximum(np.concatenate([pre, post], axis=1).shape[1] - 1, 1)\n            )\n        ))(s[:, :b], s[:, b:])\n    ))(np.asarray(values[\"series\"], dtype=np.float64), int(ctx.read_input(\"boundary\")))\n)",
+            "age": 0,
+            "stats": {}
+          },
+          {
+            "id": "source_spectral_entropy_shift",
+            "parents": [
+              "series"
+            ],
+            "description": "Source-backed spectral entropy and frequency centroid shift features.",
+            "tags": [
+              "source"
+            ],
+            "primitive": "source",
+            "global_refs": [],
+            "has_torch": false,
+            "source": "lambda ctx, values: (\n    (lambda s, b: (\n        (lambda pre, post: (\n            (lambda pre_fft, post_fft: (\n                (lambda pre_p, post_p, freq: FeatureBlock(\n                    np.column_stack([\n                        np.sum(post_p * freq.reshape(1, -1), axis=1) - np.sum(pre_p * freq.reshape(1, -1), axis=1),\n                        -np.sum(post_p * np.log(post_p + 1e-8), axis=1) + np.sum(pre_p * np.log(pre_p + 1e-8), axis=1),\n                        np.max(post_p, axis=1) - np.max(pre_p, axis=1),\n                        np.sum(post_p[:, :max(2, post_p.shape[1] // 3)], axis=1) - np.sum(pre_p[:, :max(2, pre_p.shape[1] // 3)], axis=1),\n                        np.sum(post_p[:, -max(2, post_p.shape[1] // 3):], axis=1) - np.sum(pre_p[:, -max(2, pre_p.shape[1] // 3):], axis=1)\n                    ]),\n                    [\n                        \"src_spectral_centroid_delta\",\n                        \"src_spectral_entropy_delta\",\n                        \"src_spectral_peak_share_delta\",\n                        \"src_spectral_low_share_delta\",\n                        \"src_spectral_high_share_delta\"\n                    ]\n                ))(\n                    pre_fft / np.maximum(np.sum(pre_fft, axis=1, keepdims=True), 1e-8),\n                    post_fft / np.maximum(np.sum(post_fft, axis=1, keepdims=True), 1e-8),\n                    np.linspace(0.0, 1.0, pre_fft.shape[1])\n                )\n            ))(np.abs(np.fft.rfft(pre, axis=1))[:, 1:] + 1e-8, np.abs(np.fft.rfft(post, axis=1))[:, 1:] + 1e-8)\n        ))(s[:, :b], s[:, b:])\n    ))(np.asarray(values[\"series\"], dtype=np.float64), int(ctx.read_input(\"boundary\")))\n)",
+            "age": 0,
+            "stats": {}
+          },
+          {
+            "id": "source_tail_extrema_shift",
+            "parents": [
+              "series"
+            ],
+            "description": "Source-backed tail extrema, range, and exceedance-rate shift features.",
+            "tags": [
+              "source"
+            ],
+            "primitive": "source",
+            "global_refs": [],
+            "has_torch": false,
+            "source": "lambda ctx, values: (\n    (lambda s, b: (\n        (lambda pre, post, w: (\n            (lambda pre_tail, post_tail, pre_med, post_med, pre_scale, post_scale: FeatureBlock(\n                np.column_stack([\n                    (np.max(post_tail, axis=1) - post_med) / post_scale - (np.max(pre_tail, axis=1) - pre_med) / pre_scale,\n                    (post_med - np.min(post_tail, axis=1)) / post_scale - (pre_med - np.min(pre_tail, axis=1)) / pre_scale,\n                    (np.max(post_tail, axis=1) - np.min(post_tail, axis=1)) - (np.max(pre_tail, axis=1) - np.min(pre_tail, axis=1)),\n                    np.mean(post_tail > (post_med.reshape(-1, 1) + post_scale.reshape(-1, 1)), axis=1) - np.mean(pre_tail > (pre_med.reshape(-1, 1) + pre_scale.reshape(-1, 1)), axis=1),\n                    np.mean(post_tail < (post_med.reshape(-1, 1) - post_scale.reshape(-1, 1)), axis=1) - np.mean(pre_tail < (pre_med.reshape(-1, 1) - pre_scale.reshape(-1, 1)), axis=1)\n                ]),\n                [\n                    \"src_tail_upper_extreme_delta\",\n                    \"src_tail_lower_extreme_delta\",\n                    \"src_tail_range_delta\",\n                    \"src_tail_high_exceedance_delta\",\n                    \"src_tail_low_exceedance_delta\"\n                ]\n            ))(\n                pre[:, -w:],\n                post[:, -w:],\n                np.median(pre, axis=1),\n                np.median(post, axis=1),\n                np.maximum(np.std(pre, axis=1), 1e-8),\n                np.maximum(np.std(post, axis=1), 1e-8)\n            )\n        ))(s[:, :b], s[:, b:], max(3, (s.shape[1] - b) // 3))\n    ))(np.asarray(values[\"series\"], dtype=np.float64), int(ctx.read_input(\"boundary\")))\n)",
+            "age": 0,
+            "stats": {}
+          },
+          {
+            "id": "source_moment_shape_shift",
+            "parents": [
+              "series"
+            ],
+            "description": "Source-backed skewness, kurtosis, and centered-moment shift features.",
+            "tags": [
+              "source"
+            ],
+            "primitive": "source",
+            "global_refs": [],
+            "has_torch": false,
+            "source": "lambda ctx, values: (\n    (lambda s, b: (\n        (lambda pre, post: (\n            (lambda pre_z, post_z: FeatureBlock(\n                np.column_stack([\n                    np.mean(post_z ** 3, axis=1) - np.mean(pre_z ** 3, axis=1),\n                    np.mean(post_z ** 4, axis=1) - np.mean(pre_z ** 4, axis=1),\n                    np.mean(np.abs(post_z), axis=1) - np.mean(np.abs(pre_z), axis=1),\n                    np.mean(np.maximum(post_z, 0.0) ** 2, axis=1) - np.mean(np.maximum(pre_z, 0.0) ** 2, axis=1),\n                    np.mean(np.minimum(post_z, 0.0) ** 2, axis=1) - np.mean(np.minimum(pre_z, 0.0) ** 2, axis=1)\n                ]),\n                [\n                    \"src_skew_delta\",\n                    \"src_kurtosis_delta\",\n                    \"src_abs_z_delta\",\n                    \"src_positive_energy_delta\",\n                    \"src_negative_energy_delta\"\n                ]\n            ))(\n                (pre - np.mean(pre, axis=1, keepdims=True)) / np.maximum(np.std(pre, axis=1, keepdims=True), 1e-8),\n                (post - np.mean(post, axis=1, keepdims=True)) / np.maximum(np.std(post, axis=1, keepdims=True), 1e-8)\n            )\n        ))(s[:, :b], s[:, b:])\n    ))(np.asarray(values[\"series\"], dtype=np.float64), int(ctx.read_input(\"boundary\")))\n)",
+            "age": 0,
+            "stats": {}
+          },
+          {
+            "id": "source_multiresolution_cusum_shift",
+            "parents": [
+              "series"
+            ],
+            "description": "Source-backed multi-resolution CUSUM location and energy-shift features.",
+            "tags": [
+              "source"
+            ],
+            "primitive": "source",
+            "global_refs": [],
+            "has_torch": false,
+            "source": "lambda ctx, values: (\n    (lambda s, b: (\n        (lambda pre, post: (\n            (lambda pre_c, post_c: (\n                (lambda pre_abs, post_abs, pre_scale, post_scale: FeatureBlock(\n                    np.column_stack([\n                        np.max(post_abs, axis=1) / post_scale - np.max(pre_abs, axis=1) / pre_scale,\n                        np.argmax(post_abs, axis=1) / np.maximum(post_abs.shape[1] - 1, 1) - np.argmax(pre_abs, axis=1) / np.maximum(pre_abs.shape[1] - 1, 1),\n                        np.mean(post_abs[:, :max(2, post_abs.shape[1] // 3)], axis=1) / post_scale - np.mean(pre_abs[:, :max(2, pre_abs.shape[1] // 3)], axis=1) / pre_scale,\n                        np.mean(post_abs[:, -max(2, post_abs.shape[1] // 3):], axis=1) / post_scale - np.mean(pre_abs[:, -max(2, pre_abs.shape[1] // 3):], axis=1) / pre_scale,\n                        np.max(np.abs(np.cumsum(s - np.mean(s, axis=1, keepdims=True), axis=1))[:, b - 1:], axis=1)\n                            / np.maximum(np.max(np.abs(np.cumsum(s - np.mean(s, axis=1, keepdims=True), axis=1)), axis=1), 1e-8)\n                    ]),\n                    [\n                        \"src_cusum_peak_delta\",\n                        \"src_cusum_peak_location_delta\",\n                        \"src_cusum_early_energy_delta\",\n                        \"src_cusum_late_energy_delta\",\n                        \"src_global_post_boundary_cusum_share\"\n                    ]\n                ))(\n                    np.abs(np.cumsum(pre_c, axis=1)),\n                    np.abs(np.cumsum(post_c, axis=1)),\n                    np.maximum(np.std(pre, axis=1), 1e-8),\n                    np.maximum(np.std(post, axis=1), 1e-8)\n                )\n            ))(pre - np.mean(pre, axis=1, keepdims=True), post - np.mean(post, axis=1, keepdims=True))\n        ))(s[:, :b], s[:, b:])\n    ))(np.asarray(values[\"series\"], dtype=np.float64), int(ctx.read_input(\"boundary\")))\n)",
+            "age": 0,
+            "stats": {}
+          },
+          {
+            "id": "source_haar_scale_energy_shift",
+            "parents": [
+              "series"
+            ],
+            "description": "Source-backed Haar-style scale-energy shift features.",
+            "tags": [
+              "source"
+            ],
+            "primitive": "source",
+            "global_refs": [],
+            "has_torch": false,
+            "source": "lambda ctx, values: (\n    (lambda s, b: (\n        (lambda pre, post, scales: FeatureBlock(\n            np.column_stack([\n                *[\n                    np.log(\n                        (np.mean(np.abs(post[:, scale:] - post[:, :-scale]), axis=1) + 1e-8)\n                        / (np.mean(np.abs(pre[:, scale:] - pre[:, :-scale]), axis=1) + 1e-8)\n                    )\n                    for scale in scales\n                ],\n                *[\n                    np.mean(post[:, scale:] - post[:, :-scale], axis=1) - np.mean(pre[:, scale:] - pre[:, :-scale], axis=1)\n                    for scale in scales\n                ]\n            ]),\n            [\n                \"src_haar_energy_log_ratio_s2\",\n                \"src_haar_energy_log_ratio_s4\",\n                \"src_haar_energy_log_ratio_s8\",\n                \"src_haar_signed_delta_s2\",\n                \"src_haar_signed_delta_s4\",\n                \"src_haar_signed_delta_s8\"\n            ]\n        ))(\n            s[:, :b],\n            s[:, b:],\n            np.asarray([2, min(4, max(2, s[:, b:].shape[1] - 1)), min(8, max(2, s[:, b:].shape[1] - 1))], dtype=np.int64)\n        )\n    ))(np.asarray(values[\"series\"], dtype=np.float64), int(ctx.read_input(\"boundary\")))\n)",
+            "age": 0,
+            "stats": {}
+          },
+          {
+            "id": "source_quantile_transport_shift",
+            "parents": [
+              "series"
+            ],
+            "description": "Source-backed quantile transport and tail-balance shift features.",
+            "tags": [
+              "source"
+            ],
+            "primitive": "source",
+            "global_refs": [],
+            "has_torch": false,
+            "source": "lambda ctx, values: (\n    (lambda s, b: (\n        (lambda pre, post, q: (\n            (lambda pre_q, post_q, diff: FeatureBlock(\n                np.column_stack([\n                    np.mean(diff, axis=1),\n                    np.mean(np.abs(diff), axis=1),\n                    np.max(np.abs(diff), axis=1),\n                    np.mean(diff[:, -4:], axis=1) - np.mean(diff[:, :4], axis=1),\n                    np.log((np.mean(np.maximum(post_q[:, -4:] - np.median(post, axis=1, keepdims=True), 0.0), axis=1) + 1e-8)\n                        / (np.mean(np.maximum(pre_q[:, -4:] - np.median(pre, axis=1, keepdims=True), 0.0), axis=1) + 1e-8)),\n                    np.log((np.mean(np.maximum(np.median(post, axis=1, keepdims=True) - post_q[:, :4], 0.0), axis=1) + 1e-8)\n                        / (np.mean(np.maximum(np.median(pre, axis=1, keepdims=True) - pre_q[:, :4], 0.0), axis=1) + 1e-8))\n                ]),\n                [\n                    \"src_quantile_transport_signed_mean\",\n                    \"src_quantile_transport_l1\",\n                    \"src_quantile_transport_linf\",\n                    \"src_quantile_tail_balance_delta\",\n                    \"src_upper_tail_spread_log_ratio\",\n                    \"src_lower_tail_spread_log_ratio\"\n                ]\n            ))(\n                np.quantile(pre, q, axis=1).T,\n                np.quantile(post, q, axis=1).T,\n                np.quantile(post, q, axis=1).T - np.quantile(pre, q, axis=1).T\n            )\n        ))(s[:, :b], s[:, b:], np.linspace(0.05, 0.95, 19))\n    ))(np.asarray(values[\"series\"], dtype=np.float64), int(ctx.read_input(\"boundary\")))\n)",
+            "age": 0,
+            "stats": {}
+          }
+        ]
+      },
+      {
+        "name": "ridge_w",
+        "kind": "fitting",
+        "description": "Sample-weight alternatives for the downstream Ridge readout.",
+        "alternatives": [
+          {
+            "id": "uniform",
+            "parents": [],
+            "description": "Uniform Ridge sample weights.",
+            "tags": [],
+            "primitive": "uniform_sample_weight",
+            "global_refs": [],
+            "has_torch": false,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          },
+          {
+            "id": "boundary_energy",
+            "parents": [
+              "series"
+            ],
+            "description": "Emphasize samples whose CUSUM energy concentrates near the boundary.",
+            "tags": [],
+            "primitive": "boundary_energy_weight",
+            "global_refs": [],
+            "has_torch": false,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          },
+          {
+            "id": "boundary_weight_mutation",
+            "parents": [
+              "series"
+            ],
+            "description": "Add an alternative sample-weighting policy for Ridge.",
+            "tags": [],
+            "primitive": "boundary_energy_weight",
+            "global_refs": [],
+            "has_torch": false,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          },
+          {
+            "id": "late_energy_weight_mutation",
+            "parents": [
+              "series"
+            ],
+            "description": "Add a sample-weighting policy for late post-period movement.",
+            "tags": [],
+            "primitive": "late_energy_weight",
+            "global_refs": [],
+            "has_torch": false,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          }
+        ]
+      },
+      {
+        "name": "ridge_g",
+        "kind": "fitting",
+        "description": "Residual-weighting alternatives for iterative Ridge fitting.",
+        "alternatives": [
+          {
+            "id": "identity",
+            "parents": [],
+            "description": "Identity residual weighting rule.",
+            "tags": [],
+            "primitive": "identity_residual_weight",
+            "global_refs": [],
+            "has_torch": false,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          },
+          {
+            "id": "huber",
+            "parents": [],
+            "description": "Huber-style residual weighting rule.",
+            "tags": [],
+            "primitive": "huber_residual_weight",
+            "global_refs": [
+              "residual_huber_scale"
+            ],
+            "has_torch": false,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          },
+          {
+            "id": "huber_residual_mutation",
+            "parents": [],
+            "description": "Add a robust residual reweighting policy for Ridge.",
+            "tags": [],
+            "primitive": "huber_residual_weight",
+            "global_refs": [
+              "residual_huber_scale"
+            ],
+            "has_torch": false,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          }
+        ]
+      }
+    ]
+  },
+  "metadata": {
+    "benchmark": "competition_event_source_suite_benchmark",
+    "stage": "pre_prune",
+    "score": {
+      "mean_validation_auc": 0.5411604619972135,
+      "min_validation_auc": 0.5271104340013282,
+      "mean_delta_vs_baseline": -0.012819511178822074,
+      "min_delta_vs_baseline": -0.0331262939958592,
+      "objective": 0.8047156789978775,
+      "splits": [
+        {
+          "seed": 211,
+          "train_auc": 0.5763396519395289,
+          "validation_auc": 0.5271104340013282,
+          "delta_vs_baseline": -0.0011523887651860854,
+          "alpha": 10000.0,
+          "n_features": 157,
+          "config": {
+            "activation": "sigmoid_gate_mutation",
+            "ridge_g": "huber",
+            "ridge_w": "late_energy_weight_mutation",
+            "segment_stats": "late_shift_mutation",
+            "shape_stats": "row_cusum_local_mutation",
+            "trend_stats": "linear"
+          }
+        },
+        {
+          "seed": 223,
+          "train_auc": 0.5711477987421384,
+          "validation_auc": 0.562033673190359,
+          "delta_vs_baseline": -0.0331262939958592,
+          "alpha": 10000.0,
+          "n_features": 157,
+          "config": {
+            "activation": "clipped_linear",
+            "ridge_g": "huber",
+            "ridge_w": "boundary_energy",
+            "segment_stats": "late_shift_mutation",
+            "shape_stats": "row_cusum_local_mutation",
+            "trend_stats": "linear"
+          }
+        },
+        {
+          "seed": 307,
+          "train_auc": 0.573788893120825,
+          "validation_auc": 0.5343372787999531,
+          "delta_vs_baseline": -0.004179850775420935,
+          "alpha": 10000.0,
+          "n_features": 149,
+          "config": {
+            "activation": "sigmoid_gate_mutation",
+            "ridge_g": "huber",
+            "ridge_w": "boundary_weight_mutation",
+            "segment_stats": "basic",
+            "shape_stats": "spectral_mutation",
+            "trend_stats": "linear"
+          }
+        }
+      ]
+    }
+  }
+}

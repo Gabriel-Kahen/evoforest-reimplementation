@@ -12,6 +12,8 @@ from benchmarks.competition_mutation_usefulness import build_report as build_mut
 from benchmarks.competition_event_benchmark import build_report as build_event_benchmark_report
 from benchmarks.competition_event_campaign import build_campaign_report as build_event_campaign_report
 from benchmarks.competition_event_multisplit_benchmark import build_report as build_multisplit_event_report
+from benchmarks.competition_event_readout_benchmark import run as run_event_readout_benchmark
+from benchmarks.competition_event_source_suite_benchmark import build_report as build_source_suite_event_report
 from benchmarks.competition_row_benchmark import build_report as build_row_benchmark_report
 from evoforest_arch.competition import COMPETITION_DATASET_NAME, COMPETITION_ROW_DATASET_NAME, competition_data_summary, load_competition_event_dataset, load_competition_row_dataset
 from evoforest_arch.production import ProductionConfig, ProductionEvolutionRunner, recheck_run
@@ -292,6 +294,55 @@ def test_competition_event_multisplit_benchmark_uses_fixed_outer_test_and_writes
     assert all(row["audit"]["no_group_overlap"] for row in report["split_audits"])
     assert Path(report["consensus_graph"]["path"]).exists()
     assert Path(report["pruned_consensus_graph"]["path"]).exists()
+    assert "mean_delta_vs_baseline" in report["internal_test"]
+
+
+def test_competition_event_readout_benchmark_reports_rank_and_blend_readouts(tmp_path) -> None:
+    data_dir = write_competition_bundle(tmp_path, include_reduced=False, n_train=48)
+
+    json_path, markdown_path = run_event_readout_benchmark(
+        tmp_path / "readout",
+        data_dir=data_dir,
+        seed=13,
+        split_seeds=(13, 17),
+        series_length=20,
+        max_samples=None,
+        folds=2,
+        max_configurations=4,
+        max_interaction_base=4,
+    )
+    report = json.loads(json_path.read_text(encoding="utf-8"))
+
+    assert markdown_path.exists()
+    assert report["benchmark"] == "competition_event_readout_benchmark"
+    assert report["reduced_test_access"]["accessed"] is False
+    assert {"ridge", "rank_interaction", "ridge_rank_blend"} <= set(report["summary"]["readouts"])
+    assert report["summary"]["best_by_validation_auc"] in report["summary"]["readouts"]
+    assert all("validation_predictions" not in row["ridge_rank_blend"] for row in report["splits"])
+
+
+def test_competition_event_source_suite_benchmark_prunes_all_source_candidates(tmp_path) -> None:
+    data_dir = write_competition_bundle(tmp_path, include_reduced=False, n_train=48)
+
+    report = build_source_suite_event_report(
+        tmp_path / "source_suite",
+        data_dir=data_dir,
+        seed=13,
+        split_seeds=(13, 17),
+        series_length=20,
+        max_samples=None,
+        folds=2,
+        max_configurations=4,
+        screen_sources=False,
+    )
+
+    assert report["benchmark"] == "competition_event_source_suite_benchmark"
+    assert report["reduced_test_access"]["accessed"] is False
+    assert report["source_mutations"]["passed_repair_checks"] == report["source_mutations"]["templates"]
+    assert all(row["audit"]["no_group_overlap"] for row in report["split_audits"])
+    assert Path(report["source_suite_graph"]["path"]).exists()
+    assert Path(report["pruned_source_suite_graph"]["path"]).exists()
+    assert report["pruning"]["attempted"] == report["source_mutations"]["templates"]
     assert "mean_delta_vs_baseline" in report["internal_test"]
 
 
