@@ -185,6 +185,7 @@ def build_report(
         "max_configurations": int(max_configurations),
         "irls_steps": 0,
         "group_key": "sample_id",
+        "diagnostics_mode": "basic",
     }
 
     seed_graph = build_seed_graph()

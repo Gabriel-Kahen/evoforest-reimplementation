@@ -169,6 +169,23 @@ def test_ridge_evaluator_scores_synthetic_breaks() -> None:
     assert "alternatives[name,age,evals,sel,n,imp,shap" in toon
 
 
+def test_ridge_evaluator_basic_diagnostics_skips_feature_rows() -> None:
+    dataset = make_structural_break_data(n_series=80, length=80, seed=10)
+    graph = build_seed_graph()
+
+    result = RidgeEvaluator(n_splits=2, seed=10, max_configurations=4, diagnostics_mode="basic").evaluate(
+        graph,
+        dataset.inputs(),
+        dataset.y,
+    )
+
+    assert result.auc > 0.7
+    assert result.diagnostics["diagnostics_mode"] == "basic"
+    assert result.diagnostics["features"] == []
+    assert result.diagnostics["subnodes"] == []
+    assert result.diagnostics["configuration_search"]["evaluated"] == 4
+
+
 def test_ridge_g_runs_iterative_reweighted_least_squares() -> None:
     dataset = make_structural_break_data(n_series=84, length=90, seed=16)
     graph = build_seed_graph()

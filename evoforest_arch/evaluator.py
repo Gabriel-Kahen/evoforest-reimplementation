@@ -80,6 +80,7 @@ class RidgeEvaluator:
         refine_backend: str = "auto",
         irls_steps: int = 2,
         group_key: str | None = None,
+        diagnostics_mode: str = "full",
     ) -> None:
         self.n_splits = int(n_splits)
         self.seed = int(seed)
@@ -90,6 +91,9 @@ class RidgeEvaluator:
         self.refine_backend = refine_backend
         self.irls_steps = max(0, int(irls_steps))
         self.group_key = group_key
+        if diagnostics_mode not in {"full", "basic"}:
+            raise ValueError("diagnostics_mode must be 'full' or 'basic'.")
+        self.diagnostics_mode = diagnostics_mode
 
     def evaluate(
         self,
@@ -216,21 +220,24 @@ class RidgeEvaluator:
                 }
             )
         auc = roc_auc_score(y, preds)
-        feature_dependencies = feature_dependency_rows(names, graph.output_dependency_map(config))
-        global_fit = self._fit_global_diagnostic_model(x, y, sample_weight, residual_rule)
-        diagnostics = self._diagnostics(
-            x,
-            y,
-            preds,
-            names,
-            coefs,
-            feature_dependencies,
-            fold_contributions,
-            fold_intercepts,
-            global_fit,
-        )
         selected_alternatives = graph.selected_alternatives(config)
-        diagnostics["alternatives"] = alternative_diagnostics(diagnostics["features"], selected_alternatives, auc)
+        if self.diagnostics_mode == "full":
+            feature_dependencies = feature_dependency_rows(names, graph.output_dependency_map(config))
+            global_fit = self._fit_global_diagnostic_model(x, y, sample_weight, residual_rule)
+            diagnostics = self._diagnostics(
+                x,
+                y,
+                preds,
+                names,
+                coefs,
+                feature_dependencies,
+                fold_contributions,
+                fold_intercepts,
+                global_fit,
+            )
+            diagnostics["alternatives"] = alternative_diagnostics(diagnostics["features"], selected_alternatives, auc)
+        else:
+            diagnostics = self._basic_diagnostics(preds, y, names, selected_alternatives)
         diagnostics["folds"] = {
             "auc": fold_aucs,
             "auc_mean": float(np.mean(fold_aucs)) if fold_aucs else 0.0,
@@ -468,6 +475,41 @@ class RidgeEvaluator:
                 "description": residual_rule.description,
             }
         return sample_weight, residual_rule, diagnostics
+
+    @staticmethod
+    def _basic_diagnostics(
+        preds: np.ndarray,
+        y: np.ndarray,
+        names: list[str],
+        selected_alternatives: dict[str, str],
+    ) -> dict[str, object]:
+        residual = y - preds
+        return {
+            "prediction_std": float(np.std(preds)),
+            "residual_std": float(np.std(residual)),
+            "effective_rank": 0.0,
+            "mean_max_corr": 0.0,
+            "global_ridge": {},
+            "linear_shap": {
+                "basis": "skipped",
+                "global_reconstruction_error": 0.0,
+                "cv_reconstruction_error": 0.0,
+                "mean_abs_contribution_total": 0.0,
+                "top_feature": "",
+            },
+            "features": [],
+            "subnodes": [],
+            "alternatives": [
+                {
+                    "name": f"{node}.{alternative}",
+                    "selected": True,
+                    "last_auc": float(roc_auc_score(y, preds)),
+                }
+                for node, alternative in selected_alternatives.items()
+            ],
+            "diagnostics_mode": "basic",
+            "n_features": int(len(names)),
+        }
 
     @staticmethod
     def _diagnostics(
