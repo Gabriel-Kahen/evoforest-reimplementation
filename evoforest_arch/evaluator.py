@@ -237,7 +237,7 @@ class RidgeEvaluator:
             )
             diagnostics["alternatives"] = alternative_diagnostics(diagnostics["features"], selected_alternatives, auc)
         else:
-            diagnostics = self._basic_diagnostics(preds, y, names, selected_alternatives)
+            diagnostics = self._basic_diagnostics(preds, y, names, selected_alternatives, auc)
         diagnostics["folds"] = {
             "auc": fold_aucs,
             "auc_mean": float(np.mean(fold_aucs)) if fold_aucs else 0.0,
@@ -482,6 +482,7 @@ class RidgeEvaluator:
         y: np.ndarray,
         names: list[str],
         selected_alternatives: dict[str, str],
+        auc: float,
     ) -> dict[str, object]:
         residual = y - preds
         return {
@@ -503,7 +504,7 @@ class RidgeEvaluator:
                 {
                     "name": f"{node}.{alternative}",
                     "selected": True,
-                    "last_auc": float(roc_auc_score(y, preds)),
+                    "last_auc": float(auc),
                 }
                 for node, alternative in selected_alternatives.items()
             ],
