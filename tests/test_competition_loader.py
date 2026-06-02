@@ -414,6 +414,7 @@ def test_competition_row_multisplit_benchmark_writes_pruned_graph_and_avoids_red
         folds=2,
         max_configurations=4,
         include_builtin_templates=False,
+        skip_pruning=True,
     )
 
     assert report["benchmark"] == "competition_row_multisplit_benchmark"
@@ -422,6 +423,7 @@ def test_competition_row_multisplit_benchmark_writes_pruned_graph_and_avoids_red
     assert Path(report["row_baseline_graph"]["path"]).exists()
     assert Path(report["pruned_row_template_suite_graph"]["path"]).exists()
     assert report["template_suite"]["added_templates"] >= 1
+    assert report["pruning"]["skipped"] is True
     assert "mean_delta_vs_baseline" in report["internal_test"]
     assert report["ensembles"]["best"]["name"]
     assert report["ensembles"]["internal_test"]["test_used_for_selection"] is False

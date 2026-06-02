@@ -161,6 +161,7 @@ def build_report(
     include_focused_row_templates: bool = True,
     include_builtin_templates: bool = True,
     include_source_mutations: bool = False,
+    skip_pruning: bool = False,
 ) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
     config = ProductionConfig(
@@ -238,26 +239,34 @@ def build_report(
         stability_weight=stability_weight,
         objective_mode=objective_mode,
     )
-    pruned_graph, prune_rows, pruned_score = prune_graph(
-        suite_graph,
-        [(spec.target_node, spec.alternative_id, 0) for spec in suite_specs],
-        contexts,
-        evaluator_kwargs=evaluator_kwargs,
-        stability_weight=stability_weight,
-        objective_mode=objective_mode,
-        prune_tolerance=prune_tolerance,
-        allow_source=include_source_mutations,
-    )
-    pruned_output_only_graph, output_only_prune_rows, pruned_output_only_score = prune_graph(
-        suite_output_only_graph,
-        [(spec.target_node, spec.alternative_id, 0) for spec in suite_specs],
-        contexts,
-        evaluator_kwargs=evaluator_kwargs,
-        stability_weight=stability_weight,
-        objective_mode=objective_mode,
-        prune_tolerance=prune_tolerance,
-        allow_source=include_source_mutations,
-    )
+    if skip_pruning:
+        pruned_graph = suite_graph.clone()
+        prune_rows: list[dict[str, Any]] = []
+        pruned_score = suite_score
+        pruned_output_only_graph = suite_output_only_graph.clone()
+        output_only_prune_rows: list[dict[str, Any]] = []
+        pruned_output_only_score = suite_output_only_score
+    else:
+        pruned_graph, prune_rows, pruned_score = prune_graph(
+            suite_graph,
+            [(spec.target_node, spec.alternative_id, 0) for spec in suite_specs],
+            contexts,
+            evaluator_kwargs=evaluator_kwargs,
+            stability_weight=stability_weight,
+            objective_mode=objective_mode,
+            prune_tolerance=prune_tolerance,
+            allow_source=include_source_mutations,
+        )
+        pruned_output_only_graph, output_only_prune_rows, pruned_output_only_score = prune_graph(
+            suite_output_only_graph,
+            [(spec.target_node, spec.alternative_id, 0) for spec in suite_specs],
+            contexts,
+            evaluator_kwargs=evaluator_kwargs,
+            stability_weight=stability_weight,
+            objective_mode=objective_mode,
+            prune_tolerance=prune_tolerance,
+            allow_source=include_source_mutations,
+        )
     row_baseline_path = write_graph(
         output_dir / "row_baseline_graph.json",
         row_baseline_graph,
@@ -357,6 +366,7 @@ def build_report(
             "include_focused_row_templates": bool(include_focused_row_templates),
             "include_builtin_templates": bool(include_builtin_templates),
             "include_source_mutations": bool(include_source_mutations),
+            "skip_pruning": bool(skip_pruning),
             "objective": objective_description(objective_mode),
         },
         "outer_split": outer_split,
@@ -440,11 +450,13 @@ def build_report(
             "pruned_output_only_delta_vs_suite_output_only": float(pruned_output_only_score.objective) - float(suite_output_only_score.objective),
         },
         "pruning": {
+            "skipped": bool(skip_pruning),
             "attempted": len(prune_rows),
             "removed": sum(1 for row in prune_rows if row.get("removed")),
             "rows": prune_rows,
         },
         "output_only_pruning": {
+            "skipped": bool(skip_pruning),
             "attempted": len(output_only_prune_rows),
             "removed": sum(1 for row in output_only_prune_rows if row.get("removed")),
             "rows": output_only_prune_rows,
@@ -1039,6 +1051,7 @@ def run(
     include_focused_row_templates: bool = True,
     include_builtin_templates: bool = True,
     include_source_mutations: bool = False,
+    skip_pruning: bool = False,
 ) -> tuple[Path, Path]:
     payload = build_report(
         output_dir,
@@ -1056,6 +1069,7 @@ def run(
         include_focused_row_templates=include_focused_row_templates,
         include_builtin_templates=include_builtin_templates,
         include_source_mutations=include_source_mutations,
+        skip_pruning=skip_pruning,
     )
     return write_report(output_dir, "competition_row_multisplit_benchmark", payload, markdown_report(payload))
 
@@ -1077,6 +1091,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--disable-focused-row-templates", action="store_true")
     parser.add_argument("--disable-builtins", action="store_true")
     parser.add_argument("--include-source-mutations", action="store_true")
+    parser.add_argument("--skip-pruning", action="store_true", help="Skip backward pruning for quick archive/ensemble audits.")
     args = parser.parse_args(argv)
     print_report_paths(
         run(
@@ -1095,6 +1110,7 @@ def main(argv: list[str] | None = None) -> int:
             include_focused_row_templates=not args.disable_focused_row_templates,
             include_builtin_templates=not args.disable_builtins,
             include_source_mutations=args.include_source_mutations,
+            skip_pruning=args.skip_pruning,
         )
     )
     return 0
