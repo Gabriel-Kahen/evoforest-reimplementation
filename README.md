@@ -285,6 +285,17 @@ internal-test AUC `0.6420` with no reduced-test access. That is a real full-data
 improvement over the row baseline (`0.6334` internal-test AUC), but it is not yet
 a reliable `0.65` internal-test result.
 
+The archive/OOF row multi-split audit committed at
+`benchmark_reports/competition-row-multisplit-pc-2k-32-l480-ensemble-cfg4-skipprune`
+uses the validation-only archive selector on a 2k-id PC run with pruning skipped
+for turnaround. It selected `best_archive_member` (`row_baseline_graph`) with
+mean validation AUC `0.6839`, minimum split validation AUC `0.6670`, and no
+reduced-test access. The selected member's non-selection internal-test mean/min
+AUC was `0.6438`/`0.6416`, and the OOF archive selector did not improve beyond
+that single graph. Treat this as evidence that grouped validation can clear
+`0.65`, not as evidence that the selected graph/ensemble reliably clears `0.65`
+on untouched internal tests.
+
 For the 2026 real-time CrunchDAO contest interface, use the self-contained
 notebook in `submissions/structural_break_real_time/`. It defines the required
 `train()` and streaming `infer()` functions and adapts the same row/time/tail

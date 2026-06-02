@@ -1,0 +1,435 @@
+{
+  "graph_hash": "fb3f004b98ad85e3797e789b3f409e494a2cd2dfc5d55828221b8ac12cc91aba",
+  "graph": {
+    "name": "evoforest_seed",
+    "globals": {
+      "gate_scale": {
+        "name": "gate_scale",
+        "shape": [
+          1
+        ],
+        "trainable": true,
+        "description": "Shared scale for callable gate families.",
+        "value": [
+          1.0
+        ]
+      },
+      "projection_vector": {
+        "name": "projection_vector",
+        "shape": [
+          16
+        ],
+        "trainable": true,
+        "description": "Low-dimensional global vector used by projection outputs.",
+        "value": [
+          0.2,
+          0.25333333333333335,
+          0.3066666666666667,
+          0.36,
+          0.41333333333333333,
+          0.4666666666666667,
+          0.52,
+          0.5733333333333334,
+          0.6266666666666667,
+          0.68,
+          0.7333333333333334,
+          0.7866666666666666,
+          0.8400000000000001,
+          0.8933333333333333,
+          0.9466666666666668,
+          1.0
+        ]
+      },
+      "residual_huber_scale": {
+        "name": "residual_huber_scale",
+        "shape": [
+          1
+        ],
+        "trainable": true,
+        "description": "Shared threshold for residual-based Ridge reweighting.",
+        "value": [
+          1.0
+        ]
+      }
+    },
+    "nodes": [
+      {
+        "name": "series",
+        "kind": "input",
+        "description": "Batch of univariate time series with shape (n_series, length).",
+        "alternatives": []
+      },
+      {
+        "name": "boundary",
+        "kind": "input",
+        "description": "Known boundary index separating pre and post segments.",
+        "alternatives": []
+      },
+      {
+        "name": "segment_stats",
+        "kind": "intermediate",
+        "description": "Segment-level change statistics.",
+        "alternatives": [
+          {
+            "id": "basic",
+            "parents": [
+              "series"
+            ],
+            "description": "Mean and variance segment statistics.",
+            "tags": [],
+            "primitive": "segment_basic",
+            "global_refs": [],
+            "has_torch": true,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          },
+          {
+            "id": "robust",
+            "parents": [
+              "series"
+            ],
+            "description": "Robust quantile segment statistics.",
+            "tags": [],
+            "primitive": "segment_robust",
+            "global_refs": [],
+            "has_torch": true,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          }
+        ]
+      },
+      {
+        "name": "trend_stats",
+        "kind": "intermediate",
+        "description": "Trend summaries around the boundary.",
+        "alternatives": [
+          {
+            "id": "linear",
+            "parents": [
+              "series"
+            ],
+            "description": "Linear trend summaries before and after boundary.",
+            "tags": [],
+            "primitive": "trend_basic",
+            "global_refs": [],
+            "has_torch": true,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          }
+        ]
+      },
+      {
+        "name": "shape_stats",
+        "kind": "intermediate",
+        "description": "Profile and frequency shape statistics.",
+        "alternatives": [
+          {
+            "id": "cusum",
+            "parents": [
+              "series"
+            ],
+            "description": "CUSUM profile statistics.",
+            "tags": [],
+            "primitive": "cusum_basic",
+            "global_refs": [],
+            "has_torch": true,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          },
+          {
+            "id": "spectral",
+            "parents": [
+              "series"
+            ],
+            "description": "Frequency-band ratio change statistics.",
+            "tags": [],
+            "primitive": "spectral_basic",
+            "global_refs": [],
+            "has_torch": true,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          }
+        ]
+      },
+      {
+        "name": "activation",
+        "kind": "callable",
+        "description": "Reusable callable family node.",
+        "alternatives": [
+          {
+            "id": "identity",
+            "parents": [],
+            "description": "Identity callable.",
+            "tags": [],
+            "primitive": "identity_callable",
+            "global_refs": [],
+            "has_torch": true,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          },
+          {
+            "id": "sigmoid_gate",
+            "parents": [],
+            "description": "Sigmoid gate callable.",
+            "tags": [],
+            "primitive": "sigmoid_gate_callable",
+            "global_refs": [
+              "gate_scale"
+            ],
+            "has_torch": true,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          },
+          {
+            "id": "clipped_linear",
+            "parents": [],
+            "description": "Clipped linear callable.",
+            "tags": [],
+            "primitive": "clipped_linear_callable",
+            "global_refs": [
+              "gate_scale"
+            ],
+            "has_torch": true,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          }
+        ]
+      },
+      {
+        "name": "output",
+        "kind": "output",
+        "description": "Candidate predictive feature alternatives evaluated as an ensemble.",
+        "alternatives": [
+          {
+            "id": "raw_concat",
+            "parents": [
+              "segment_stats",
+              "trend_stats",
+              "shape_stats"
+            ],
+            "description": "Concatenate parent feature blocks.",
+            "tags": [],
+            "primitive": "pass_outputs",
+            "global_refs": [],
+            "has_torch": true,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          },
+          {
+            "id": "activated",
+            "parents": [
+              "segment_stats",
+              "trend_stats",
+              "shape_stats",
+              "activation"
+            ],
+            "description": "Apply callable family to parent features.",
+            "tags": [],
+            "primitive": "activated_outputs",
+            "global_refs": [],
+            "has_torch": true,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          },
+          {
+            "id": "projection",
+            "parents": [
+              "segment_stats",
+              "trend_stats",
+              "shape_stats"
+            ],
+            "description": "Projection using persistent global parameters.",
+            "tags": [],
+            "primitive": "projection_outputs",
+            "global_refs": [
+              "projection_vector"
+            ],
+            "has_torch": true,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          },
+          {
+            "id": "adia_row_baseline_output",
+            "parents": [
+              "series"
+            ],
+            "description": "Graph-embedded deterministic ADIA row-level baseline features.",
+            "tags": [],
+            "primitive": "adia_row_baseline_outputs",
+            "global_refs": [],
+            "has_torch": false,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          },
+          {
+            "id": "row_time_basis_output",
+            "parents": [
+              "series"
+            ],
+            "description": "Expanded target-time and observed-lookback basis features.",
+            "tags": [],
+            "primitive": "row_time_basis_outputs",
+            "global_refs": [],
+            "has_torch": false,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          },
+          {
+            "id": "row_multiscale_tail_output",
+            "parents": [
+              "series"
+            ],
+            "description": "Multiscale recent-tail drift, volatility, slope, and drawdown features.",
+            "tags": [],
+            "primitive": "row_multiscale_tail_outputs",
+            "global_refs": [],
+            "has_torch": false,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          }
+        ]
+      },
+      {
+        "name": "ridge_w",
+        "kind": "fitting",
+        "description": "Sample-weight alternatives for the downstream Ridge readout.",
+        "alternatives": [
+          {
+            "id": "uniform",
+            "parents": [],
+            "description": "Uniform Ridge sample weights.",
+            "tags": [],
+            "primitive": "uniform_sample_weight",
+            "global_refs": [],
+            "has_torch": false,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          },
+          {
+            "id": "boundary_energy",
+            "parents": [
+              "series"
+            ],
+            "description": "Emphasize samples whose CUSUM energy concentrates near the boundary.",
+            "tags": [],
+            "primitive": "boundary_energy_weight",
+            "global_refs": [],
+            "has_torch": false,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          }
+        ]
+      },
+      {
+        "name": "ridge_g",
+        "kind": "fitting",
+        "description": "Residual-weighting alternatives for iterative Ridge fitting.",
+        "alternatives": [
+          {
+            "id": "identity",
+            "parents": [],
+            "description": "Identity residual weighting rule.",
+            "tags": [],
+            "primitive": "identity_residual_weight",
+            "global_refs": [],
+            "has_torch": false,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          },
+          {
+            "id": "huber",
+            "parents": [],
+            "description": "Huber-style residual weighting rule.",
+            "tags": [],
+            "primitive": "huber_residual_weight",
+            "global_refs": [
+              "residual_huber_scale"
+            ],
+            "has_torch": false,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          }
+        ]
+      }
+    ]
+  },
+  "metadata": {
+    "benchmark": "competition_row_multisplit_benchmark",
+    "stage": "pre_prune",
+    "score": {
+      "mean_validation_auc": 0.6730205475774458,
+      "min_validation_auc": 0.6523013961570797,
+      "mean_delta_vs_baseline": -0.005765139774916587,
+      "min_delta_vs_baseline": -0.010874597005934628,
+      "objective": 0.9991712456559856,
+      "splits": [
+        {
+          "seed": 113,
+          "train_auc": 0.6880196596993318,
+          "validation_auc": 0.6523013961570797,
+          "delta_vs_baseline": -0.005970925412826067,
+          "alpha": 0.0001,
+          "n_features": 146,
+          "config": {
+            "segment_stats": "basic",
+            "trend_stats": "linear",
+            "shape_stats": "cusum",
+            "activation": "identity",
+            "ridge_w": "uniform",
+            "ridge_g": "identity"
+          }
+        },
+        {
+          "seed": 127,
+          "train_auc": 0.6835293907943971,
+          "validation_auc": 0.6860956194660348,
+          "delta_vs_baseline": -0.010874597005934628,
+          "alpha": 0.0001,
+          "n_features": 146,
+          "config": {
+            "activation": "identity",
+            "ridge_g": "huber",
+            "ridge_w": "boundary_energy",
+            "segment_stats": "robust",
+            "shape_stats": "cusum",
+            "trend_stats": "linear"
+          }
+        },
+        {
+          "seed": 149,
+          "train_auc": 0.6846675087034915,
+          "validation_auc": 0.6806646271092232,
+          "delta_vs_baseline": -0.00044989690598906673,
+          "alpha": 0.0001,
+          "n_features": 146,
+          "config": {
+            "activation": "identity",
+            "ridge_g": "identity",
+            "ridge_w": "boundary_energy",
+            "segment_stats": "basic",
+            "shape_stats": "spectral",
+            "trend_stats": "linear"
+          }
+        }
+      ]
+    }
+  }
+}

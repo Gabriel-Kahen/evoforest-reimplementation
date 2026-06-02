@@ -208,6 +208,17 @@ internal-test AUC for `row_baseline_time_tail_graph`, with reduced-test access
 set to `False`. Treat that as evidence of a stronger graph primitive set, not as
 evidence that the current graph reliably reaches `0.65` on untouched tests.
 
+The committed archive/OOF row report
+`benchmark_reports/competition-row-multisplit-pc-2k-32-l480-ensemble-cfg4-skipprune`
+is a faster 2k-id PC audit with `skip_pruning=True`. It reports a
+validation-only selected `best_archive_member` (`row_baseline_graph`) at
+`0.6839` mean validation AUC and `0.6670` minimum split validation AUC, with
+reduced-test access set to `False`. The same selected member reaches only
+`0.6438` mean and `0.6416` minimum AUC on the internal non-selection test, and
+the OOF archive selector does not select a multi-member improvement. Treat this
+as useful grouped-validation signal, not reliable `0.65` untouched-test
+evidence.
+
 The default suite scripts accept `--seed`, `--output`, and `--quick`. The
 external parquet benchmark accepts `--seed` and `--output` plus data-capping
 arguments such as `--max-ids` and `--max-rows-per-id`.
