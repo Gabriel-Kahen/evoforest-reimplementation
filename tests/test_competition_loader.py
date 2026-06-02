@@ -8,9 +8,13 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from benchmarks.competition_mutation_usefulness import build_report as build_mutation_usefulness_report
+from benchmarks.competition_event_benchmark import build_report as build_event_benchmark_report
+from benchmarks.competition_event_campaign import build_campaign_report as build_event_campaign_report
 from benchmarks.competition_row_benchmark import build_report as build_row_benchmark_report
 from evoforest_arch.competition import COMPETITION_DATASET_NAME, COMPETITION_ROW_DATASET_NAME, competition_data_summary, load_competition_event_dataset, load_competition_row_dataset
 from evoforest_arch.production import ProductionConfig, ProductionEvolutionRunner, recheck_run
+from evoforest_arch.seed import build_seed_graph
+from evoforest_arch.source_mutations import structural_break_source_mutations, validate_source_mutations
 from evoforest_arch.splits import make_grouped_split_manifest, split_dataset
 
 
@@ -144,6 +148,63 @@ def test_competition_mutation_usefulness_benchmark_uses_diverse_train_only_candi
     assert len(primitives) == len(set(primitives))
     assert "reduced_test" not in report["dataset"]["split"]
     assert report["summary"]["duplicate_proposals"] is False
+
+
+def test_structural_break_source_mutations_pass_repair_checks(tmp_path) -> None:
+    data_dir = write_competition_bundle(tmp_path, include_reduced=False, n_train=24)
+    dataset = load_competition_event_dataset(data_dir, split="train", series_length=20)
+
+    checks = validate_source_mutations(build_seed_graph(), structural_break_source_mutations(), dataset.inputs)
+
+    assert checks
+    assert all(check.passed for check in checks)
+    assert all(check.n_features > 0 for check in checks)
+
+
+def test_competition_event_benchmark_reports_source_candidates_and_no_reduced_access(tmp_path) -> None:
+    data_dir = write_competition_bundle(tmp_path, include_reduced=False, n_train=30)
+
+    report = build_event_benchmark_report(
+        tmp_path,
+        data_dir=data_dir,
+        seed=13,
+        series_length=20,
+        max_samples=None,
+        steps=4,
+        folds=2,
+        max_configurations=4,
+    )
+
+    assert report["dataset"]["name"] == COMPETITION_DATASET_NAME
+    assert report["split"]["group_key"] == "sample_id"
+    assert report["split"]["audit"]["no_group_overlap"] is True
+    assert report["source_mutations"]["passed_repair_checks"] == report["source_mutations"]["templates"]
+    assert any(row["source_backed"] for row in report["evolution"]["candidates"])
+    assert report["reduced_test_access"]["accessed"] is False
+    assert all("reduced" not in Path(path).name for path in report["reduced_test_access"]["read_paths"])
+    assert "validation_auc" in report["baseline"]
+    assert "best" in report["ensembles"]
+
+
+def test_competition_event_campaign_aggregates_multiple_seeds(tmp_path) -> None:
+    data_dir = write_competition_bundle(tmp_path, include_reduced=False, n_train=30)
+
+    report = build_event_campaign_report(
+        tmp_path / "campaign",
+        data_dir=data_dir,
+        seeds=(13, 17),
+        series_length=20,
+        max_samples=None,
+        steps=4,
+        folds=2,
+        max_configurations=4,
+    )
+
+    assert report["summary"]["seed_count"] == 2
+    assert report["summary"]["any_reduced_test_accessed"] is False
+    assert len(report["seeds_detail"]) == 2
+    assert all(row["source_backed_candidates"] >= 1 for row in report["seeds_detail"])
+    assert all(row["group_overlap"] == {"train_validation": 0, "train_test": 0, "validation_test": 0} for row in report["seeds_detail"])
 
 
 def test_competition_row_benchmark_reports_grouped_holdout_and_no_reduced_access(tmp_path) -> None:

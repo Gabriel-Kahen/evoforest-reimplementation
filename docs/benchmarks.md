@@ -66,6 +66,16 @@ Each command writes paired JSON and Markdown reports. The top-level
     non-evolved row-local baseline on train ids, and compares validation-only
     graph evolution on held-out ids. It is not part of `benchmarks.run_all`
     because it requires the downloaded parquet bundle.
+- `competition_event_benchmark`
+  - Optional external-data benchmark for the paper's likely id-level ADIA
+    protocol. It loads one structural-break label per id from the index parquet,
+    uses grouped id splits, compares a strong fixed structural-break baseline
+    against source-backed EvoForest mutations, and reports validation-selected
+    graph archive ensembles.
+- `competition_event_campaign`
+  - Multi-seed wrapper around `competition_event_benchmark`. Use this on the PC
+    to scale toward the paper-style `600+` step campaign and aggregate per-seed
+    baseline, evolved graph, ensemble, source-candidate, and leakage results.
 
 ## Interpreting Results
 
@@ -98,6 +108,19 @@ python -m benchmarks.competition_row_benchmark \
   --max-rows-per-id 16 \
   --steps 8 \
   --output benchmark_reports/competition-row
+python -m benchmarks.competition_event_benchmark \
+  --data-dir /Users/gabrielkahen/Downloads/data \
+  --series-length 160 \
+  --steps 24 \
+  --max-configurations 96 \
+  --output benchmark_reports/competition-event
+python -m benchmarks.competition_event_campaign \
+  --data-dir /Users/gabrielkahen/Downloads/data \
+  --seeds 211,223,227 \
+  --series-length 160 \
+  --steps 96 \
+  --max-configurations 64 \
+  --output benchmark_reports/competition-event-campaign
 ```
 
 The default suite scripts accept `--seed`, `--output`, and `--quick`. The

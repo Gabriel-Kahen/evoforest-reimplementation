@@ -139,6 +139,8 @@ class EngineerAgent:
             alternative_id=f"{selected.alternative_id}_{suffix}",
             parents=selected.parents,
             description=selected.description,
+            source=selected.source,
+            global_refs=selected.global_refs,
         )
         removals = self._safe_redundancy_removals(graph)
         return MutationDocument(
@@ -170,6 +172,7 @@ class EngineerAgent:
             candidates,
             key=lambda template: (
                 target_rank.get(template.target_node, len(target_rank) + 1),
+                0 if template.source else 1,
                 template.target_node,
                 template.primitive,
                 template.alternative_id,
@@ -183,6 +186,10 @@ class EngineerAgent:
         if node is None:
             return False
         for alternative in node.alternatives:
+            if template.source:
+                if alternative.source.strip() == template.source.strip():
+                    return True
+                continue
             if alternative.primitive == template.primitive and alternative.parents == template.parents:
                 return True
         return False

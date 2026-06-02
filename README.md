@@ -171,6 +171,33 @@ python -m benchmarks.competition_mutation_usefulness \
   --output benchmark_reports/competition
 ```
 
+To target the paper's likely id-level ADIA protocol more directly, run the
+structural-break event benchmark. It uses one label per id, a grouped id split,
+strong fixed structural-break baselines, trusted source-backed graph mutations,
+and validation-selected graph archive ensembles:
+
+```bash
+python -m benchmarks.competition_event_benchmark \
+  --data-dir /Users/gabrielkahen/Downloads/data \
+  --series-length 160 \
+  --steps 24 \
+  --max-configurations 96 \
+  --output benchmark_reports/competition-event
+```
+
+For multi-seed campaigns, use the campaign runner. The paper-scale target is
+`600+` steps per seed on the PC; start smaller to size runtime:
+
+```bash
+python -m benchmarks.competition_event_campaign \
+  --data-dir /Users/gabrielkahen/Downloads/data \
+  --seeds 211,223,227 \
+  --series-length 160 \
+  --steps 96 \
+  --max-configurations 64 \
+  --output benchmark_reports/competition-event-campaign
+```
+
 ## Run Benchmarks
 
 The benchmark suite generates reproducible JSON and Markdown reports that show
