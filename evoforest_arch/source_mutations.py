@@ -98,6 +98,33 @@ def structural_break_source_mutations() -> tuple[MutationSpec, ...]:
             source=SOURCE_MOMENT_SHAPE_SHIFT,
             description="Source-backed skewness, kurtosis, and centered-moment shift features.",
         ),
+        MutationSpec(
+            kind="add_alternative",
+            target_node="output",
+            primitive="source",
+            alternative_id="source_multiresolution_cusum_shift",
+            parents=("series",),
+            source=SOURCE_MULTIRESOLUTION_CUSUM_SHIFT,
+            description="Source-backed multi-resolution CUSUM location and energy-shift features.",
+        ),
+        MutationSpec(
+            kind="add_alternative",
+            target_node="output",
+            primitive="source",
+            alternative_id="source_haar_scale_energy_shift",
+            parents=("series",),
+            source=SOURCE_HAAR_SCALE_ENERGY_SHIFT,
+            description="Source-backed Haar-style scale-energy shift features.",
+        ),
+        MutationSpec(
+            kind="add_alternative",
+            target_node="output",
+            primitive="source",
+            alternative_id="source_quantile_transport_shift",
+            parents=("series",),
+            source=SOURCE_QUANTILE_TRANSPORT_SHIFT,
+            description="Source-backed quantile transport and tail-balance shift features.",
+        ),
     )
 
 
@@ -314,5 +341,102 @@ SOURCE_MOMENT_SHAPE_SHIFT = """lambda ctx, values: (
                 (post - np.mean(post, axis=1, keepdims=True)) / np.maximum(np.std(post, axis=1, keepdims=True), 1e-8)
             )
         ))(s[:, :b], s[:, b:])
+    ))(np.asarray(values["series"], dtype=np.float64), int(ctx.read_input("boundary")))
+)"""
+
+
+SOURCE_MULTIRESOLUTION_CUSUM_SHIFT = """lambda ctx, values: (
+    (lambda s, b: (
+        (lambda pre, post: (
+            (lambda pre_c, post_c: (
+                (lambda pre_abs, post_abs, pre_scale, post_scale: FeatureBlock(
+                    np.column_stack([
+                        np.max(post_abs, axis=1) / post_scale - np.max(pre_abs, axis=1) / pre_scale,
+                        np.argmax(post_abs, axis=1) / np.maximum(post_abs.shape[1] - 1, 1) - np.argmax(pre_abs, axis=1) / np.maximum(pre_abs.shape[1] - 1, 1),
+                        np.mean(post_abs[:, :max(2, post_abs.shape[1] // 3)], axis=1) / post_scale - np.mean(pre_abs[:, :max(2, pre_abs.shape[1] // 3)], axis=1) / pre_scale,
+                        np.mean(post_abs[:, -max(2, post_abs.shape[1] // 3):], axis=1) / post_scale - np.mean(pre_abs[:, -max(2, pre_abs.shape[1] // 3):], axis=1) / pre_scale,
+                        np.max(np.abs(np.cumsum(s - np.mean(s, axis=1, keepdims=True), axis=1))[:, b - 1:], axis=1)
+                            / np.maximum(np.max(np.abs(np.cumsum(s - np.mean(s, axis=1, keepdims=True), axis=1)), axis=1), 1e-8)
+                    ]),
+                    [
+                        "src_cusum_peak_delta",
+                        "src_cusum_peak_location_delta",
+                        "src_cusum_early_energy_delta",
+                        "src_cusum_late_energy_delta",
+                        "src_global_post_boundary_cusum_share"
+                    ]
+                ))(
+                    np.abs(np.cumsum(pre_c, axis=1)),
+                    np.abs(np.cumsum(post_c, axis=1)),
+                    np.maximum(np.std(pre, axis=1), 1e-8),
+                    np.maximum(np.std(post, axis=1), 1e-8)
+                )
+            ))(pre - np.mean(pre, axis=1, keepdims=True), post - np.mean(post, axis=1, keepdims=True))
+        ))(s[:, :b], s[:, b:])
+    ))(np.asarray(values["series"], dtype=np.float64), int(ctx.read_input("boundary")))
+)"""
+
+
+SOURCE_HAAR_SCALE_ENERGY_SHIFT = """lambda ctx, values: (
+    (lambda s, b: (
+        (lambda pre, post, scales: FeatureBlock(
+            np.column_stack([
+                *[
+                    np.log(
+                        (np.mean(np.abs(post[:, scale:] - post[:, :-scale]), axis=1) + 1e-8)
+                        / (np.mean(np.abs(pre[:, scale:] - pre[:, :-scale]), axis=1) + 1e-8)
+                    )
+                    for scale in scales
+                ],
+                *[
+                    np.mean(post[:, scale:] - post[:, :-scale], axis=1) - np.mean(pre[:, scale:] - pre[:, :-scale], axis=1)
+                    for scale in scales
+                ]
+            ]),
+            [
+                "src_haar_energy_log_ratio_s2",
+                "src_haar_energy_log_ratio_s4",
+                "src_haar_energy_log_ratio_s8",
+                "src_haar_signed_delta_s2",
+                "src_haar_signed_delta_s4",
+                "src_haar_signed_delta_s8"
+            ]
+        ))(
+            s[:, :b],
+            s[:, b:],
+            np.asarray([2, min(4, max(2, s[:, b:].shape[1] - 1)), min(8, max(2, s[:, b:].shape[1] - 1))], dtype=np.int64)
+        )
+    ))(np.asarray(values["series"], dtype=np.float64), int(ctx.read_input("boundary")))
+)"""
+
+
+SOURCE_QUANTILE_TRANSPORT_SHIFT = """lambda ctx, values: (
+    (lambda s, b: (
+        (lambda pre, post, q: (
+            (lambda pre_q, post_q, diff: FeatureBlock(
+                np.column_stack([
+                    np.mean(diff, axis=1),
+                    np.mean(np.abs(diff), axis=1),
+                    np.max(np.abs(diff), axis=1),
+                    np.mean(diff[:, -4:], axis=1) - np.mean(diff[:, :4], axis=1),
+                    np.log((np.mean(np.maximum(post_q[:, -4:] - np.median(post, axis=1, keepdims=True), 0.0), axis=1) + 1e-8)
+                        / (np.mean(np.maximum(pre_q[:, -4:] - np.median(pre, axis=1, keepdims=True), 0.0), axis=1) + 1e-8)),
+                    np.log((np.mean(np.maximum(np.median(post, axis=1, keepdims=True) - post_q[:, :4], 0.0), axis=1) + 1e-8)
+                        / (np.mean(np.maximum(np.median(pre, axis=1, keepdims=True) - pre_q[:, :4], 0.0), axis=1) + 1e-8))
+                ]),
+                [
+                    "src_quantile_transport_signed_mean",
+                    "src_quantile_transport_l1",
+                    "src_quantile_transport_linf",
+                    "src_quantile_tail_balance_delta",
+                    "src_upper_tail_spread_log_ratio",
+                    "src_lower_tail_spread_log_ratio"
+                ]
+            ))(
+                np.quantile(pre, q, axis=1).T,
+                np.quantile(post, q, axis=1).T,
+                np.quantile(post, q, axis=1).T - np.quantile(pre, q, axis=1).T
+            )
+        ))(s[:, :b], s[:, b:], np.linspace(0.05, 0.95, 19))
     ))(np.asarray(values["series"], dtype=np.float64), int(ctx.read_input("boundary")))
 )"""

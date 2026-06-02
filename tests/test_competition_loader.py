@@ -11,6 +11,7 @@ import benchmarks.competition_event_campaign as event_campaign
 from benchmarks.competition_mutation_usefulness import build_report as build_mutation_usefulness_report
 from benchmarks.competition_event_benchmark import build_report as build_event_benchmark_report
 from benchmarks.competition_event_campaign import build_campaign_report as build_event_campaign_report
+from benchmarks.competition_event_multisplit_benchmark import build_report as build_multisplit_event_report
 from benchmarks.competition_row_benchmark import build_report as build_row_benchmark_report
 from evoforest_arch.competition import COMPETITION_DATASET_NAME, COMPETITION_ROW_DATASET_NAME, competition_data_summary, load_competition_event_dataset, load_competition_row_dataset
 from evoforest_arch.production import ProductionConfig, ProductionEvolutionRunner, recheck_run
@@ -265,6 +266,33 @@ def test_competition_event_campaign_ranks_best_seed_by_delta_not_raw_auc(tmp_pat
 
     assert report["summary"]["best_evolved"]["seed"] == 1
     assert report["summary"]["best_ensemble"]["seed"] == 1
+
+
+def test_competition_event_multisplit_benchmark_uses_fixed_outer_test_and_writes_graphs(tmp_path) -> None:
+    data_dir = write_competition_bundle(tmp_path, include_reduced=False, n_train=48)
+
+    report = build_multisplit_event_report(
+        tmp_path / "multisplit",
+        data_dir=data_dir,
+        seed=13,
+        split_seeds=(13, 17),
+        series_length=20,
+        max_samples=None,
+        steps=2,
+        folds=2,
+        max_configurations=4,
+    )
+
+    assert report["benchmark"] == "competition_event_multisplit_benchmark"
+    assert report["outer_split"]["test_groups"] > 0
+    assert len(report["split_contexts"]) == 2
+    assert report["reduced_test_access"]["accessed"] is False
+    assert report["source_mutations"]["passed_repair_checks"] == report["source_mutations"]["templates"]
+    assert report["evolution"]["validation_selection"] == "multi_split_grouped"
+    assert all(row["audit"]["no_group_overlap"] for row in report["split_audits"])
+    assert Path(report["consensus_graph"]["path"]).exists()
+    assert Path(report["pruned_consensus_graph"]["path"]).exists()
+    assert "mean_delta_vs_baseline" in report["internal_test"]
 
 
 def test_competition_row_benchmark_reports_grouped_holdout_and_no_reduced_access(tmp_path) -> None:

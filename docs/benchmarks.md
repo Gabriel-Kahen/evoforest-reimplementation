@@ -76,6 +76,11 @@ Each command writes paired JSON and Markdown reports. The top-level
   - Multi-seed wrapper around `competition_event_benchmark`. Use this on the PC
     to scale toward the paper-style `600+` step campaign and aggregate per-seed
     baseline, evolved graph, ensemble, source-candidate, and leakage results.
+- `competition_event_multisplit_benchmark`
+  - Stronger id-level benchmark that uses one fixed grouped outer test holdout,
+    evolves against multiple grouped validation splits inside the development
+    pool, prunes accepted alternatives with the same robust objective, writes
+    consensus graph artifacts, and reports archive/OOF validation ensembles.
 
 ## Interpreting Results
 
@@ -122,6 +127,14 @@ python -m benchmarks.competition_event_campaign \
   --max-configurations 64 \
   --resume-existing \
   --output benchmark_reports/competition-event-campaign
+python -m benchmarks.competition_event_multisplit_benchmark \
+  --data-dir /Users/gabrielkahen/Downloads/data \
+  --split-seeds 211,223,307 \
+  --series-length 160 \
+  --steps 96 \
+  --max-configurations 64 \
+  --objective-mode auc \
+  --output benchmark_reports/competition-event-multisplit
 ```
 
 The default suite scripts accept `--seed`, `--output`, and `--quick`. The

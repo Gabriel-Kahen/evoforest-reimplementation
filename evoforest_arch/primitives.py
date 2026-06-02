@@ -39,6 +39,7 @@ class PrimitiveRegistry:
         registry.register("activated_outputs", activated_outputs_factory)
         registry.register("projection_outputs", projection_outputs_factory)
         registry.register("competition_event_outputs", competition_event_outputs_factory)
+        registry.register("adia_structural_break_baseline_outputs", adia_structural_break_baseline_outputs_factory)
         registry.register("interaction_outputs", interaction_outputs_factory)
         registry.register("uniform_sample_weight", uniform_sample_weight_factory)
         registry.register("boundary_energy_weight", boundary_energy_weight_factory)
@@ -676,6 +677,107 @@ def competition_event_outputs_factory(alternative_id: str, parents: tuple[str, .
     return NodeAlternative(alternative_id, parents, fn, "Always-evaluated competition event detection output features.")
 
 
+def adia_structural_break_baseline_outputs_factory(alternative_id: str, parents: tuple[str, ...]) -> NodeAlternative:
+    def fn(ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
+        series = np.asarray(values[parents[0]], dtype=np.float64)
+        boundary = int(ctx.read_input("boundary"))
+        pre, post = split_segments(series, boundary)
+        pre_tail = _tail_window(pre)
+        post_head = _head_window(post)
+        post_tail = _tail_window(post)
+        pre_d = np.diff(pre, axis=1)
+        post_d = np.diff(post, axis=1)
+        pre_mean = np.mean(pre, axis=1)
+        post_mean = np.mean(post, axis=1)
+        pre_std = safe_std(pre)
+        post_std = safe_std(post)
+        pre_iqr = np.quantile(pre, 0.75, axis=1) - np.quantile(pre, 0.25, axis=1)
+        post_iqr = np.quantile(post, 0.75, axis=1) - np.quantile(post, 0.25, axis=1)
+        pre_c = pre - pre_mean.reshape(-1, 1)
+        post_c = post - post_mean.reshape(-1, 1)
+        pre_cusum = np.cumsum(pre_c, axis=1)
+        post_cusum = np.cumsum(post_c, axis=1)
+        pre_fft = np.abs(np.fft.rfft(pre, axis=1))
+        post_fft = np.abs(np.fft.rfft(post, axis=1))
+        pre_low = _safe_band_mean(pre_fft, 1, 4)
+        post_low = _safe_band_mean(post_fft, 1, 4)
+        pre_high = _safe_band_mean(pre_fft, 4, pre_fft.shape[1])
+        post_high = _safe_band_mean(post_fft, 4, post_fft.shape[1])
+        quantiles = np.linspace(0.1, 0.9, 9)
+        pre_q = np.quantile(pre, quantiles, axis=1).T
+        post_q = np.quantile(post, quantiles, axis=1).T
+        paired = max(1, min(pre.shape[1], post.shape[1]))
+        sorted_pre = np.sort(pre, axis=1)[:, :paired]
+        sorted_post = np.sort(post, axis=1)[:, :paired]
+        post_drawdown, post_drawup = _drawdown_drawup(post)
+        pre_drawdown, pre_drawup = _drawdown_drawup(pre)
+        features = np.column_stack(
+            [
+                post_mean - pre_mean,
+                np.abs(post_mean - pre_mean),
+                (post_mean - pre_mean) / pre_std,
+                np.median(post, axis=1) - np.median(pre, axis=1),
+                np.log((post_std + 1e-8) / (pre_std + 1e-8)),
+                post_iqr - pre_iqr,
+                np.log((post_iqr + 1e-8) / (pre_iqr + 1e-8)),
+                np.mean(np.abs(post_d), axis=1) - np.mean(np.abs(pre_d), axis=1),
+                np.log((safe_std(post_d) + 1e-8) / (safe_std(pre_d) + 1e-8)),
+                _autocorr1(post) - _autocorr1(pre),
+                slope(post) - slope(pre),
+                slope(post_tail) - slope(pre_tail),
+                np.mean(post_head, axis=1) - np.mean(pre_tail, axis=1),
+                np.mean(post_tail, axis=1) - np.mean(post_head, axis=1),
+                np.mean(np.abs(post_q - pre_q), axis=1),
+                np.max(np.abs(post_q - pre_q), axis=1),
+                np.mean(sorted_post - sorted_pre, axis=1),
+                np.mean(np.abs(sorted_post - sorted_pre), axis=1),
+                np.max(np.abs(post_cusum), axis=1) / post_std,
+                np.max(np.abs(pre_cusum), axis=1) / pre_std,
+                np.max(np.abs(post_cusum), axis=1) / np.maximum(np.max(np.abs(pre_cusum), axis=1), 1e-8),
+                np.log((post_low + 1e-8) / (pre_low + 1e-8)),
+                np.log((post_high + 1e-8) / (pre_high + 1e-8)),
+                np.log((post_high + 1e-8) / (post_low + 1e-8)) - np.log((pre_high + 1e-8) / (pre_low + 1e-8)),
+                post_drawdown - pre_drawdown,
+                post_drawup - pre_drawup,
+                series[:, -1] - pre_mean,
+                series[:, -1] - np.mean(pre_tail, axis=1),
+            ]
+        )
+        names = [
+            "adia_mean_delta",
+            "adia_mean_delta_abs",
+            "adia_mean_delta_scaled",
+            "adia_median_delta",
+            "adia_std_log_ratio",
+            "adia_iqr_delta",
+            "adia_iqr_log_ratio",
+            "adia_absdiff_delta",
+            "adia_diff_std_log_ratio",
+            "adia_autocorr_delta",
+            "adia_slope_delta",
+            "adia_tail_slope_delta",
+            "adia_boundary_jump",
+            "adia_post_tail_drift",
+            "adia_quantile_l1_distance",
+            "adia_quantile_max_distance",
+            "adia_sorted_signed_distance",
+            "adia_sorted_l1_distance",
+            "adia_post_cusum_peak",
+            "adia_pre_cusum_peak",
+            "adia_cusum_peak_ratio",
+            "adia_low_freq_log_ratio",
+            "adia_high_freq_log_ratio",
+            "adia_spectral_shape_delta",
+            "adia_drawdown_delta",
+            "adia_drawup_delta",
+            "adia_last_vs_pre_mean",
+            "adia_last_vs_pre_tail",
+        ]
+        return FeatureBlock(features, names)
+
+    return NodeAlternative(alternative_id, parents, fn, "Always-evaluated full ADIA structural-break baseline feature block.")
+
+
 def interaction_outputs_factory(alternative_id: str, parents: tuple[str, ...]) -> NodeAlternative:
     def fn(_ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
         block = combine_blocks(values, parents)
@@ -777,6 +879,17 @@ def _drawdown_drawup(x: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     drawup = np.max(x - cumulative_min, axis=1)
     scale = np.maximum(safe_std(x), 1e-8)
     return drawdown / scale, drawup / scale
+
+
+def _autocorr1(x: np.ndarray) -> np.ndarray:
+    centered = x - np.mean(x, axis=1, keepdims=True)
+    return np.sum(centered[:, 1:] * centered[:, :-1], axis=1) / np.maximum(np.sum(centered[:, :-1] ** 2, axis=1), 1e-8)
+
+
+def _safe_band_mean(x: np.ndarray, start: int, stop: int) -> np.ndarray:
+    start = min(max(0, int(start)), x.shape[1] - 1)
+    stop = min(max(start + 1, int(stop)), x.shape[1])
+    return np.mean(x[:, start:stop], axis=1)
 
 
 def _row_context_features(ctx: EvalContext, n_rows: int, series_length: int) -> tuple[np.ndarray, list[str]]:

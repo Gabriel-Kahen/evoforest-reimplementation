@@ -199,6 +199,22 @@ python -m benchmarks.competition_event_campaign \
   --output benchmark_reports/competition-event-campaign
 ```
 
+To reduce single-split overfitting, use the multi-split runner. It keeps one
+fixed grouped outer test holdout, evolves against several grouped validation
+splits inside the development pool, prunes accepted alternatives by the same
+objective, and reports archive/OOF validation ensembles:
+
+```bash
+python -m benchmarks.competition_event_multisplit_benchmark \
+  --data-dir /Users/gabrielkahen/Downloads/data \
+  --split-seeds 211,223,307 \
+  --series-length 160 \
+  --steps 96 \
+  --max-configurations 64 \
+  --objective-mode auc \
+  --output benchmark_reports/competition-event-multisplit
+```
+
 ## Run Benchmarks
 
 The benchmark suite generates reproducible JSON and Markdown reports that show

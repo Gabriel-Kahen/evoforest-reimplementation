@@ -345,6 +345,14 @@ def built_in_mutations() -> list[MutationSpec]:
         MutationSpec(
             kind="add_alternative",
             target_node="output",
+            primitive="adia_structural_break_baseline_outputs",
+            alternative_id="adia_baseline_output_mutation",
+            parents=("series",),
+            description="Add the full deterministic ADIA structural-break baseline feature block as graph outputs.",
+        ),
+        MutationSpec(
+            kind="add_alternative",
+            target_node="output",
             primitive="competition_event_outputs",
             alternative_id="competition_event_output_mutation",
             parents=("series",),

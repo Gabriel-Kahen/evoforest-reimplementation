@@ -1,0 +1,882 @@
+{
+  "graph_hash": "c994e562e63a103ba473088663e8327a98b6df119885b2350ea0c57cf06d6af8",
+  "graph": {
+    "name": "evoforest_seed",
+    "globals": {
+      "gate_scale": {
+        "name": "gate_scale",
+        "shape": [
+          1
+        ],
+        "trainable": true,
+        "description": "Shared scale for callable gate families.",
+        "value": [
+          1.0
+        ]
+      },
+      "projection_vector": {
+        "name": "projection_vector",
+        "shape": [
+          16
+        ],
+        "trainable": true,
+        "description": "Low-dimensional global vector used by projection outputs.",
+        "value": [
+          0.2,
+          0.25333333333333335,
+          0.3066666666666667,
+          0.36,
+          0.41333333333333333,
+          0.4666666666666667,
+          0.52,
+          0.5733333333333334,
+          0.6266666666666667,
+          0.68,
+          0.7333333333333334,
+          0.7866666666666666,
+          0.8400000000000001,
+          0.8933333333333333,
+          0.9466666666666668,
+          1.0
+        ]
+      },
+      "residual_huber_scale": {
+        "name": "residual_huber_scale",
+        "shape": [
+          1
+        ],
+        "trainable": true,
+        "description": "Shared threshold for residual-based Ridge reweighting.",
+        "value": [
+          1.0
+        ]
+      }
+    },
+    "nodes": [
+      {
+        "name": "series",
+        "kind": "input",
+        "description": "Batch of univariate time series with shape (n_series, length).",
+        "alternatives": []
+      },
+      {
+        "name": "boundary",
+        "kind": "input",
+        "description": "Known boundary index separating pre and post segments.",
+        "alternatives": []
+      },
+      {
+        "name": "segment_stats",
+        "kind": "intermediate",
+        "description": "Segment-level change statistics.",
+        "alternatives": [
+          {
+            "id": "basic",
+            "parents": [
+              "series"
+            ],
+            "description": "Mean and variance segment statistics.",
+            "tags": [],
+            "primitive": "segment_basic",
+            "global_refs": [],
+            "has_torch": true,
+            "source": "",
+            "age": 6,
+            "stats": {
+              "participation_count": 6,
+              "selected_count": 6,
+              "output_count": 0,
+              "last_participation_age": 6,
+              "last_selected": true,
+              "kind": "intermediate",
+              "last_feature_count": 30,
+              "mean_feature_count": 25.5,
+              "last_importance": 0.6509398170682043,
+              "mean_importance": 0.7466347040853686,
+              "last_shap_importance": 0.6774639180571316,
+              "mean_shap_importance": 0.7544941829493093,
+              "last_mean_abs_shap": 0.0021939065895347372,
+              "mean_abs_shap": 0.0022220580733603055,
+              "max_feature_auc": 0.5455834456424079,
+              "last_abs_residual_corr": 0.011896094146956986,
+              "mean_abs_residual_corr": 0.010416866347339834,
+              "last_redundancy": 0.7958981391122822,
+              "mean_redundancy": 0.8742883996381887,
+              "last_weight_stability": 1.80349595660976,
+              "mean_weight_stability": 2.536823186318618,
+              "last_config_auc": 0.5404739931247314,
+              "mean_config_auc": 0.5449858881206296,
+              "best_config_auc": 0.5548574895503731
+            }
+          },
+          {
+            "id": "robust",
+            "parents": [
+              "series"
+            ],
+            "description": "Robust quantile segment statistics.",
+            "tags": [],
+            "primitive": "segment_robust",
+            "global_refs": [],
+            "has_torch": true,
+            "source": "",
+            "age": 6,
+            "stats": {}
+          }
+        ]
+      },
+      {
+        "name": "trend_stats",
+        "kind": "intermediate",
+        "description": "Trend summaries around the boundary.",
+        "alternatives": [
+          {
+            "id": "linear",
+            "parents": [
+              "series"
+            ],
+            "description": "Linear trend summaries before and after boundary.",
+            "tags": [],
+            "primitive": "trend_basic",
+            "global_refs": [],
+            "has_torch": true,
+            "source": "",
+            "age": 6,
+            "stats": {
+              "participation_count": 6,
+              "selected_count": 6,
+              "output_count": 0,
+              "last_participation_age": 6,
+              "last_selected": true,
+              "kind": "intermediate",
+              "last_feature_count": 30,
+              "mean_feature_count": 25.5,
+              "last_importance": 0.6509398170682043,
+              "mean_importance": 0.7466347040853686,
+              "last_shap_importance": 0.6774639180571316,
+              "mean_shap_importance": 0.7544941829493093,
+              "last_mean_abs_shap": 0.0021939065895347372,
+              "mean_abs_shap": 0.0022220580733603055,
+              "max_feature_auc": 0.5455834456424079,
+              "last_abs_residual_corr": 0.011896094146956986,
+              "mean_abs_residual_corr": 0.010416866347339834,
+              "last_redundancy": 0.7958981391122822,
+              "mean_redundancy": 0.8742883996381887,
+              "last_weight_stability": 1.80349595660976,
+              "mean_weight_stability": 2.536823186318618,
+              "last_config_auc": 0.5404739931247314,
+              "mean_config_auc": 0.5449858881206296,
+              "best_config_auc": 0.5548574895503731
+            }
+          }
+        ]
+      },
+      {
+        "name": "shape_stats",
+        "kind": "intermediate",
+        "description": "Profile and frequency shape statistics.",
+        "alternatives": [
+          {
+            "id": "cusum",
+            "parents": [
+              "series"
+            ],
+            "description": "CUSUM profile statistics.",
+            "tags": [],
+            "primitive": "cusum_basic",
+            "global_refs": [],
+            "has_torch": true,
+            "source": "",
+            "age": 6,
+            "stats": {
+              "participation_count": 5,
+              "selected_count": 5,
+              "output_count": 0,
+              "last_participation_age": 5,
+              "last_selected": true,
+              "kind": "intermediate",
+              "last_feature_count": 30,
+              "mean_feature_count": 24.6,
+              "last_importance": 0.735271624472894,
+              "mean_importance": 0.7657736814888014,
+              "last_shap_importance": 0.7389756902791292,
+              "mean_shap_importance": 0.7699002359277448,
+              "last_mean_abs_shap": 0.0021048368329050302,
+              "mean_abs_shap": 0.0022276883701254193,
+              "max_feature_auc": 0.5455834456424079,
+              "last_abs_residual_corr": 0.010506682028391301,
+              "mean_abs_residual_corr": 0.010121020787416403,
+              "last_redundancy": 0.8472941841375781,
+              "mean_redundancy": 0.8899664517433701,
+              "last_weight_stability": 2.6616641831134946,
+              "mean_weight_stability": 2.6834886322603895,
+              "last_config_auc": 0.5548574895503731,
+              "mean_config_auc": 0.5458882671198093,
+              "best_config_auc": 0.5548574895503731
+            }
+          },
+          {
+            "id": "spectral",
+            "parents": [
+              "series"
+            ],
+            "description": "Frequency-band ratio change statistics.",
+            "tags": [],
+            "primitive": "spectral_basic",
+            "global_refs": [],
+            "has_torch": true,
+            "source": "",
+            "age": 6,
+            "stats": {
+              "participation_count": 1,
+              "selected_count": 1,
+              "output_count": 0,
+              "last_participation_age": 6,
+              "last_selected": true,
+              "kind": "intermediate",
+              "last_feature_count": 30,
+              "mean_feature_count": 30.0,
+              "last_importance": 0.6509398170682043,
+              "mean_importance": 0.6509398170682043,
+              "last_shap_importance": 0.6774639180571316,
+              "mean_shap_importance": 0.6774639180571316,
+              "last_mean_abs_shap": 0.0021939065895347372,
+              "mean_abs_shap": 0.0021939065895347372,
+              "max_feature_auc": 0.5455834456424079,
+              "last_abs_residual_corr": 0.011896094146956986,
+              "mean_abs_residual_corr": 0.011896094146956986,
+              "last_redundancy": 0.7958981391122822,
+              "mean_redundancy": 0.7958981391122822,
+              "last_weight_stability": 1.80349595660976,
+              "mean_weight_stability": 1.80349595660976,
+              "last_config_auc": 0.5404739931247314,
+              "mean_config_auc": 0.5404739931247314,
+              "best_config_auc": 0.5404739931247314
+            }
+          }
+        ]
+      },
+      {
+        "name": "activation",
+        "kind": "callable",
+        "description": "Reusable callable family node.",
+        "alternatives": [
+          {
+            "id": "identity",
+            "parents": [],
+            "description": "Identity callable.",
+            "tags": [],
+            "primitive": "identity_callable",
+            "global_refs": [],
+            "has_torch": true,
+            "source": "",
+            "age": 6,
+            "stats": {
+              "participation_count": 2,
+              "selected_count": 2,
+              "output_count": 0,
+              "last_participation_age": 4,
+              "last_selected": true,
+              "kind": "callable",
+              "last_feature_count": 10,
+              "mean_feature_count": 10.0,
+              "last_importance": 0.2151708913654814,
+              "mean_importance": 0.28535136404819117,
+              "last_shap_importance": 0.24180986715954406,
+              "mean_shap_importance": 0.29829865010018586,
+              "last_mean_abs_shap": 0.00198832495884169,
+              "mean_abs_shap": 0.002035543484026502,
+              "max_feature_auc": 0.5455834456424079,
+              "last_abs_residual_corr": 0.010178595272010479,
+              "mean_abs_residual_corr": 0.011372990714933652,
+              "last_redundancy": 1.0,
+              "mean_redundancy": 1.0,
+              "last_weight_stability": 2.0147033701966106,
+              "mean_weight_stability": 3.0989635864629763,
+              "last_config_auc": 0.545245908043283,
+              "mean_config_auc": 0.5469827312590336,
+              "best_config_auc": 0.5487195544747842
+            }
+          },
+          {
+            "id": "sigmoid_gate",
+            "parents": [],
+            "description": "Sigmoid gate callable.",
+            "tags": [],
+            "primitive": "sigmoid_gate_callable",
+            "global_refs": [
+              "gate_scale"
+            ],
+            "has_torch": true,
+            "source": "",
+            "age": 6,
+            "stats": {
+              "participation_count": 1,
+              "selected_count": 1,
+              "output_count": 0,
+              "last_participation_age": 5,
+              "last_selected": true,
+              "kind": "callable",
+              "last_feature_count": 10,
+              "mean_feature_count": 10.0,
+              "last_importance": 0.23562576311069083,
+              "mean_importance": 0.23562576311069083,
+              "last_shap_importance": 0.27049705929767853,
+              "mean_shap_importance": 0.27049705929767853,
+              "last_mean_abs_shap": 0.002311383910560812,
+              "mean_abs_shap": 0.002311383910560812,
+              "max_feature_auc": 0.5455834456424079,
+              "last_abs_residual_corr": 0.008455678700571078,
+              "mean_abs_residual_corr": 0.008455678700571078,
+              "last_redundancy": 0.9115895488682497,
+              "mean_redundancy": 0.9115895488682497,
+              "last_weight_stability": 1.7018366097794293,
+              "mean_weight_stability": 1.7018366097794293,
+              "last_config_auc": 0.5548574895503731,
+              "mean_config_auc": 0.5548574895503731,
+              "best_config_auc": 0.5548574895503731
+            }
+          },
+          {
+            "id": "clipped_linear",
+            "parents": [],
+            "description": "Clipped linear callable.",
+            "tags": [],
+            "primitive": "clipped_linear_callable",
+            "global_refs": [
+              "gate_scale"
+            ],
+            "has_torch": true,
+            "source": "",
+            "age": 6,
+            "stats": {
+              "participation_count": 3,
+              "selected_count": 3,
+              "output_count": 0,
+              "last_participation_age": 6,
+              "last_selected": true,
+              "kind": "callable",
+              "last_feature_count": 10,
+              "mean_feature_count": 10.0,
+              "last_importance": 0.20494129091040636,
+              "mean_importance": 0.3340019144980057,
+              "last_shap_importance": 0.28474220445493276,
+              "mean_shap_importance": 0.3866508029022393,
+              "last_mean_abs_shap": 0.0027663368425459504,
+              "mean_abs_shap": 0.002782580866500973,
+              "max_feature_auc": 0.5455123369076917,
+              "last_abs_residual_corr": 0.012002949120412209,
+              "mean_abs_residual_corr": 0.009602446650687024,
+              "last_redundancy": 0.8751927785695932,
+              "mean_redundancy": 0.8275357445022303,
+              "last_weight_stability": 2.221557005605466,
+              "mean_weight_stability": 2.0870886218632356,
+              "last_config_auc": 0.5404739931247314,
+              "mean_config_auc": 0.5403641255517794,
+              "best_config_auc": 0.5447392964568929
+            }
+          }
+        ]
+      },
+      {
+        "name": "output",
+        "kind": "output",
+        "description": "Candidate predictive feature alternatives evaluated as an ensemble.",
+        "alternatives": [
+          {
+            "id": "raw_concat",
+            "parents": [
+              "segment_stats",
+              "trend_stats",
+              "shape_stats"
+            ],
+            "description": "Concatenate parent feature blocks.",
+            "tags": [],
+            "primitive": "pass_outputs",
+            "global_refs": [],
+            "has_torch": true,
+            "source": "",
+            "age": 6,
+            "stats": {
+              "participation_count": 6,
+              "selected_count": 0,
+              "output_count": 6,
+              "last_participation_age": 6,
+              "last_selected": false,
+              "kind": "output",
+              "last_feature_count": 10,
+              "mean_feature_count": 10.0,
+              "last_importance": 0.19416797945218525,
+              "mean_importance": 0.2975463616531476,
+              "last_shap_importance": 0.18782141671576114,
+              "mean_shap_importance": 0.29556583381769497,
+              "last_mean_abs_shap": 0.0018247288134703662,
+              "mean_abs_shap": 0.0021086656039338353,
+              "max_feature_auc": 0.5455834456424079,
+              "last_abs_residual_corr": 0.010243675766935242,
+              "mean_abs_residual_corr": 0.010012607102886381,
+              "last_redundancy": 0.8990331153208453,
+              "mean_redundancy": 0.9464185010463942,
+              "last_weight_stability": 1.745012462803991,
+              "mean_weight_stability": 2.6663474489136276,
+              "last_config_auc": 0.5404739931247314,
+              "mean_config_auc": 0.5449858881206296,
+              "best_config_auc": 0.5548574895503731
+            }
+          },
+          {
+            "id": "activated",
+            "parents": [
+              "segment_stats",
+              "trend_stats",
+              "shape_stats",
+              "activation"
+            ],
+            "description": "Apply callable family to parent features.",
+            "tags": [],
+            "primitive": "activated_outputs",
+            "global_refs": [],
+            "has_torch": true,
+            "source": "",
+            "age": 6,
+            "stats": {
+              "participation_count": 6,
+              "selected_count": 0,
+              "output_count": 6,
+              "last_participation_age": 6,
+              "last_selected": false,
+              "kind": "output",
+              "last_feature_count": 10,
+              "mean_feature_count": 10.0,
+              "last_importance": 0.20494129091040636,
+              "mean_importance": 0.30138903911684833,
+              "last_shap_importance": 0.28474220445493276,
+              "mean_shap_importance": 0.33784112803412797,
+              "last_mean_abs_shap": 0.0027663368425459504,
+              "mean_abs_shap": 0.002455035579686123,
+              "max_feature_auc": 0.5455834456424079,
+              "last_abs_residual_corr": 0.012002949120412209,
+              "mean_abs_residual_corr": 0.01000150001374991,
+              "last_redundancy": 0.8751927785695932,
+              "mean_redundancy": 0.8990327970624902,
+              "last_weight_stability": 2.221557005605466,
+              "mean_weight_stability": 2.3601716080491815,
+              "last_config_auc": 0.5404739931247314,
+              "mean_config_auc": 0.5449858881206296,
+              "best_config_auc": 0.5548574895503731
+            }
+          },
+          {
+            "id": "projection",
+            "parents": [
+              "segment_stats",
+              "trend_stats",
+              "shape_stats"
+            ],
+            "description": "Projection using persistent global parameters.",
+            "tags": [],
+            "primitive": "projection_outputs",
+            "global_refs": [
+              "projection_vector"
+            ],
+            "has_torch": true,
+            "source": "",
+            "age": 6,
+            "stats": {
+              "participation_count": 6,
+              "selected_count": 0,
+              "output_count": 6,
+              "last_participation_age": 6,
+              "last_selected": false,
+              "kind": "output",
+              "last_feature_count": 1,
+              "mean_feature_count": 1.0,
+              "last_importance": 0.008922777310765155,
+              "mean_importance": 0.012736372888091076,
+              "last_shap_importance": 0.005253214902980314,
+              "mean_shap_importance": 0.007862225660677364,
+              "last_mean_abs_shap": 0.0005103620643713164,
+              "mean_abs_shap": 0.0005432984507501837,
+              "max_feature_auc": 0.5023273614203679,
+              "last_abs_residual_corr": 0.004645255045012594,
+              "mean_abs_residual_corr": 0.0034996180812465194,
+              "last_redundancy": 0.6102387711909029,
+              "mean_redundancy": 0.9274224805274498,
+              "last_weight_stability": 0.506162708903521,
+              "mean_weight_stability": 0.4410867996562961,
+              "last_config_auc": 0.5404739931247314,
+              "mean_config_auc": 0.5449858881206296,
+              "best_config_auc": 0.5548574895503731
+            }
+          },
+          {
+            "id": "source_autocorr_volatility_shift_3",
+            "parents": [
+              "series"
+            ],
+            "description": "Source-backed autocorrelation, volatility, and increment-regime change features.",
+            "tags": [
+              "source"
+            ],
+            "primitive": "source",
+            "global_refs": [],
+            "has_torch": false,
+            "source": "lambda ctx, values: (\n    (lambda s, b: (\n        (lambda pre, post, pre_d, post_d: (\n            (lambda pre_c, post_c: FeatureBlock(\n                np.column_stack([\n                    np.mean(np.abs(post_d), axis=1) - np.mean(np.abs(pre_d), axis=1),\n                    np.log((np.std(post_d, axis=1) + 1e-8) / (np.std(pre_d, axis=1) + 1e-8)),\n                    (np.sum(post_c[:, 1:] * post_c[:, :-1], axis=1) / np.maximum(np.sum(post_c[:, :-1] ** 2, axis=1), 1e-8))\n                        - (np.sum(pre_c[:, 1:] * pre_c[:, :-1], axis=1) / np.maximum(np.sum(pre_c[:, :-1] ** 2, axis=1), 1e-8)),\n                    np.max(np.abs(np.cumsum(post - np.mean(post, axis=1, keepdims=True), axis=1)), axis=1) / np.maximum(np.std(post, axis=1), 1e-8),\n                    np.max(np.abs(np.cumsum(pre - np.mean(pre, axis=1, keepdims=True), axis=1)), axis=1) / np.maximum(np.std(pre, axis=1), 1e-8),\n                    np.max(np.abs(np.cumsum(post - np.mean(post, axis=1, keepdims=True), axis=1)), axis=1) / np.maximum(np.max(np.abs(np.cumsum(pre - np.mean(pre, axis=1, keepdims=True), axis=1)), axis=1), 1e-8)\n                ]),\n                [\n                    \"src_absdiff_delta\",\n                    \"src_diff_std_log_ratio\",\n                    \"src_autocorr_delta\",\n                    \"src_post_cusum_peak\",\n                    \"src_pre_cusum_peak\",\n                    \"src_cusum_peak_ratio\"\n                ]\n            ))(pre - np.mean(pre, axis=1, keepdims=True), post - np.mean(post, axis=1, keepdims=True))\n        ))(s[:, :b], s[:, b:], np.diff(s[:, :b], axis=1), np.diff(s[:, b:], axis=1))\n    ))(np.asarray(values[\"series\"], dtype=np.float64), int(ctx.read_input(\"boundary\")))\n)",
+            "age": 5,
+            "stats": {
+              "participation_count": 5,
+              "selected_count": 0,
+              "output_count": 5,
+              "last_participation_age": 5,
+              "last_selected": false,
+              "kind": "output",
+              "last_feature_count": 6,
+              "mean_feature_count": 6.0,
+              "last_importance": 0.11766276541506955,
+              "mean_importance": 0.19775065414856702,
+              "last_shap_importance": 0.11259367227621939,
+              "mean_shap_importance": 0.18691410727570043,
+              "last_mean_abs_shap": 0.0018231229218460083,
+              "mean_abs_shap": 0.002350461344425226,
+              "max_feature_auc": 0.5391189597249892,
+              "last_abs_residual_corr": 0.011000380718942602,
+              "mean_abs_residual_corr": 0.010416031793576455,
+              "last_redundancy": 0.7105251311494447,
+              "mean_redundancy": 0.6980009719195748,
+              "last_weight_stability": 4.488400200355417,
+              "mean_weight_stability": 2.5237643439364965,
+              "last_config_auc": 0.5404739931247314,
+              "mean_config_auc": 0.5450352064533771,
+              "best_config_auc": 0.5548574895503731
+            }
+          },
+          {
+            "id": "source_spectral_entropy_shift_10",
+            "parents": [
+              "series"
+            ],
+            "description": "Source-backed spectral entropy and frequency centroid shift features.",
+            "tags": [
+              "source"
+            ],
+            "primitive": "source",
+            "global_refs": [],
+            "has_torch": false,
+            "source": "lambda ctx, values: (\n    (lambda s, b: (\n        (lambda pre, post: (\n            (lambda pre_fft, post_fft: (\n                (lambda pre_p, post_p, freq: FeatureBlock(\n                    np.column_stack([\n                        np.sum(post_p * freq.reshape(1, -1), axis=1) - np.sum(pre_p * freq.reshape(1, -1), axis=1),\n                        -np.sum(post_p * np.log(post_p + 1e-8), axis=1) + np.sum(pre_p * np.log(pre_p + 1e-8), axis=1),\n                        np.max(post_p, axis=1) - np.max(pre_p, axis=1),\n                        np.sum(post_p[:, :max(2, post_p.shape[1] // 3)], axis=1) - np.sum(pre_p[:, :max(2, pre_p.shape[1] // 3)], axis=1),\n                        np.sum(post_p[:, -max(2, post_p.shape[1] // 3):], axis=1) - np.sum(pre_p[:, -max(2, pre_p.shape[1] // 3):], axis=1)\n                    ]),\n                    [\n                        \"src_spectral_centroid_delta\",\n                        \"src_spectral_entropy_delta\",\n                        \"src_spectral_peak_share_delta\",\n                        \"src_spectral_low_share_delta\",\n                        \"src_spectral_high_share_delta\"\n                    ]\n                ))(\n                    pre_fft / np.maximum(np.sum(pre_fft, axis=1, keepdims=True), 1e-8),\n                    post_fft / np.maximum(np.sum(post_fft, axis=1, keepdims=True), 1e-8),\n                    np.linspace(0.0, 1.0, pre_fft.shape[1])\n                )\n            ))(np.abs(np.fft.rfft(pre, axis=1))[:, 1:] + 1e-8, np.abs(np.fft.rfft(post, axis=1))[:, 1:] + 1e-8)\n        ))(s[:, :b], s[:, b:])\n    ))(np.asarray(values[\"series\"], dtype=np.float64), int(ctx.read_input(\"boundary\")))\n)",
+            "age": 4,
+            "stats": {
+              "participation_count": 4,
+              "selected_count": 0,
+              "output_count": 4,
+              "last_participation_age": 4,
+              "last_selected": false,
+              "kind": "output",
+              "last_feature_count": 5,
+              "mean_feature_count": 5.0,
+              "last_importance": 0.08803789148233213,
+              "mean_importance": 0.09701974467763946,
+              "last_shap_importance": 0.09138132753512533,
+              "mean_shap_importance": 0.10497582094852963,
+              "last_mean_abs_shap": 0.0017755817657244151,
+              "mean_abs_shap": 0.0017617731157840173,
+              "max_feature_auc": 0.5189893892339544,
+              "last_abs_residual_corr": 0.007366395917603154,
+              "mean_abs_residual_corr": 0.007060976999190637,
+              "last_redundancy": 0.9121617041962813,
+              "mean_redundancy": 0.9121617041962813,
+              "last_weight_stability": 2.780480594500983,
+              "mean_weight_stability": 2.508225816744528,
+              "last_config_auc": 0.5404739931247314,
+              "mean_config_auc": 0.5441141194480252,
+              "best_config_auc": 0.5548574895503731
+            }
+          },
+          {
+            "id": "interaction_output_mutation_13",
+            "parents": [
+              "segment_stats",
+              "trend_stats",
+              "shape_stats"
+            ],
+            "description": "Add standardized aggregate and pairwise interaction output features.",
+            "tags": [],
+            "primitive": "interaction_outputs",
+            "global_refs": [],
+            "has_torch": false,
+            "source": "",
+            "age": 3,
+            "stats": {
+              "participation_count": 3,
+              "selected_count": 0,
+              "output_count": 3,
+              "last_participation_age": 3,
+              "last_selected": false,
+              "kind": "output",
+              "last_feature_count": 9,
+              "mean_feature_count": 9.0,
+              "last_importance": 0.24290776939484732,
+              "mean_importance": 0.2699258608545636,
+              "last_shap_importance": 0.19964708198345713,
+              "mean_shap_importance": 0.22644999087361783,
+              "last_mean_abs_shap": 0.0021551310068341823,
+              "mean_abs_shap": 0.002207363732601006,
+              "max_feature_auc": 0.5350074709949607,
+              "last_abs_residual_corr": 0.014419035610024706,
+              "mean_abs_residual_corr": 0.014602554105979193,
+              "last_redundancy": 0.6138273848081314,
+              "mean_redundancy": 0.6151023202332607,
+              "last_weight_stability": 1.5481134783660775,
+              "mean_weight_stability": 2.682307012146469,
+              "last_config_auc": 0.5404739931247314,
+              "mean_config_auc": 0.5468591302394624,
+              "best_config_auc": 0.5548574895503731
+            }
+          },
+          {
+            "id": "source_distribution_shift_22",
+            "parents": [
+              "series"
+            ],
+            "description": "Source-backed robust distribution-shift features across the known boundary.",
+            "tags": [
+              "source"
+            ],
+            "primitive": "source",
+            "global_refs": [],
+            "has_torch": false,
+            "source": "lambda ctx, values: (\n    (lambda s, b: (\n        (lambda pre, post: FeatureBlock(\n            np.column_stack([\n                np.mean(post, axis=1) - np.mean(pre, axis=1),\n                np.abs(np.mean(post, axis=1) - np.mean(pre, axis=1)),\n                (np.median(post, axis=1) - np.median(pre, axis=1)) / (np.maximum(np.std(pre, axis=1), 1e-8)),\n                np.log((np.std(post, axis=1) + 1e-8) / (np.std(pre, axis=1) + 1e-8)),\n                (np.quantile(post, 0.75, axis=1) - np.quantile(post, 0.25, axis=1)) - (np.quantile(pre, 0.75, axis=1) - np.quantile(pre, 0.25, axis=1)),\n                np.mean(np.abs(np.sort(post, axis=1) - np.sort(pre, axis=1)), axis=1),\n                np.max(np.abs(np.quantile(post, np.linspace(0.1, 0.9, 9), axis=1).T - np.quantile(pre, np.linspace(0.1, 0.9, 9), axis=1).T), axis=1)\n            ]),\n            [\n                \"src_mean_delta\",\n                \"src_mean_delta_abs\",\n                \"src_scaled_median_delta\",\n                \"src_std_log_ratio\",\n                \"src_iqr_delta\",\n                \"src_sorted_l1_distance\",\n                \"src_quantile_max_distance\"\n            ]\n        ))(s[:, :b], s[:, b:])\n    ))(np.asarray(values[\"series\"], dtype=np.float64), int(ctx.read_input(\"boundary\")))\n)",
+            "age": 1,
+            "stats": {
+              "participation_count": 1,
+              "selected_count": 0,
+              "output_count": 1,
+              "last_participation_age": 1,
+              "last_selected": false,
+              "kind": "output",
+              "last_feature_count": 7,
+              "mean_feature_count": 7.0,
+              "last_importance": 0.1433595260343942,
+              "mean_importance": 0.1433595260343942,
+              "last_shap_importance": 0.11856108213152404,
+              "mean_shap_importance": 0.11856108213152404,
+              "last_mean_abs_shap": 0.0016454978998102427,
+              "mean_abs_shap": 0.0016454978998102427,
+              "max_feature_auc": 0.5455834456424079,
+              "last_abs_residual_corr": 0.014810094376957485,
+              "mean_abs_residual_corr": 0.014810094376957485,
+              "last_redundancy": 0.8773649806441493,
+              "mean_redundancy": 0.8773649806441493,
+              "last_weight_stability": 3.049896460431769,
+              "mean_weight_stability": 3.049896460431769,
+              "last_config_auc": 0.5404739931247314,
+              "mean_config_auc": 0.5404739931247314,
+              "best_config_auc": 0.5404739931247314
+            }
+          }
+        ]
+      },
+      {
+        "name": "ridge_w",
+        "kind": "fitting",
+        "description": "Sample-weight alternatives for the downstream Ridge readout.",
+        "alternatives": [
+          {
+            "id": "uniform",
+            "parents": [],
+            "description": "Uniform Ridge sample weights.",
+            "tags": [],
+            "primitive": "uniform_sample_weight",
+            "global_refs": [],
+            "has_torch": false,
+            "source": "",
+            "age": 6,
+            "stats": {}
+          },
+          {
+            "id": "boundary_energy",
+            "parents": [
+              "series"
+            ],
+            "description": "Emphasize samples whose CUSUM energy concentrates near the boundary.",
+            "tags": [],
+            "primitive": "boundary_energy_weight",
+            "global_refs": [],
+            "has_torch": false,
+            "source": "",
+            "age": 6,
+            "stats": {
+              "participation_count": 6,
+              "selected_count": 6,
+              "output_count": 0,
+              "last_participation_age": 6,
+              "last_selected": true,
+              "kind": "fitting",
+              "last_feature_count": 0,
+              "mean_feature_count": 0.0,
+              "last_importance": 0.0,
+              "mean_importance": 0.0,
+              "last_shap_importance": 0.0,
+              "mean_shap_importance": 0.0,
+              "last_mean_abs_shap": 0.0,
+              "mean_abs_shap": 0.0,
+              "max_feature_auc": 0.0,
+              "last_abs_residual_corr": 0.0,
+              "mean_abs_residual_corr": 0.0,
+              "last_redundancy": 0.0,
+              "mean_redundancy": 0.0,
+              "last_weight_stability": 0.0,
+              "mean_weight_stability": 0.0,
+              "last_config_auc": 0.5404739931247314,
+              "mean_config_auc": 0.5449858881206296,
+              "best_config_auc": 0.5548574895503731
+            }
+          }
+        ]
+      },
+      {
+        "name": "ridge_g",
+        "kind": "fitting",
+        "description": "Residual-weighting alternatives for iterative Ridge fitting.",
+        "alternatives": [
+          {
+            "id": "identity",
+            "parents": [],
+            "description": "Identity residual weighting rule.",
+            "tags": [],
+            "primitive": "identity_residual_weight",
+            "global_refs": [],
+            "has_torch": false,
+            "source": "",
+            "age": 6,
+            "stats": {
+              "participation_count": 3,
+              "selected_count": 3,
+              "output_count": 0,
+              "last_participation_age": 6,
+              "last_selected": true,
+              "kind": "fitting",
+              "last_feature_count": 0,
+              "mean_feature_count": 0.0,
+              "last_importance": 0.0,
+              "mean_importance": 0.0,
+              "last_shap_importance": 0.0,
+              "mean_shap_importance": 0.0,
+              "last_mean_abs_shap": 0.0,
+              "mean_abs_shap": 0.0,
+              "max_feature_auc": 0.0,
+              "last_abs_residual_corr": 0.0,
+              "mean_abs_residual_corr": 0.0,
+              "last_redundancy": 0.0,
+              "mean_redundancy": 0.0,
+              "last_weight_stability": 0.0,
+              "mean_weight_stability": 0.0,
+              "last_config_auc": 0.5404739931247314,
+              "mean_config_auc": 0.5416908782244098,
+              "best_config_auc": 0.5487195544747842
+            }
+          },
+          {
+            "id": "huber",
+            "parents": [],
+            "description": "Huber-style residual weighting rule.",
+            "tags": [],
+            "primitive": "huber_residual_weight",
+            "global_refs": [
+              "residual_huber_scale"
+            ],
+            "has_torch": false,
+            "source": "",
+            "age": 6,
+            "stats": {
+              "participation_count": 3,
+              "selected_count": 3,
+              "output_count": 0,
+              "last_participation_age": 5,
+              "last_selected": true,
+              "kind": "fitting",
+              "last_feature_count": 0,
+              "mean_feature_count": 0.0,
+              "last_importance": 0.0,
+              "mean_importance": 0.0,
+              "last_shap_importance": 0.0,
+              "mean_shap_importance": 0.0,
+              "last_mean_abs_shap": 0.0,
+              "mean_abs_shap": 0.0,
+              "max_feature_auc": 0.0,
+              "last_abs_residual_corr": 0.0,
+              "mean_abs_residual_corr": 0.0,
+              "last_redundancy": 0.0,
+              "mean_redundancy": 0.0,
+              "last_weight_stability": 0.0,
+              "mean_weight_stability": 0.0,
+              "last_config_auc": 0.5548574895503731,
+              "mean_config_auc": 0.5482808980168496,
+              "best_config_auc": 0.5548574895503731
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "metadata": {
+    "benchmark": "competition_event_multisplit_benchmark",
+    "stage": "post_prune",
+    "score": {
+      "mean_validation_auc": 0.561115668580804,
+      "min_validation_auc": 0.5356556896753779,
+      "mean_delta_vs_baseline": 0.007135695404768401,
+      "min_delta_vs_baseline": 0.00413102074299776,
+      "objective": 0.8289435134184929,
+      "splits": [
+        {
+          "seed": 211,
+          "train_auc": 0.5702420016406891,
+          "validation_auc": 0.5356556896753779,
+          "delta_vs_baseline": 0.007392866908863649,
+          "alpha": 3162.2776601683795,
+          "n_features": 48,
+          "config": {
+            "activation": "identity",
+            "ridge_g": "huber",
+            "ridge_w": "boundary_energy",
+            "segment_stats": "basic",
+            "shape_stats": "cusum",
+            "trend_stats": "linear"
+          }
+        },
+        {
+          "seed": 223,
+          "train_auc": 0.5557681696550647,
+          "validation_auc": 0.605043165748662,
+          "delta_vs_baseline": 0.009883198562443796,
+          "alpha": 10000.0,
+          "n_features": 48,
+          "config": {
+            "activation": "clipped_linear",
+            "ridge_g": "identity",
+            "ridge_w": "boundary_energy",
+            "segment_stats": "basic",
+            "shape_stats": "spectral",
+            "trend_stats": "linear"
+          }
+        },
+        {
+          "seed": 307,
+          "train_auc": 0.5687868666744794,
+          "validation_auc": 0.5426481503183718,
+          "delta_vs_baseline": 0.00413102074299776,
+          "alpha": 10000.0,
+          "n_features": 48,
+          "config": {
+            "activation": "clipped_linear",
+            "ridge_g": "huber",
+            "ridge_w": "uniform",
+            "segment_stats": "basic",
+            "shape_stats": "spectral",
+            "trend_stats": "linear"
+          }
+        }
+      ]
+    }
+  }
+}
