@@ -120,6 +120,7 @@ python -m benchmarks.competition_event_campaign \
   --series-length 160 \
   --steps 96 \
   --max-configurations 64 \
+  --resume-existing \
   --output benchmark_reports/competition-event-campaign
 ```
 

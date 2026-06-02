@@ -195,6 +195,14 @@ def build_report(
         "seed": int(seed),
         "dataset": metadata,
         "dataset_config": config.dataset_config(),
+        "benchmark_config": {
+            "steps": int(steps),
+            "folds": int(folds),
+            "max_configurations": int(max_configurations),
+            "include_source_mutations": bool(include_source_mutations),
+            "min_validation_improvement": float(min_validation_improvement),
+            "meaningful_margin": float(meaningful_margin),
+        },
         "split": {
             "manifest_method": split_manifest.method,
             "group_key": split_manifest.group_key,

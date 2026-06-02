@@ -7,6 +7,7 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+import benchmarks.competition_event_campaign as event_campaign
 from benchmarks.competition_mutation_usefulness import build_report as build_mutation_usefulness_report
 from benchmarks.competition_event_benchmark import build_report as build_event_benchmark_report
 from benchmarks.competition_event_campaign import build_campaign_report as build_event_campaign_report
@@ -205,6 +206,65 @@ def test_competition_event_campaign_aggregates_multiple_seeds(tmp_path) -> None:
     assert len(report["seeds_detail"]) == 2
     assert all(row["source_backed_candidates"] >= 1 for row in report["seeds_detail"])
     assert all(row["group_overlap"] == {"train_validation": 0, "train_test": 0, "validation_test": 0} for row in report["seeds_detail"])
+
+
+def test_competition_event_campaign_resumes_matching_seed_reports(tmp_path) -> None:
+    data_dir = write_competition_bundle(tmp_path, include_reduced=False, n_train=30)
+    output_dir = tmp_path / "campaign"
+
+    build_event_campaign_report(
+        output_dir,
+        data_dir=data_dir,
+        seeds=(13, 17),
+        series_length=20,
+        max_samples=None,
+        steps=2,
+        folds=2,
+        max_configurations=4,
+    )
+    resumed = build_event_campaign_report(
+        output_dir,
+        data_dir=data_dir,
+        seeds=(13, 17),
+        series_length=20,
+        max_samples=None,
+        steps=2,
+        folds=2,
+        max_configurations=4,
+        resume_existing=True,
+    )
+
+    assert resumed["summary"]["resumed_seed_count"] == 2
+    assert all(row["resumed"] for row in resumed["seeds_detail"])
+
+
+def test_competition_event_campaign_ranks_best_seed_by_delta_not_raw_auc(tmp_path, monkeypatch) -> None:
+    def fake_seed_report(seed_dir: Path, **kwargs: object) -> dict[str, object]:
+        seed = int(kwargs["seed"])
+        baseline = 0.5 if seed == 1 else 0.8
+        evolved = 0.55 if seed == 1 else 0.7
+        return {
+            "seed": seed,
+            "dataset": {"data_dir": str(kwargs["data_dir"]), "series_length": kwargs["series_length"], "max_samples": kwargs["max_samples"]},
+            "dataset_config": {"series_length": kwargs["series_length"], "max_samples": kwargs["max_samples"]},
+            "benchmark_config": {"folds": kwargs["folds"], "max_configurations": kwargs["max_configurations"], "include_source_mutations": kwargs["include_source_mutations"]},
+            "baseline": {"validation_auc": baseline},
+            "seed_graph": {"validation_auc": evolved},
+            "evolved_graph": {"validation_auc": evolved, "validation_delta_vs_baseline": evolved - baseline},
+            "ensembles": {"best": {"name": "fake", "validation_auc": evolved, "validation_delta_vs_baseline": evolved - baseline}},
+            "evolution": {"steps": kwargs["steps"], "accepted_mutations": 1, "source_backed_candidates": 0, "failed_candidates": 0},
+            "reduced_test_access": {"accessed": False},
+            "split": {"audit": {"group_overlaps": {"train_validation": 0, "train_test": 0, "validation_test": 0}}, "group_counts": {"train": 1, "validation": 1}},
+            "source_mutations": {"enabled": kwargs["include_source_mutations"]},
+        }
+
+    monkeypatch.setattr(event_campaign, "_run_seed_report", fake_seed_report)
+    monkeypatch.setattr(event_campaign, "event_markdown_report", lambda payload: "fake seed report")
+
+    report = event_campaign.build_campaign_report(tmp_path / "campaign", seeds=(1, 2), steps=1)
+
+    assert report["summary"]["best_evolved"]["seed"] == 1
+    assert report["summary"]["best_ensemble"]["seed"] == 1
 
 
 def test_competition_row_benchmark_reports_grouped_holdout_and_no_reduced_access(tmp_path) -> None:

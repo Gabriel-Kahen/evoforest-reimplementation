@@ -62,6 +62,42 @@ def structural_break_source_mutations() -> tuple[MutationSpec, ...]:
             source=SOURCE_MULTISCALE_TAIL_SHIFT,
             description="Source-backed multiscale tail/head structural-break features.",
         ),
+        MutationSpec(
+            kind="add_alternative",
+            target_node="output",
+            primitive="source",
+            alternative_id="source_rank_shape_shift",
+            parents=("series",),
+            source=SOURCE_RANK_SHAPE_SHIFT,
+            description="Source-backed rank and ordinal-shape shift features.",
+        ),
+        MutationSpec(
+            kind="add_alternative",
+            target_node="output",
+            primitive="source",
+            alternative_id="source_spectral_entropy_shift",
+            parents=("series",),
+            source=SOURCE_SPECTRAL_ENTROPY_SHIFT,
+            description="Source-backed spectral entropy and frequency centroid shift features.",
+        ),
+        MutationSpec(
+            kind="add_alternative",
+            target_node="output",
+            primitive="source",
+            alternative_id="source_tail_extrema_shift",
+            parents=("series",),
+            source=SOURCE_TAIL_EXTREMA_SHIFT,
+            description="Source-backed tail extrema, range, and exceedance-rate shift features.",
+        ),
+        MutationSpec(
+            kind="add_alternative",
+            target_node="output",
+            primitive="source",
+            alternative_id="source_moment_shape_shift",
+            parents=("series",),
+            source=SOURCE_MOMENT_SHAPE_SHIFT,
+            description="Source-backed skewness, kurtosis, and centered-moment shift features.",
+        ),
     )
 
 
@@ -162,5 +198,121 @@ SOURCE_MULTISCALE_TAIL_SHIFT = """lambda ctx, values: (
                 "src_last_pre_tail_z"
             ]
         ))(s[:, :b], s[:, b:], max(2, (s.shape[1] - b) // 4), max(3, (s.shape[1] - b) // 2))
+    ))(np.asarray(values["series"], dtype=np.float64), int(ctx.read_input("boundary")))
+)"""
+
+
+SOURCE_RANK_SHAPE_SHIFT = """lambda ctx, values: (
+    (lambda s, b: (
+        (lambda pre, post: (
+            (lambda combined, pre_rank, post_rank: FeatureBlock(
+                np.column_stack([
+                    np.mean(post_rank, axis=1) - np.mean(pre_rank, axis=1),
+                    np.std(post_rank, axis=1) - np.std(pre_rank, axis=1),
+                    np.mean(np.maximum(post_rank - 0.75, 0.0), axis=1) - np.mean(np.maximum(pre_rank - 0.75, 0.0), axis=1),
+                    np.mean(np.maximum(0.25 - post_rank, 0.0), axis=1) - np.mean(np.maximum(0.25 - pre_rank, 0.0), axis=1),
+                    np.mean(np.abs(np.diff(post_rank, axis=1)), axis=1) - np.mean(np.abs(np.diff(pre_rank, axis=1)), axis=1)
+                ]),
+                [
+                    "src_rank_mean_delta",
+                    "src_rank_std_delta",
+                    "src_upper_rank_excess_delta",
+                    "src_lower_rank_excess_delta",
+                    "src_rank_path_variation_delta"
+                ]
+            ))(
+                np.concatenate([pre, post], axis=1),
+                np.argsort(np.argsort(np.concatenate([pre, post], axis=1), axis=1), axis=1)[:, :pre.shape[1]] / np.maximum(np.concatenate([pre, post], axis=1).shape[1] - 1, 1),
+                np.argsort(np.argsort(np.concatenate([pre, post], axis=1), axis=1), axis=1)[:, pre.shape[1]:] / np.maximum(np.concatenate([pre, post], axis=1).shape[1] - 1, 1)
+            )
+        ))(s[:, :b], s[:, b:])
+    ))(np.asarray(values["series"], dtype=np.float64), int(ctx.read_input("boundary")))
+)"""
+
+
+SOURCE_SPECTRAL_ENTROPY_SHIFT = """lambda ctx, values: (
+    (lambda s, b: (
+        (lambda pre, post: (
+            (lambda pre_fft, post_fft: (
+                (lambda pre_p, post_p, freq: FeatureBlock(
+                    np.column_stack([
+                        np.sum(post_p * freq.reshape(1, -1), axis=1) - np.sum(pre_p * freq.reshape(1, -1), axis=1),
+                        -np.sum(post_p * np.log(post_p + 1e-8), axis=1) + np.sum(pre_p * np.log(pre_p + 1e-8), axis=1),
+                        np.max(post_p, axis=1) - np.max(pre_p, axis=1),
+                        np.sum(post_p[:, :max(2, post_p.shape[1] // 3)], axis=1) - np.sum(pre_p[:, :max(2, pre_p.shape[1] // 3)], axis=1),
+                        np.sum(post_p[:, -max(2, post_p.shape[1] // 3):], axis=1) - np.sum(pre_p[:, -max(2, pre_p.shape[1] // 3):], axis=1)
+                    ]),
+                    [
+                        "src_spectral_centroid_delta",
+                        "src_spectral_entropy_delta",
+                        "src_spectral_peak_share_delta",
+                        "src_spectral_low_share_delta",
+                        "src_spectral_high_share_delta"
+                    ]
+                ))(
+                    pre_fft / np.maximum(np.sum(pre_fft, axis=1, keepdims=True), 1e-8),
+                    post_fft / np.maximum(np.sum(post_fft, axis=1, keepdims=True), 1e-8),
+                    np.linspace(0.0, 1.0, pre_fft.shape[1])
+                )
+            ))(np.abs(np.fft.rfft(pre, axis=1))[:, 1:] + 1e-8, np.abs(np.fft.rfft(post, axis=1))[:, 1:] + 1e-8)
+        ))(s[:, :b], s[:, b:])
+    ))(np.asarray(values["series"], dtype=np.float64), int(ctx.read_input("boundary")))
+)"""
+
+
+SOURCE_TAIL_EXTREMA_SHIFT = """lambda ctx, values: (
+    (lambda s, b: (
+        (lambda pre, post, w: (
+            (lambda pre_tail, post_tail, pre_med, post_med, pre_scale, post_scale: FeatureBlock(
+                np.column_stack([
+                    (np.max(post_tail, axis=1) - post_med) / post_scale - (np.max(pre_tail, axis=1) - pre_med) / pre_scale,
+                    (post_med - np.min(post_tail, axis=1)) / post_scale - (pre_med - np.min(pre_tail, axis=1)) / pre_scale,
+                    (np.max(post_tail, axis=1) - np.min(post_tail, axis=1)) - (np.max(pre_tail, axis=1) - np.min(pre_tail, axis=1)),
+                    np.mean(post_tail > (post_med.reshape(-1, 1) + post_scale.reshape(-1, 1)), axis=1) - np.mean(pre_tail > (pre_med.reshape(-1, 1) + pre_scale.reshape(-1, 1)), axis=1),
+                    np.mean(post_tail < (post_med.reshape(-1, 1) - post_scale.reshape(-1, 1)), axis=1) - np.mean(pre_tail < (pre_med.reshape(-1, 1) - pre_scale.reshape(-1, 1)), axis=1)
+                ]),
+                [
+                    "src_tail_upper_extreme_delta",
+                    "src_tail_lower_extreme_delta",
+                    "src_tail_range_delta",
+                    "src_tail_high_exceedance_delta",
+                    "src_tail_low_exceedance_delta"
+                ]
+            ))(
+                pre[:, -w:],
+                post[:, -w:],
+                np.median(pre, axis=1),
+                np.median(post, axis=1),
+                np.maximum(np.std(pre, axis=1), 1e-8),
+                np.maximum(np.std(post, axis=1), 1e-8)
+            )
+        ))(s[:, :b], s[:, b:], max(3, (s.shape[1] - b) // 3))
+    ))(np.asarray(values["series"], dtype=np.float64), int(ctx.read_input("boundary")))
+)"""
+
+
+SOURCE_MOMENT_SHAPE_SHIFT = """lambda ctx, values: (
+    (lambda s, b: (
+        (lambda pre, post: (
+            (lambda pre_z, post_z: FeatureBlock(
+                np.column_stack([
+                    np.mean(post_z ** 3, axis=1) - np.mean(pre_z ** 3, axis=1),
+                    np.mean(post_z ** 4, axis=1) - np.mean(pre_z ** 4, axis=1),
+                    np.mean(np.abs(post_z), axis=1) - np.mean(np.abs(pre_z), axis=1),
+                    np.mean(np.maximum(post_z, 0.0) ** 2, axis=1) - np.mean(np.maximum(pre_z, 0.0) ** 2, axis=1),
+                    np.mean(np.minimum(post_z, 0.0) ** 2, axis=1) - np.mean(np.minimum(pre_z, 0.0) ** 2, axis=1)
+                ]),
+                [
+                    "src_skew_delta",
+                    "src_kurtosis_delta",
+                    "src_abs_z_delta",
+                    "src_positive_energy_delta",
+                    "src_negative_energy_delta"
+                ]
+            ))(
+                (pre - np.mean(pre, axis=1, keepdims=True)) / np.maximum(np.std(pre, axis=1, keepdims=True), 1e-8),
+                (post - np.mean(post, axis=1, keepdims=True)) / np.maximum(np.std(post, axis=1, keepdims=True), 1e-8)
+            )
+        ))(s[:, :b], s[:, b:])
     ))(np.asarray(values["series"], dtype=np.float64), int(ctx.read_input("boundary")))
 )"""
