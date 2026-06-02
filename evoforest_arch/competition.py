@@ -209,6 +209,7 @@ def load_competition_row_dataset(
         "sample_time": target_times,
         "sample_period": sample_periods,
         "lookback_observed": observed_lengths,
+        "sample_time_scale": np.full(labels.shape[0], max(float(np.max(target_times)), 1.0), dtype=np.float64),
     }
     positive_count = int(np.sum(labels >= 0.5))
     unique_ids = np.unique(target_ids)

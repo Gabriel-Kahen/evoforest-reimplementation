@@ -30,6 +30,22 @@ ROW_BASELINE_SPEC = MutationSpec(
     parents=("series",),
     description="Graph-embedded deterministic ADIA row-level baseline features.",
 )
+ROW_TIME_BASIS_SPEC = MutationSpec(
+    kind="add_alternative",
+    target_node="output",
+    primitive="row_time_basis_outputs",
+    alternative_id="row_time_basis_output",
+    parents=("series",),
+    description="Expanded target-time and observed-lookback basis features.",
+)
+ROW_MULTISCALE_TAIL_SPEC = MutationSpec(
+    kind="add_alternative",
+    target_node="output",
+    primitive="row_multiscale_tail_outputs",
+    alternative_id="row_multiscale_tail_output",
+    parents=("series",),
+    description="Multiscale recent-tail drift, volatility, slope, and drawdown features.",
+)
 
 
 @dataclass(frozen=True)
@@ -127,6 +143,7 @@ def build_report(
     stability_weight: float = 0.5,
     objective_mode: str = "auc",
     prune_tolerance: float = 0.001,
+    include_focused_row_templates: bool = True,
     include_builtin_templates: bool = True,
     include_source_mutations: bool = False,
 ) -> dict[str, Any]:
@@ -159,11 +176,12 @@ def build_report(
     engine = MutationEngine(allow_source=include_source_mutations)
     row_baseline_graph = engine.apply(seed_graph, ROW_BASELINE_SPEC)
     row_baseline_only_graph = build_output_only_graph(seed_graph, (ROW_BASELINE_SPEC,), allow_source=include_source_mutations)
+    focused_row_specs = (ROW_TIME_BASIS_SPEC, ROW_MULTISCALE_TAIL_SPEC) if include_focused_row_templates else ()
     builtin_specs = tuple(built_in_mutations()) if include_builtin_templates else ()
     source_specs = structural_break_source_mutations() if include_source_mutations else ()
     source_checks = validate_source_mutations(seed_graph, source_specs, contexts[0].train_inputs) if source_specs else []
     passed_sources = tuple(spec for spec, check in zip(source_specs, source_checks, strict=True) if check.passed)
-    suite_specs = (*builtin_specs, *passed_sources)
+    suite_specs = (*focused_row_specs, *builtin_specs, *passed_sources)
     if not any(spec.primitive == ROW_BASELINE_SPEC.primitive for spec in suite_specs):
         suite_specs = (ROW_BASELINE_SPEC, *suite_specs)
     suite_graph = engine.apply_document(seed_graph, MutationDocument(add=suite_specs)).graph
@@ -254,7 +272,27 @@ def build_report(
         pruned_output_only_graph,
         metadata={"benchmark": "competition_row_multisplit_benchmark", "stage": "output_only_post_prune", "score": pruned_output_only_score.to_dict()},
     )
-    internal_test = internal_test_report(pruned_output_only_graph, contexts, evaluator_kwargs=evaluator_kwargs)
+    graph_candidates = {
+        "seed_graph": (seed_graph, seed_score),
+        "row_baseline_graph": (row_baseline_graph, row_baseline_graph_score),
+        "row_baseline_only_graph": (row_baseline_only_graph, row_baseline_only_score),
+        "row_template_suite_graph": (suite_graph, suite_score),
+        "pruned_row_template_suite_graph": (pruned_graph, pruned_score),
+        "row_template_suite_output_only_graph": (suite_output_only_graph, suite_output_only_score),
+        "pruned_row_template_suite_output_only_graph": (pruned_output_only_graph, pruned_output_only_score),
+    }
+    best_graph = max(
+        ((name, score) for name, (_graph, score) in graph_candidates.items()),
+        key=lambda row: float(row[1].objective),
+    )
+    internal_test_graphs = {"pruned_row_template_suite_output_only_graph": pruned_output_only_graph}
+    if best_graph[0] not in internal_test_graphs:
+        internal_test_graphs[best_graph[0]] = graph_candidates[best_graph[0]][0]
+    internal_tests = {
+        name: internal_test_report(graph, contexts, evaluator_kwargs=evaluator_kwargs)
+        for name, graph in internal_test_graphs.items()
+    }
+    internal_test = internal_tests["pruned_row_template_suite_output_only_graph"]
     split_audits = [
         {
             "seed": context.seed,
@@ -270,18 +308,7 @@ def build_report(
     ]
     read_paths = [str(path) for path in metadata.get("read_paths", [])]
     reduced_read_paths = [path for path in read_paths if "reduced" in Path(path).name]
-    best_graph = max(
-        (
-            ("seed_graph", seed_score),
-            ("row_baseline_graph", row_baseline_graph_score),
-            ("row_baseline_only_graph", row_baseline_only_score),
-            ("row_template_suite_graph", suite_score),
-            ("pruned_row_template_suite_graph", pruned_score),
-            ("row_template_suite_output_only_graph", suite_output_only_score),
-            ("pruned_row_template_suite_output_only_graph", pruned_output_only_score),
-        ),
-        key=lambda row: float(row[1].objective),
-    )
+    best_internal_test = internal_tests.get(best_graph[0])
     return {
         "benchmark": "competition_row_multisplit_benchmark",
         "scope": report_scope(),
@@ -295,6 +322,7 @@ def build_report(
             "stability_weight": float(stability_weight),
             "objective_mode": objective_mode,
             "prune_tolerance": float(prune_tolerance),
+            "include_focused_row_templates": bool(include_focused_row_templates),
             "include_builtin_templates": bool(include_builtin_templates),
             "include_source_mutations": bool(include_source_mutations),
             "objective": objective_description(objective_mode),
@@ -302,6 +330,7 @@ def build_report(
         "outer_split": outer_split,
         "split_contexts": [context.to_dict() for context in contexts],
         "split_audits": split_audits,
+        "validation_split_group_overlap": validation_split_group_overlap(contexts),
         "reduced_test_access": {
             "accessed": bool(reduced_read_paths),
             "read_paths": read_paths,
@@ -315,6 +344,7 @@ def build_report(
             "checks": [check.to_dict() for check in source_checks],
         },
         "template_suite": {
+            "focused_row_templates": len(focused_row_specs),
             "builtin_templates": len(builtin_specs),
             "source_templates": len(passed_sources),
             "added_templates": len(suite_specs),
@@ -352,11 +382,14 @@ def build_report(
             "graph": graph_summary(pruned_output_only_graph),
         },
         "internal_test": internal_test,
+        "internal_tests": internal_tests,
         "summary": {
             "best_graph_by_objective": best_graph[0],
             "best_objective": float(best_graph[1].objective),
             "best_mean_validation_auc": float(best_graph[1].mean_validation_auc),
             "best_mean_delta_vs_baseline": float(best_graph[1].mean_delta_vs_baseline),
+            "best_internal_test_mean_graph_auc": float(best_internal_test["mean_graph_auc"]) if best_internal_test else None,
+            "best_internal_test_mean_delta_vs_baseline": float(best_internal_test["mean_delta_vs_baseline"]) if best_internal_test else None,
             "row_baseline_graph_delta_vs_seed": float(row_baseline_graph_score.objective) - float(seed_score.objective),
             "row_baseline_only_delta_vs_row_baseline_graph": float(row_baseline_only_score.objective) - float(row_baseline_graph_score.objective),
             "pruned_delta_vs_suite": float(pruned_score.objective) - float(suite_score.objective),
@@ -607,6 +640,31 @@ def internal_test_report(
     }
 
 
+def validation_split_group_overlap(contexts: tuple[RowSplitContext, ...]) -> dict[str, Any]:
+    rows: list[dict[str, Any]] = []
+    for left_index, left in enumerate(contexts):
+        left_groups = set(left.validation_groups)
+        for right in contexts[left_index + 1 :]:
+            right_groups = set(right.validation_groups)
+            overlap = left_groups & right_groups
+            rows.append(
+                {
+                    "left_seed": int(left.seed),
+                    "right_seed": int(right.seed),
+                    "overlap": int(len(overlap)),
+                    "left_validation_groups": int(len(left_groups)),
+                    "right_validation_groups": int(len(right_groups)),
+                    "jaccard": float(len(overlap) / max(len(left_groups | right_groups), 1)),
+                }
+            )
+    return {
+        "n_splits": int(len(contexts)),
+        "any_overlap": any(row["overlap"] > 0 for row in rows),
+        "max_overlap": max((int(row["overlap"]) for row in rows), default=0),
+        "pairs": rows,
+    }
+
+
 def markdown_report(payload: dict[str, Any]) -> str:
     graph_rows = []
     for name in (
@@ -640,6 +698,7 @@ def markdown_report(payload: dict[str, Any]) -> str:
     ]
     dataset = payload["dataset"]
     internal = payload["internal_test"]
+    best_internal = payload.get("internal_tests", {}).get(payload["summary"]["best_graph_by_objective"])
     return "\n\n".join(
         [
             "# Competition Row Multi-Split Benchmark",
@@ -658,6 +717,10 @@ def markdown_report(payload: dict[str, Any]) -> str:
             (
                 f"Internal non-selection test audit for pruned output-only suite: mean graph AUC `{fmt_float(internal['mean_graph_auc'])}`, "
                 f"mean delta `{fmt_float(internal['mean_delta_vs_baseline'])}`, minimum delta `{fmt_float(internal['min_delta_vs_baseline'])}`."
+            ),
+            (
+                f"Internal non-selection test audit for best objective graph `{payload['summary']['best_graph_by_objective']}`: "
+                f"mean graph AUC `{fmt_float(best_internal['mean_graph_auc']) if best_internal else 'n/a'}`."
             ),
             markdown_table(["Graph", "Mean Val AUC", "Mean Delta", "Min Val AUC", "Objective"], graph_rows),
             markdown_table(["Pruned Alternative", "Removed", "Objective Before", "Objective After", "Delta"], prune_rows),
@@ -679,6 +742,7 @@ def run(
     folds: int = 3,
     max_configurations: int = 64,
     objective_mode: str = "auc",
+    include_focused_row_templates: bool = True,
     include_builtin_templates: bool = True,
     include_source_mutations: bool = False,
 ) -> tuple[Path, Path]:
@@ -695,6 +759,7 @@ def run(
         folds=folds,
         max_configurations=max_configurations,
         objective_mode=objective_mode,
+        include_focused_row_templates=include_focused_row_templates,
         include_builtin_templates=include_builtin_templates,
         include_source_mutations=include_source_mutations,
     )
@@ -715,6 +780,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--folds", type=int, default=3)
     parser.add_argument("--max-configurations", type=int, default=64)
     parser.add_argument("--objective-mode", choices=("delta", "auc"), default="auc")
+    parser.add_argument("--disable-focused-row-templates", action="store_true")
     parser.add_argument("--disable-builtins", action="store_true")
     parser.add_argument("--include-source-mutations", action="store_true")
     args = parser.parse_args(argv)
@@ -732,6 +798,7 @@ def main(argv: list[str] | None = None) -> int:
             folds=args.folds,
             max_configurations=args.max_configurations,
             objective_mode=args.objective_mode,
+            include_focused_row_templates=not args.disable_focused_row_templates,
             include_builtin_templates=not args.disable_builtins,
             include_source_mutations=args.include_source_mutations,
         )

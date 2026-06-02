@@ -32,6 +32,8 @@ class PrimitiveRegistry:
         registry.register("row_cusum_local", row_cusum_local_factory)
         registry.register("row_context_outputs", row_context_outputs_factory)
         registry.register("row_local_outputs", row_local_outputs_factory)
+        registry.register("row_time_basis_outputs", row_time_basis_outputs_factory)
+        registry.register("row_multiscale_tail_outputs", row_multiscale_tail_outputs_factory)
         registry.register("adia_row_baseline_outputs", adia_row_baseline_outputs_factory)
         registry.register("identity_callable", identity_callable_factory)
         registry.register("sigmoid_gate_callable", sigmoid_gate_callable_factory)
@@ -477,6 +479,26 @@ def row_local_outputs_factory(alternative_id: str, parents: tuple[str, ...]) -> 
         return FeatureBlock(block, names)
 
     return NodeAlternative(alternative_id, parents, fn, "Always-evaluated row-local features for target-time lookback windows.")
+
+
+def row_time_basis_outputs_factory(alternative_id: str, parents: tuple[str, ...]) -> NodeAlternative:
+    def fn(ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
+        series = np.asarray(values[parents[0]], dtype=np.float64)
+        block, names = _row_time_basis_features(ctx, series.shape[0], series.shape[1])
+        return FeatureBlock(block, names)
+
+    return NodeAlternative(alternative_id, parents, fn, "Expanded row time and observed-lookback basis features.")
+
+
+def row_multiscale_tail_outputs_factory(alternative_id: str, parents: tuple[str, ...]) -> NodeAlternative:
+    def fn(ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
+        series = np.asarray(values[parents[0]], dtype=np.float64)
+        boundary = int(ctx.read_input("boundary"))
+        older, recent = split_segments(series, boundary)
+        features, names = _row_multiscale_tail_features(older, recent)
+        return FeatureBlock(features, names)
+
+    return NodeAlternative(alternative_id, parents, fn, "Multiscale recent-tail drift, volatility, slope, and drawdown features.")
 
 
 def adia_row_baseline_outputs_factory(alternative_id: str, parents: tuple[str, ...]) -> NodeAlternative:
@@ -963,7 +985,11 @@ def _row_context_features(ctx: EvalContext, n_rows: int, series_length: int) -> 
     sample_time = _optional_input_vector(ctx, "sample_time", n_rows)
     sample_period = _optional_input_vector(ctx, "sample_period", n_rows)
     observed = _optional_input_vector(ctx, "lookback_observed", n_rows)
-    time_scale = max(float(np.max(sample_time)) if sample_time.size else 0.0, 1.0)
+    sample_time_scale = _optional_input_vector(ctx, "sample_time_scale", n_rows)
+    if np.any(sample_time_scale > 0.0):
+        time_scale = max(float(np.max(sample_time_scale)), 1.0)
+    else:
+        time_scale = max(float(np.max(sample_time)) if sample_time.size else 0.0, 1.0)
     time_norm = sample_time / time_scale
     log_time_norm = np.log1p(np.maximum(sample_time, 0.0)) / max(float(np.log1p(time_scale)), 1.0)
     period_two = (sample_period >= 2.0).astype(np.float64)
@@ -972,6 +998,125 @@ def _row_context_features(ctx: EvalContext, n_rows: int, series_length: int) -> 
         np.column_stack([time_norm, log_time_norm, period_two, observed_fraction]),
         ["sample_time_norm", "sample_time_log_norm", "sample_period_two", "lookback_observed_fraction"],
     )
+
+
+def _row_time_basis_features(ctx: EvalContext, n_rows: int, series_length: int) -> tuple[np.ndarray, list[str]]:
+    sample_time = _optional_input_vector(ctx, "sample_time", n_rows)
+    sample_period = _optional_input_vector(ctx, "sample_period", n_rows)
+    observed = _optional_input_vector(ctx, "lookback_observed", n_rows)
+    sample_time_scale = _optional_input_vector(ctx, "sample_time_scale", n_rows)
+    if np.any(sample_time_scale > 0.0):
+        time_scale = max(float(np.max(sample_time_scale)), 1.0)
+    else:
+        time_scale = max(float(np.max(sample_time)) if sample_time.size else 0.0, 1.0)
+    time_norm = sample_time / time_scale
+    log_time_norm = np.log1p(np.maximum(sample_time, 0.0)) / max(float(np.log1p(time_scale)), 1.0)
+    sqrt_time_norm = np.sqrt(np.maximum(time_norm, 0.0))
+    observed_fraction = np.clip(observed / max(float(series_length), 1.0), 0.0, 1.0)
+    block = np.column_stack(
+        [
+            time_norm,
+            log_time_norm,
+            time_norm * time_norm,
+            time_norm * time_norm * time_norm,
+            sqrt_time_norm,
+            np.sin(np.pi * time_norm),
+            np.cos(np.pi * time_norm),
+            np.sin(2.0 * np.pi * time_norm),
+            np.cos(2.0 * np.pi * time_norm),
+            observed_fraction,
+            observed_fraction * observed_fraction,
+            time_norm * observed_fraction,
+            (sample_period >= 2.0).astype(np.float64),
+        ]
+    )
+    return (
+        block,
+        [
+            "time_basis_norm",
+            "time_basis_log_norm",
+            "time_basis_sq",
+            "time_basis_cube",
+            "time_basis_sqrt",
+            "time_basis_sin1",
+            "time_basis_cos1",
+            "time_basis_sin2",
+            "time_basis_cos2",
+            "observed_basis_fraction",
+            "observed_basis_sq",
+            "time_observed_interaction",
+            "time_basis_period_two",
+        ],
+    )
+
+
+def _row_multiscale_tail_features(older: np.ndarray, recent: np.ndarray) -> tuple[np.ndarray, list[str]]:
+    columns: list[np.ndarray] = []
+    names: list[str] = []
+    last = recent[:, -1]
+    seen_widths: set[int] = set()
+    for requested_width in (4, 8, 16, 32, 64, 128, 240):
+        width = min(int(requested_width), recent.shape[1])
+        if width < 2 or width in seen_widths:
+            continue
+        seen_widths.add(width)
+        tail = recent[:, -width:]
+        previous = recent[:, max(0, recent.shape[1] - 2 * width) : recent.shape[1] - width]
+        if previous.shape[1] < 2:
+            previous = older[:, -min(width, older.shape[1]) :]
+        old = older[:, -min(width, older.shape[1]) :]
+        tail_mean = np.mean(tail, axis=1)
+        previous_mean = np.mean(previous, axis=1)
+        old_mean = np.mean(old, axis=1)
+        tail_std = safe_std(tail)
+        previous_std = safe_std(previous)
+        old_std = safe_std(old)
+        tail_diff = np.diff(tail, axis=1)
+        previous_diff = np.diff(previous, axis=1)
+        old_diff = np.diff(old, axis=1)
+        tail_absdiff = np.mean(np.abs(tail_diff), axis=1)
+        previous_absdiff = np.mean(np.abs(previous_diff), axis=1)
+        old_absdiff = np.mean(np.abs(old_diff), axis=1)
+        drawdown, drawup = _drawdown_drawup(tail)
+        tail_slope = slope(tail)
+        previous_slope = slope(previous)
+        columns.extend(
+            [
+                last - tail_mean,
+                tail_mean - previous_mean,
+                tail_mean - old_mean,
+                np.log(tail_std / previous_std),
+                np.log(tail_std / old_std),
+                tail_absdiff - previous_absdiff,
+                np.log((tail_absdiff + 1e-8) / (previous_absdiff + 1e-8)),
+                np.log((tail_absdiff + 1e-8) / (old_absdiff + 1e-8)),
+                tail_slope,
+                tail_slope - previous_slope,
+                drawdown,
+                drawup,
+                np.max(tail, axis=1) - np.min(tail, axis=1),
+            ]
+        )
+        names.extend(
+            [
+                f"tail_last_vs_mean_{width}",
+                f"tail_prev_mean_delta_{width}",
+                f"tail_old_mean_delta_{width}",
+                f"tail_prev_std_log_ratio_{width}",
+                f"tail_old_std_log_ratio_{width}",
+                f"tail_prev_absdiff_delta_{width}",
+                f"tail_prev_absdiff_log_ratio_{width}",
+                f"tail_old_absdiff_log_ratio_{width}",
+                f"tail_slope_{width}",
+                f"tail_prev_slope_delta_{width}",
+                f"tail_drawdown_{width}",
+                f"tail_drawup_{width}",
+                f"tail_range_{width}",
+            ]
+        )
+    if not columns:
+        return np.zeros((recent.shape[0], 0), dtype=np.float64), []
+    return np.column_stack(columns), names
 
 
 def _optional_input_vector(ctx: EvalContext, name: str, n_rows: int) -> np.ndarray:

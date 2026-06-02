@@ -377,6 +377,22 @@ def built_in_mutations() -> list[MutationSpec]:
         MutationSpec(
             kind="add_alternative",
             target_node="output",
+            primitive="row_time_basis_outputs",
+            alternative_id="row_time_basis_output_mutation",
+            parents=("series",),
+            description="Add expanded target-time and observed-lookback basis features.",
+        ),
+        MutationSpec(
+            kind="add_alternative",
+            target_node="output",
+            primitive="row_multiscale_tail_outputs",
+            alternative_id="row_multiscale_tail_output_mutation",
+            parents=("series",),
+            description="Add multiscale recent-tail drift, volatility, slope, and drawdown features.",
+        ),
+        MutationSpec(
+            kind="add_alternative",
+            target_node="output",
             primitive="adia_row_baseline_outputs",
             alternative_id="adia_row_baseline_output_mutation",
             parents=("series",),

@@ -16,10 +16,11 @@ from benchmarks.competition_event_readout_benchmark import run as run_event_read
 from benchmarks.competition_event_source_suite_benchmark import build_report as build_source_suite_event_report
 from benchmarks.competition_row_benchmark import build_report as build_row_benchmark_report
 from benchmarks.competition_row_benchmark import row_local_baseline_features
+from benchmarks.competition_row_focused_graph_benchmark import build_report as build_row_focused_graph_report
 from benchmarks.competition_row_multisplit_benchmark import ROW_BASELINE_SPEC
 from benchmarks.competition_row_multisplit_benchmark import build_report as build_row_multisplit_report
 from evoforest_arch.competition import COMPETITION_DATASET_NAME, COMPETITION_ROW_DATASET_NAME, competition_data_summary, load_competition_event_dataset, load_competition_row_dataset
-from evoforest_arch.mutations import MutationEngine
+from evoforest_arch.mutations import MutationEngine, MutationSpec
 from evoforest_arch.production import ProductionConfig, ProductionEvolutionRunner, recheck_run
 from evoforest_arch.seed import build_seed_graph
 from evoforest_arch.source_mutations import structural_break_source_mutations, validate_source_mutations
@@ -52,6 +53,7 @@ def test_competition_row_loader_maps_target_rows_to_causal_graph_inputs(tmp_path
     assert dataset.metadata["official_metric_note"].startswith("This is row/time-level")
     assert dataset.inputs["sample_id"][:4].tolist() == [0, 0, 0, 0]
     assert dataset.inputs["sample_time"][:4].tolist() == [10, 13, 16, 19]
+    assert dataset.inputs["sample_time_scale"][:4].tolist() == [19.0, 19.0, 19.0, 19.0]
     first_series = dataset.inputs["series"][0]
     assert np.allclose(first_series[10:], first_series[10])
     assert first_series[-1] == 0.5 + np.cos(0.0)
@@ -363,6 +365,41 @@ def test_row_baseline_output_primitive_matches_fixed_row_baseline(tmp_path) -> N
     assert np.allclose(x[:, baseline_columns], expected_x)
 
 
+def test_row_time_and_multiscale_tail_primitives_evaluate(tmp_path) -> None:
+    data_dir = write_competition_bundle(tmp_path, include_reduced=False, n_train=24)
+    dataset = load_competition_row_dataset(data_dir, split="train", series_length=20, max_ids=8, max_rows_per_id=3)
+    graph = build_seed_graph()
+    engine = MutationEngine()
+    for spec in (
+        MutationSpec(
+            kind="add_alternative",
+            target_node="output",
+            primitive="row_time_basis_outputs",
+            alternative_id="row_time_basis_output",
+            parents=("series",),
+        ),
+        MutationSpec(
+            kind="add_alternative",
+            target_node="output",
+            primitive="row_multiscale_tail_outputs",
+            alternative_id="row_multiscale_tail_output",
+            parents=("series",),
+        ),
+    ):
+        graph = engine.apply(graph, spec)
+
+    x, names, _ctx = graph.evaluate_features(dataset.inputs, config=graph.default_config())
+    time_columns = [idx for idx, name in enumerate(names) if name.startswith("output.row_time_basis_output.")]
+    tail_columns = [idx for idx, name in enumerate(names) if name.startswith("output.row_multiscale_tail_output.")]
+
+    assert x.shape[0] == dataset.y.shape[0]
+    assert len(time_columns) == 13
+    assert len(tail_columns) == 39
+    assert len({names[idx] for idx in tail_columns}) == len(tail_columns)
+    assert np.std(x[:, time_columns[0]]) > 0.0
+    assert np.std(x[:, tail_columns[0]]) > 0.0
+
+
 def test_competition_row_multisplit_benchmark_writes_pruned_graph_and_avoids_reduced(tmp_path) -> None:
     data_dir = write_competition_bundle(tmp_path, include_reduced=False, n_train=48)
 
@@ -386,6 +423,32 @@ def test_competition_row_multisplit_benchmark_writes_pruned_graph_and_avoids_red
     assert Path(report["pruned_row_template_suite_graph"]["path"]).exists()
     assert report["template_suite"]["added_templates"] >= 1
     assert "mean_delta_vs_baseline" in report["internal_test"]
+
+
+def test_competition_row_focused_graph_benchmark_compares_row_primitives(tmp_path) -> None:
+    data_dir = write_competition_bundle(tmp_path, include_reduced=False, n_train=48)
+
+    report = build_row_focused_graph_report(
+        tmp_path / "row_focused",
+        data_dir=data_dir,
+        seed=13,
+        split_seeds=(13, 17),
+        series_length=20,
+        max_ids=None,
+        max_rows_per_id=3,
+    )
+
+    assert report["benchmark"] == "competition_row_focused_graph_benchmark"
+    assert report["reduced_test_access"]["accessed"] is False
+    assert set(report["graphs"]) == {
+        "row_baseline_only_graph",
+        "row_baseline_time_graph",
+        "row_baseline_tail_graph",
+        "row_baseline_time_tail_graph",
+    }
+    assert all(Path(row["path"]).exists() for row in report["graphs"].values())
+    assert report["summary"]["best_graph_by_validation"] in report["graphs"]
+    assert "best_internal_test_mean_auc" in report["summary"]
 
 
 def test_competition_row_benchmark_reports_grouped_holdout_and_no_reduced_access(tmp_path) -> None:

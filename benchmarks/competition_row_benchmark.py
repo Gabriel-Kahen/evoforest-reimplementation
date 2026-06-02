@@ -268,7 +268,11 @@ def row_local_baseline_features(inputs: dict[str, object]) -> tuple[np.ndarray, 
     sample_time = optional_vector(inputs, "sample_time", series.shape[0])
     sample_period = optional_vector(inputs, "sample_period", series.shape[0])
     observed = optional_vector(inputs, "lookback_observed", series.shape[0])
-    time_scale = max(float(np.max(sample_time)) if sample_time.size else 0.0, 1.0)
+    sample_time_scale = optional_vector(inputs, "sample_time_scale", series.shape[0])
+    if np.any(sample_time_scale > 0.0):
+        time_scale = max(float(np.max(sample_time_scale)), 1.0)
+    else:
+        time_scale = max(float(np.max(sample_time)) if sample_time.size else 0.0, 1.0)
     features = np.column_stack(
         [
             series[:, -1],

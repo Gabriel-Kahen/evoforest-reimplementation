@@ -71,6 +71,11 @@ Each command writes paired JSON and Markdown reports. The top-level
     holdout, multiple grouped validation splits inside the development pool,
     embeds the deterministic row-local baseline as a graph output primitive, and
     reports both seed-output-plus-baseline and output-only graph variants.
+- `competition_row_focused_graph_benchmark`
+  - Faster full-data row/time-level audit for graph-embedded row primitives. It
+    compares output-only graph variants for the deterministic row baseline,
+    expanded target-time basis, and multiscale recent-tail features under the
+    same grouped multi-split validation and fixed internal-test protocol.
 - `competition_event_benchmark`
   - Optional external-data benchmark for the paper's likely id-level ADIA
     protocol. It loads one structural-break label per id from the index parquet,
@@ -185,6 +190,23 @@ python -m benchmarks.competition_row_multisplit_benchmark \
   --disable-builtins \
   --output benchmark_reports/competition-row-multisplit
 ```
+
+```bash
+python -m benchmarks.competition_row_focused_graph_benchmark \
+  --data-dir /Users/gabrielkahen/Downloads/data \
+  --split-seeds 113,127,149 \
+  --series-length 480 \
+  --max-ids 10000 \
+  --max-rows-per-id 32 \
+  --output benchmark_reports/competition-row-focused-graph
+```
+
+The committed PC report
+`benchmark_reports/competition-row-focused-graph-pc-10k-32-l480` is a full
+10k-id audit. It reports `0.6567` mean validation AUC and `0.6420` mean
+internal-test AUC for `row_baseline_time_tail_graph`, with reduced-test access
+set to `False`. Treat that as evidence of a stronger graph primitive set, not as
+evidence that the current graph reliably reaches `0.65` on untouched tests.
 
 The default suite scripts accept `--seed`, `--output`, and `--quick`. The
 external parquet benchmark accepts `--seed` and `--output` plus data-capping

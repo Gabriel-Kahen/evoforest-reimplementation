@@ -264,6 +264,27 @@ python -m benchmarks.competition_row_multisplit_benchmark \
   --output benchmark_reports/competition-row-multisplit
 ```
 
+For a faster full-data audit of the row-specific graph primitives, use the
+focused graph benchmark. It compares output-only graph variants for the row
+baseline, expanded target-time basis, and multiscale recent-tail features across
+the same grouped validation/internal-test protocol:
+
+```bash
+python -m benchmarks.competition_row_focused_graph_benchmark \
+  --data-dir /Users/gabrielkahen/Downloads/data \
+  --split-seeds 113,127,149 \
+  --series-length 480 \
+  --max-ids 10000 \
+  --max-rows-per-id 32 \
+  --output benchmark_reports/competition-row-focused-graph
+```
+
+On the PC with the local parquet bundle, the best focused graph
+(`row_baseline_time_tail_graph`) reached mean validation AUC `0.6567` and mean
+internal-test AUC `0.6420` with no reduced-test access. That is a real full-data
+improvement over the row baseline (`0.6334` internal-test AUC), but it is not yet
+a reliable `0.65` internal-test result.
+
 ## Run Benchmarks
 
 The benchmark suite generates reproducible JSON and Markdown reports that show

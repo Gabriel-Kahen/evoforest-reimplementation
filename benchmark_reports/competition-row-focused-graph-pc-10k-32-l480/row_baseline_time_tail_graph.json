@@ -1,0 +1,222 @@
+{
+  "graph_hash": "589a6877197bd47e58626febb57ac9224864c9263893e7498dff104d7eed5761",
+  "graph": {
+    "name": "evoforest_seed",
+    "globals": {
+      "residual_huber_scale": {
+        "name": "residual_huber_scale",
+        "shape": [
+          1
+        ],
+        "trainable": true,
+        "description": "Shared threshold for residual-based Ridge reweighting.",
+        "value": [
+          1.0
+        ]
+      }
+    },
+    "nodes": [
+      {
+        "name": "series",
+        "kind": "input",
+        "description": "Batch of univariate time series with shape (n_series, length).",
+        "alternatives": []
+      },
+      {
+        "name": "boundary",
+        "kind": "input",
+        "description": "Known boundary index separating pre and post segments.",
+        "alternatives": []
+      },
+      {
+        "name": "output",
+        "kind": "output",
+        "description": "Candidate predictive feature alternatives evaluated as an ensemble.",
+        "alternatives": [
+          {
+            "id": "adia_row_baseline_output",
+            "parents": [
+              "series"
+            ],
+            "description": "Graph-embedded deterministic ADIA row-level baseline features.",
+            "tags": [],
+            "primitive": "adia_row_baseline_outputs",
+            "global_refs": [],
+            "has_torch": false,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          },
+          {
+            "id": "row_time_basis_output",
+            "parents": [
+              "series"
+            ],
+            "description": "Expanded target-time and observed-lookback basis features.",
+            "tags": [],
+            "primitive": "row_time_basis_outputs",
+            "global_refs": [],
+            "has_torch": false,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          },
+          {
+            "id": "row_multiscale_tail_output",
+            "parents": [
+              "series"
+            ],
+            "description": "Multiscale recent-tail drift, volatility, slope, and drawdown features.",
+            "tags": [],
+            "primitive": "row_multiscale_tail_outputs",
+            "global_refs": [],
+            "has_torch": false,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          }
+        ]
+      },
+      {
+        "name": "ridge_w",
+        "kind": "fitting",
+        "description": "Sample-weight alternatives for the downstream Ridge readout.",
+        "alternatives": [
+          {
+            "id": "uniform",
+            "parents": [],
+            "description": "Uniform Ridge sample weights.",
+            "tags": [],
+            "primitive": "uniform_sample_weight",
+            "global_refs": [],
+            "has_torch": false,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          },
+          {
+            "id": "boundary_energy",
+            "parents": [
+              "series"
+            ],
+            "description": "Emphasize samples whose CUSUM energy concentrates near the boundary.",
+            "tags": [],
+            "primitive": "boundary_energy_weight",
+            "global_refs": [],
+            "has_torch": false,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          }
+        ]
+      },
+      {
+        "name": "ridge_g",
+        "kind": "fitting",
+        "description": "Residual-weighting alternatives for iterative Ridge fitting.",
+        "alternatives": [
+          {
+            "id": "identity",
+            "parents": [],
+            "description": "Identity residual weighting rule.",
+            "tags": [],
+            "primitive": "identity_residual_weight",
+            "global_refs": [],
+            "has_torch": false,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          },
+          {
+            "id": "huber",
+            "parents": [],
+            "description": "Huber-style residual weighting rule.",
+            "tags": [],
+            "primitive": "huber_residual_weight",
+            "global_refs": [
+              "residual_huber_scale"
+            ],
+            "has_torch": false,
+            "source": "",
+            "age": 0,
+            "stats": {}
+          }
+        ]
+      }
+    ]
+  },
+  "metadata": {
+    "benchmark": "competition_row_focused_graph_benchmark",
+    "stage": "row_baseline_time_tail_graph",
+    "score": {
+      "validation": {
+        "mean_auc": 0.6567253354982784,
+        "min_auc": 0.6527953728975052,
+        "mean_delta_vs_baseline": 0.005561340470860876,
+        "min_delta_vs_baseline": 0.004466714051390208,
+        "splits": [
+          {
+            "seed": 113,
+            "train_auc": 0.666123223681966,
+            "auc": 0.6608751805970755,
+            "baseline_auc": 0.6564084665456853,
+            "delta_vs_baseline": 0.004466714051390208,
+            "alpha": 0.0001,
+            "n_features": 125
+          },
+          {
+            "seed": 127,
+            "train_auc": 0.6660856852127672,
+            "auc": 0.6527953728975052,
+            "baseline_auc": 0.6475992411170568,
+            "delta_vs_baseline": 0.005196131780448421,
+            "alpha": 0.00031622776601683794,
+            "n_features": 125
+          },
+          {
+            "seed": 149,
+            "train_auc": 0.6660741317932903,
+            "auc": 0.6565054530002545,
+            "baseline_auc": 0.6494842774195105,
+            "delta_vs_baseline": 0.007021175580743999,
+            "alpha": 0.0001,
+            "n_features": 125
+          }
+        ]
+      },
+      "test": {
+        "mean_auc": 0.6420221217347826,
+        "min_auc": 0.641673890239045,
+        "mean_delta_vs_baseline": 0.008647835779728089,
+        "min_delta_vs_baseline": 0.007879230580960073,
+        "splits": [
+          {
+            "seed": 113,
+            "auc": 0.6421825059312001,
+            "baseline_auc": 0.6336070707034062,
+            "delta_vs_baseline": 0.008575435227793915,
+            "alpha": 0.0001,
+            "n_features": 125
+          },
+          {
+            "seed": 127,
+            "auc": 0.6422099690341024,
+            "baseline_auc": 0.6327211275036722,
+            "delta_vs_baseline": 0.009488841530430281,
+            "alpha": 0.00031622776601683794,
+            "n_features": 125
+          },
+          {
+            "seed": 149,
+            "auc": 0.641673890239045,
+            "baseline_auc": 0.6337946596580849,
+            "delta_vs_baseline": 0.007879230580960073,
+            "alpha": 0.0001,
+            "n_features": 125
+          }
+        ]
+      },
+      "objective": 0.983123021947031
+    }
+  }
+}
