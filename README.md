@@ -285,6 +285,11 @@ internal-test AUC `0.6420` with no reduced-test access. That is a real full-data
 improvement over the row baseline (`0.6334` internal-test AUC), but it is not yet
 a reliable `0.65` internal-test result.
 
+For the 2026 real-time CrunchDAO contest interface, use the self-contained
+notebook in `submissions/structural_break_real_time/`. It defines the required
+`train()` and streaming `infer()` functions and adapts the same row/time/tail
+feature family to per-online-step predictions.
+
 ## Run Benchmarks
 
 The benchmark suite generates reproducible JSON and Markdown reports that show
