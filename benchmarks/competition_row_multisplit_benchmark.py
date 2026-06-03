@@ -162,7 +162,10 @@ def build_report(
     include_builtin_templates: bool = True,
     include_source_mutations: bool = False,
     skip_pruning: bool = False,
+    prune_scoring_mode: str = "search",
 ) -> dict[str, Any]:
+    if prune_scoring_mode not in {"search", "fixed-config"}:
+        raise ValueError("prune_scoring_mode must be 'search' or 'fixed-config'.")
     output_dir.mkdir(parents=True, exist_ok=True)
     config = ProductionConfig(
         output_dir=Path("unused"),
@@ -255,6 +258,7 @@ def build_report(
             stability_weight=stability_weight,
             objective_mode=objective_mode,
             prune_tolerance=prune_tolerance,
+            prune_scoring_mode=prune_scoring_mode,
             allow_source=include_source_mutations,
         )
         pruned_output_only_graph, output_only_prune_rows, pruned_output_only_score = prune_graph(
@@ -265,6 +269,7 @@ def build_report(
             stability_weight=stability_weight,
             objective_mode=objective_mode,
             prune_tolerance=prune_tolerance,
+            prune_scoring_mode=prune_scoring_mode,
             allow_source=include_source_mutations,
         )
     row_baseline_path = write_graph(
@@ -367,6 +372,7 @@ def build_report(
             "include_builtin_templates": bool(include_builtin_templates),
             "include_source_mutations": bool(include_source_mutations),
             "skip_pruning": bool(skip_pruning),
+            "prune_scoring_mode": prune_scoring_mode,
             "objective": objective_description(objective_mode),
         },
         "outer_split": outer_split,
@@ -451,12 +457,14 @@ def build_report(
         },
         "pruning": {
             "skipped": bool(skip_pruning),
+            "scoring_mode": prune_scoring_mode,
             "attempted": len(prune_rows),
             "removed": sum(1 for row in prune_rows if row.get("removed")),
             "rows": prune_rows,
         },
         "output_only_pruning": {
             "skipped": bool(skip_pruning),
+            "scoring_mode": prune_scoring_mode,
             "attempted": len(output_only_prune_rows),
             "removed": sum(1 for row in output_only_prune_rows if row.get("removed")),
             "rows": output_only_prune_rows,
@@ -574,6 +582,53 @@ def score_graph_across_splits(
                 validation_predictions=holdout.validation_predictions,
             )
         )
+    return summarize_split_scores(split_scores, stability_weight=stability_weight, objective_mode=objective_mode)
+
+
+def score_graph_across_splits_fixed_configs(
+    graph: Graph,
+    contexts: tuple[RowSplitContext, ...],
+    split_configs: tuple[dict[str, str], ...],
+    *,
+    stability_weight: float,
+    objective_mode: str,
+) -> RowMultiSplitScore:
+    if len(contexts) != len(split_configs):
+        raise ValueError("Fixed-config scoring requires one config per split.")
+    split_scores: list[RowSplitGraphScore] = []
+    for context, config in zip(contexts, split_configs, strict=True):
+        if not graph_config_valid(graph, config):
+            raise KeyError("Fixed prune config references an alternative removed from the trial graph.")
+        holdout = graph_holdout_score(
+            graph,
+            context.train_inputs,
+            context.train_y,
+            context.validation_inputs,
+            context.validation_y,
+            config=config,
+        )
+        split_scores.append(
+            RowSplitGraphScore(
+                seed=context.seed,
+                train_auc=holdout.train_auc,
+                validation_auc=holdout.validation_auc,
+                delta_vs_baseline=float(holdout.validation_auc) - float(context.baseline.validation_auc),
+                alpha=holdout.alpha,
+                n_features=holdout.n_features,
+                config=dict(config),
+                train_predictions=holdout.train_predictions,
+                validation_predictions=holdout.validation_predictions,
+            )
+        )
+    return summarize_split_scores(split_scores, stability_weight=stability_weight, objective_mode=objective_mode)
+
+
+def summarize_split_scores(
+    split_scores: list[RowSplitGraphScore],
+    *,
+    stability_weight: float,
+    objective_mode: str,
+) -> RowMultiSplitScore:
     deltas = np.asarray([score.delta_vs_baseline for score in split_scores], dtype=np.float64)
     validation = np.asarray([score.validation_auc for score in split_scores], dtype=np.float64)
     mean_delta = float(np.mean(deltas)) if deltas.size else 0.0
@@ -597,6 +652,14 @@ def score_graph_across_splits(
     )
 
 
+def graph_config_valid(graph: Graph, config: dict[str, str]) -> bool:
+    configuration_space = graph.configuration_space()
+    for node_name, alternative_id in config.items():
+        if node_name in configuration_space and alternative_id not in configuration_space[node_name]:
+            return False
+    return True
+
+
 def prune_graph(
     graph: Graph,
     accepted: list[tuple[str, str, int]],
@@ -606,8 +669,11 @@ def prune_graph(
     stability_weight: float,
     objective_mode: str,
     prune_tolerance: float,
+    prune_scoring_mode: str,
     allow_source: bool,
 ) -> tuple[Graph, list[dict[str, Any]], RowMultiSplitScore]:
+    if prune_scoring_mode not in {"search", "fixed-config"}:
+        raise ValueError("prune_scoring_mode must be 'search' or 'fixed-config'.")
     engine = MutationEngine(allow_source=allow_source)
     current = graph.clone()
     current_score = score_graph_across_splits(
@@ -627,29 +693,33 @@ def prune_graph(
                 current,
                 MutationDocument(remove=(RemoveSpec(node_name, alternative_id, "Backward row multi-split prune candidate."),)),
             ).graph
-            trial_score = score_graph_across_splits(
+            trial_score, scoring_mode, fallback_error = score_prune_trial(
                 trial,
                 contexts,
+                current_score=current_score,
                 evaluator_kwargs=evaluator_kwargs,
                 stability_weight=stability_weight,
                 objective_mode=objective_mode,
+                prune_scoring_mode=prune_scoring_mode,
             )
             objective_delta = float(trial_score.objective) - float(current_score.objective)
             removed = objective_delta >= -float(prune_tolerance)
-            rows.append(
-                {
-                    "step": int(step),
-                    "target_node": node_name,
-                    "alternative_id": alternative_id,
-                    "removed": bool(removed),
-                    "objective_before": float(current_score.objective),
-                    "objective_after": float(trial_score.objective),
-                    "objective_delta": float(objective_delta),
-                    "mean_validation_auc_after": float(trial_score.mean_validation_auc),
-                    "mean_delta_after": float(trial_score.mean_delta_vs_baseline),
-                    "min_delta_after": float(trial_score.min_delta_vs_baseline),
-                }
-            )
+            row = {
+                "step": int(step),
+                "target_node": node_name,
+                "alternative_id": alternative_id,
+                "removed": bool(removed),
+                "scoring_mode": scoring_mode,
+                "objective_before": float(current_score.objective),
+                "objective_after": float(trial_score.objective),
+                "objective_delta": float(objective_delta),
+                "mean_validation_auc_after": float(trial_score.mean_validation_auc),
+                "mean_delta_after": float(trial_score.mean_delta_vs_baseline),
+                "min_delta_after": float(trial_score.min_delta_vs_baseline),
+            }
+            if fallback_error:
+                row["fixed_config_fallback_error"] = fallback_error
+            rows.append(row)
             if removed:
                 current = trial
                 current_score = trial_score
@@ -665,6 +735,53 @@ def prune_graph(
                 }
             )
     return current, rows, current_score
+
+
+def score_prune_trial(
+    trial: Graph,
+    contexts: tuple[RowSplitContext, ...],
+    *,
+    current_score: RowMultiSplitScore,
+    evaluator_kwargs: dict[str, Any],
+    stability_weight: float,
+    objective_mode: str,
+    prune_scoring_mode: str,
+) -> tuple[RowMultiSplitScore, str, str]:
+    if prune_scoring_mode == "fixed-config":
+        split_configs = tuple(dict(split.config) for split in current_score.splits)
+        try:
+            return (
+                score_graph_across_splits_fixed_configs(
+                    trial,
+                    contexts,
+                    split_configs,
+                    stability_weight=stability_weight,
+                    objective_mode=objective_mode,
+                ),
+                "fixed-config",
+                "",
+            )
+        except Exception as exc:
+            fallback_score = score_graph_across_splits(
+                trial,
+                contexts,
+                evaluator_kwargs=evaluator_kwargs,
+                stability_weight=stability_weight,
+                objective_mode=objective_mode,
+            )
+            return fallback_score, "search-fallback", str(exc)
+
+    return (
+        score_graph_across_splits(
+            trial,
+            contexts,
+            evaluator_kwargs=evaluator_kwargs,
+            stability_weight=stability_weight,
+            objective_mode=objective_mode,
+        ),
+        "search",
+        "",
+    )
 
 
 def internal_test_report(
@@ -972,6 +1089,7 @@ def markdown_report(payload: dict[str, Any]) -> str:
         [
             row["alternative_id"],
             "yes" if row.get("removed") else "no",
+            row.get("scoring_mode", ""),
             fmt_float(row.get("objective_before")),
             fmt_float(row.get("objective_after")),
             fmt_float(row.get("objective_delta")),
@@ -1029,7 +1147,7 @@ def markdown_report(payload: dict[str, Any]) -> str:
             ),
             markdown_table(["Graph", "Mean Val AUC", "Mean Delta", "Min Val AUC", "Objective"], graph_rows),
             markdown_table(["Ensemble", "Members", "Mean Val AUC", "Mean Delta", "Min Val AUC", "Objective"], ensemble_rows),
-            markdown_table(["Pruned Alternative", "Removed", "Objective Before", "Objective After", "Delta"], prune_rows),
+            markdown_table(["Pruned Alternative", "Removed", "Mode", "Objective Before", "Objective After", "Delta"], prune_rows),
         ]
     )
 
@@ -1052,6 +1170,7 @@ def run(
     include_builtin_templates: bool = True,
     include_source_mutations: bool = False,
     skip_pruning: bool = False,
+    prune_scoring_mode: str = "search",
 ) -> tuple[Path, Path]:
     payload = build_report(
         output_dir,
@@ -1070,6 +1189,7 @@ def run(
         include_builtin_templates=include_builtin_templates,
         include_source_mutations=include_source_mutations,
         skip_pruning=skip_pruning,
+        prune_scoring_mode=prune_scoring_mode,
     )
     return write_report(output_dir, "competition_row_multisplit_benchmark", payload, markdown_report(payload))
 
@@ -1092,6 +1212,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--disable-builtins", action="store_true")
     parser.add_argument("--include-source-mutations", action="store_true")
     parser.add_argument("--skip-pruning", action="store_true", help="Skip backward pruning for quick archive/ensemble audits.")
+    parser.add_argument(
+        "--prune-scoring-mode",
+        choices=("search", "fixed-config"),
+        default="search",
+        help="Use full CV config search for prune trials, or reuse current split configs for faster validation-only pruning.",
+    )
     args = parser.parse_args(argv)
     print_report_paths(
         run(
@@ -1111,6 +1237,7 @@ def main(argv: list[str] | None = None) -> int:
             include_builtin_templates=not args.disable_builtins,
             include_source_mutations=args.include_source_mutations,
             skip_pruning=args.skip_pruning,
+            prune_scoring_mode=args.prune_scoring_mode,
         )
     )
     return 0

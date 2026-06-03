@@ -264,6 +264,11 @@ python -m benchmarks.competition_row_multisplit_benchmark \
   --output benchmark_reports/competition-row-multisplit
 ```
 
+Use `--prune-scoring-mode fixed-config` for heavier row audits when full
+backward pruning is too slow. This keeps pruning validation-only and refits the
+holdout ridge readout, while reusing each split's current graph config instead
+of repeating CV configuration search for every removal.
+
 For a faster full-data audit of the row-specific graph primitives, use the
 focused graph benchmark. It compares output-only graph variants for the row
 baseline, expanded target-time basis, and multiscale recent-tail features across

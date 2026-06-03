@@ -191,6 +191,11 @@ python -m benchmarks.competition_row_multisplit_benchmark \
   --output benchmark_reports/competition-row-multisplit
 ```
 
+Add `--prune-scoring-mode fixed-config` when the full-search pruning loop is
+too slow for a heavier row run. It still selects removals only from grouped
+validation splits, but it reuses each split's current graph config for each
+trial removal instead of rerunning CV configuration search.
+
 ```bash
 python -m benchmarks.competition_row_focused_graph_benchmark \
   --data-dir /Users/gabrielkahen/Downloads/data \

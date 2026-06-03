@@ -430,6 +430,30 @@ def test_competition_row_multisplit_benchmark_writes_pruned_graph_and_avoids_red
     assert "best_ensemble_internal_test_mean_auc" in report["summary"]
 
 
+def test_competition_row_multisplit_fast_pruning_records_scoring_mode(tmp_path) -> None:
+    data_dir = write_competition_bundle(tmp_path, include_reduced=False, n_train=48)
+
+    report = build_row_multisplit_report(
+        tmp_path / "row_multisplit_fast_prune",
+        data_dir=data_dir,
+        seed=13,
+        split_seeds=(13, 17),
+        series_length=20,
+        max_ids=None,
+        max_rows_per_id=3,
+        folds=2,
+        max_configurations=2,
+        include_builtin_templates=False,
+        prune_scoring_mode="fixed-config",
+    )
+
+    assert report["benchmark_config"]["prune_scoring_mode"] == "fixed-config"
+    assert report["pruning"]["skipped"] is False
+    assert report["pruning"]["scoring_mode"] == "fixed-config"
+    assert report["output_only_pruning"]["scoring_mode"] == "fixed-config"
+    assert {row["scoring_mode"] for row in report["pruning"]["rows"]} <= {"fixed-config", "search-fallback"}
+
+
 def test_competition_row_focused_graph_benchmark_compares_row_primitives(tmp_path) -> None:
     data_dir = write_competition_bundle(tmp_path, include_reduced=False, n_train=48)
 
