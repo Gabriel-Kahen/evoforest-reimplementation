@@ -1,15 +1,6 @@
 """Clean-room EvoForest architecture package."""
 
 from evoforest_arch.agents import EngineerAgent, Hypothesis, ScientistAgent
-from evoforest_arch.competition import (
-    COMPETITION_DATASET_NAME,
-    COMPETITION_ROW_DATASET_NAME,
-    DEFAULT_COMPETITION_DATA_DIR,
-    CompetitionEventDataset,
-    competition_data_summary,
-    load_competition_event_dataset,
-    load_competition_row_dataset,
-)
 from evoforest_arch.evaluator import EvaluationResult, RidgeEvaluator
 from evoforest_arch.evolution import EvolutionLoop
 from evoforest_arch.graph import EvalContext, FeatureBlock, Graph, GraphNode, NodeAlternative, ResidualWeightRule
@@ -43,10 +34,6 @@ __all__ = [
     "GlobalRefiner",
     "GraphMaintenance",
     "DEFAULT_ISLAND_TEMPERATURES",
-    "DEFAULT_COMPETITION_DATA_DIR",
-    "COMPETITION_DATASET_NAME",
-    "COMPETITION_ROW_DATASET_NAME",
-    "CompetitionEventDataset",
     "HTTPJSONLLMClient",
     "Hypothesis",
     "LLMEngineerAgent",
@@ -74,11 +61,8 @@ __all__ = [
     "build_seed_graph",
     "build_source_alternative",
     "compile_lambda_source",
-    "competition_data_summary",
     "export_best_graph",
     "inspect_run",
-    "load_competition_event_dataset",
-    "load_competition_row_dataset",
     "make_structural_break_data",
     "recheck_run",
 ]

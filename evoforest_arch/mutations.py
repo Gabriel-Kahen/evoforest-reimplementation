@@ -345,18 +345,18 @@ def built_in_mutations() -> list[MutationSpec]:
         MutationSpec(
             kind="add_alternative",
             target_node="output",
-            primitive="adia_structural_break_baseline_outputs",
-            alternative_id="adia_baseline_output_mutation",
+            primitive="structural_break_baseline_outputs",
+            alternative_id="structural_break_baseline_output_mutation",
             parents=("series",),
-            description="Add the full deterministic ADIA structural-break baseline feature block as graph outputs.",
+            description="Add a deterministic structural-break baseline feature block as graph outputs.",
         ),
         MutationSpec(
             kind="add_alternative",
             target_node="output",
-            primitive="competition_event_outputs",
-            alternative_id="competition_event_output_mutation",
+            primitive="event_detection_outputs",
+            alternative_id="event_detection_output_mutation",
             parents=("series",),
-            description="Add always-evaluated event-detection features directly from the parquet sequence.",
+            description="Add always-evaluated event-detection features directly from the sequence.",
         ),
         MutationSpec(
             kind="add_alternative",
@@ -393,10 +393,10 @@ def built_in_mutations() -> list[MutationSpec]:
         MutationSpec(
             kind="add_alternative",
             target_node="output",
-            primitive="adia_row_baseline_outputs",
-            alternative_id="adia_row_baseline_output_mutation",
+            primitive="row_baseline_outputs",
+            alternative_id="row_baseline_output_mutation",
             parents=("series",),
-            description="Add the full deterministic ADIA row-level baseline feature block as graph outputs.",
+            description="Add the deterministic row-level baseline feature block as graph outputs.",
         ),
         MutationSpec(
             kind="add_alternative",

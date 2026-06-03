@@ -34,15 +34,15 @@ class PrimitiveRegistry:
         registry.register("row_local_outputs", row_local_outputs_factory)
         registry.register("row_time_basis_outputs", row_time_basis_outputs_factory)
         registry.register("row_multiscale_tail_outputs", row_multiscale_tail_outputs_factory)
-        registry.register("adia_row_baseline_outputs", adia_row_baseline_outputs_factory)
+        registry.register("row_baseline_outputs", row_baseline_outputs_factory)
         registry.register("identity_callable", identity_callable_factory)
         registry.register("sigmoid_gate_callable", sigmoid_gate_callable_factory)
         registry.register("clipped_linear_callable", clipped_linear_callable_factory)
         registry.register("pass_outputs", pass_outputs_factory)
         registry.register("activated_outputs", activated_outputs_factory)
         registry.register("projection_outputs", projection_outputs_factory)
-        registry.register("competition_event_outputs", competition_event_outputs_factory)
-        registry.register("adia_structural_break_baseline_outputs", adia_structural_break_baseline_outputs_factory)
+        registry.register("event_detection_outputs", event_detection_outputs_factory)
+        registry.register("structural_break_baseline_outputs", structural_break_baseline_outputs_factory)
         registry.register("interaction_outputs", interaction_outputs_factory)
         registry.register("uniform_sample_weight", uniform_sample_weight_factory)
         registry.register("boundary_energy_weight", boundary_energy_weight_factory)
@@ -262,7 +262,7 @@ def segment_late_shift_factory(alternative_id: str, parents: tuple[str, ...]) ->
         )
         return FeatureBlock(block, ["tail_jump", "tail_jump_abs", "post_late_drift", "post_late_drift_abs", "tail_std_log_ratio"])
 
-    return NodeAlternative(alternative_id, parents, fn, "Competition-style late shift statistics around the period boundary.")
+    return NodeAlternative(alternative_id, parents, fn, "Late shift statistics around the period boundary.")
 
 
 def shape_drawdown_factory(alternative_id: str, parents: tuple[str, ...]) -> NodeAlternative:
@@ -501,7 +501,7 @@ def row_multiscale_tail_outputs_factory(alternative_id: str, parents: tuple[str,
     return NodeAlternative(alternative_id, parents, fn, "Multiscale recent-tail drift, volatility, slope, and drawdown features.")
 
 
-def adia_row_baseline_outputs_factory(alternative_id: str, parents: tuple[str, ...]) -> NodeAlternative:
+def row_baseline_outputs_factory(alternative_id: str, parents: tuple[str, ...]) -> NodeAlternative:
     def fn(ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
         series = np.asarray(values[parents[0]], dtype=np.float64)
         boundary = int(ctx.read_input("boundary"))
@@ -564,7 +564,7 @@ def adia_row_baseline_outputs_factory(alternative_id: str, parents: tuple[str, .
         ]
         return FeatureBlock(features, names)
 
-    return NodeAlternative(alternative_id, parents, fn, "Always-evaluated ADIA row-level baseline feature block.")
+    return NodeAlternative(alternative_id, parents, fn, "Always-evaluated row-level baseline feature block.")
 
 
 def spectral_basic_factory(alternative_id: str, parents: tuple[str, ...]) -> NodeAlternative:
@@ -703,7 +703,7 @@ def projection_outputs_factory(alternative_id: str, parents: tuple[str, ...]) ->
     return NodeAlternative(alternative_id, parents, fn, "Projection using persistent global parameters.", global_refs=("projection_vector",), torch_fn=tfn)
 
 
-def competition_event_outputs_factory(alternative_id: str, parents: tuple[str, ...]) -> NodeAlternative:
+def event_detection_outputs_factory(alternative_id: str, parents: tuple[str, ...]) -> NodeAlternative:
     def fn(ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
         series = np.asarray(values[parents[0]], dtype=np.float64)
         boundary = int(ctx.read_input("boundary"))
@@ -763,10 +763,10 @@ def competition_event_outputs_factory(alternative_id: str, parents: tuple[str, .
             ],
         )
 
-    return NodeAlternative(alternative_id, parents, fn, "Always-evaluated competition event detection output features.")
+    return NodeAlternative(alternative_id, parents, fn, "Always-evaluated event detection output features.")
 
 
-def adia_structural_break_baseline_outputs_factory(alternative_id: str, parents: tuple[str, ...]) -> NodeAlternative:
+def structural_break_baseline_outputs_factory(alternative_id: str, parents: tuple[str, ...]) -> NodeAlternative:
     def fn(ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
         series = np.asarray(values[parents[0]], dtype=np.float64)
         boundary = int(ctx.read_input("boundary"))
@@ -833,38 +833,38 @@ def adia_structural_break_baseline_outputs_factory(alternative_id: str, parents:
             ]
         )
         names = [
-            "adia_mean_delta",
-            "adia_mean_delta_abs",
-            "adia_mean_delta_scaled",
-            "adia_median_delta",
-            "adia_std_log_ratio",
-            "adia_iqr_delta",
-            "adia_iqr_log_ratio",
-            "adia_absdiff_delta",
-            "adia_diff_std_log_ratio",
-            "adia_autocorr_delta",
-            "adia_slope_delta",
-            "adia_tail_slope_delta",
-            "adia_boundary_jump",
-            "adia_post_tail_drift",
-            "adia_quantile_l1_distance",
-            "adia_quantile_max_distance",
-            "adia_sorted_signed_distance",
-            "adia_sorted_l1_distance",
-            "adia_post_cusum_peak",
-            "adia_pre_cusum_peak",
-            "adia_cusum_peak_ratio",
-            "adia_low_freq_log_ratio",
-            "adia_high_freq_log_ratio",
-            "adia_spectral_shape_delta",
-            "adia_drawdown_delta",
-            "adia_drawup_delta",
-            "adia_last_vs_pre_mean",
-            "adia_last_vs_pre_tail",
+            "baseline_mean_delta",
+            "baseline_mean_delta_abs",
+            "baseline_mean_delta_scaled",
+            "baseline_median_delta",
+            "baseline_std_log_ratio",
+            "baseline_iqr_delta",
+            "baseline_iqr_log_ratio",
+            "baseline_absdiff_delta",
+            "baseline_diff_std_log_ratio",
+            "baseline_autocorr_delta",
+            "baseline_slope_delta",
+            "baseline_tail_slope_delta",
+            "baseline_boundary_jump",
+            "baseline_post_tail_drift",
+            "baseline_quantile_l1_distance",
+            "baseline_quantile_max_distance",
+            "baseline_sorted_signed_distance",
+            "baseline_sorted_l1_distance",
+            "baseline_post_cusum_peak",
+            "baseline_pre_cusum_peak",
+            "baseline_cusum_peak_ratio",
+            "baseline_low_freq_log_ratio",
+            "baseline_high_freq_log_ratio",
+            "baseline_spectral_shape_delta",
+            "baseline_drawdown_delta",
+            "baseline_drawup_delta",
+            "baseline_last_vs_pre_mean",
+            "baseline_last_vs_pre_tail",
         ]
         return FeatureBlock(features, names)
 
-    return NodeAlternative(alternative_id, parents, fn, "Always-evaluated full ADIA structural-break baseline feature block.")
+    return NodeAlternative(alternative_id, parents, fn, "Always-evaluated structural-break baseline feature block.")
 
 
 def interaction_outputs_factory(alternative_id: str, parents: tuple[str, ...]) -> NodeAlternative:

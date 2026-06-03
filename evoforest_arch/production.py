@@ -9,13 +9,6 @@ from typing import Any
 
 import numpy as np
 
-from evoforest_arch.competition import (
-    COMPETITION_DATASET_NAME,
-    COMPETITION_ROW_DATASET_NAME,
-    DEFAULT_COMPETITION_DATA_DIR,
-    load_competition_event_dataset,
-    load_competition_row_dataset,
-)
 from evoforest_arch.evaluator import EvaluationResult, RidgeEvaluator
 from evoforest_arch.evolution import EvolutionLoop
 from evoforest_arch.feedback import feedback_summary, toon_report
@@ -23,7 +16,7 @@ from evoforest_arch.graph import Graph
 from evoforest_arch.graph_io import graph_hash, graph_from_path, write_graph
 from evoforest_arch.mutations import MutationEngine
 from evoforest_arch.seed import build_seed_graph
-from evoforest_arch.splits import SplitManifest, make_grouped_split_manifest, make_split_manifest, read_split_manifest, split_dataset, write_split_manifest
+from evoforest_arch.splits import SplitManifest, make_split_manifest, read_split_manifest, split_dataset, write_split_manifest
 from evoforest_arch.synthetic import make_structural_break_data
 
 
@@ -43,15 +36,9 @@ class ProductionConfig:
     steps: int = 4
     seed: int = 17
     dataset_name: str = "synthetic-structural-break"
-    data_dir: pathlib.Path | None = None
     n_series: int = 240
     length: int = 160
     boundary: int | None = None
-    competition_series_length: int = 160
-    max_samples: int | None = None
-    competition_max_ids: int | None = None
-    competition_max_rows_per_id: int | None = None
-    competition_row_stride: int = 1
     validation_fraction: float = 0.2
     test_fraction: float = 0.2
     split_seed: int | None = None
@@ -66,16 +53,6 @@ class ProductionConfig:
     allow_source_mutations: bool = False
 
     def dataset_config(self) -> dict[str, Any]:
-        if self.dataset_name in {COMPETITION_DATASET_NAME, COMPETITION_ROW_DATASET_NAME}:
-            return {
-                "name": self.dataset_name,
-                "data_dir": str(self.data_dir or DEFAULT_COMPETITION_DATA_DIR),
-                "series_length": int(self.competition_series_length),
-                "max_samples": self.max_samples,
-                "max_ids": self.competition_max_ids,
-                "max_rows_per_id": self.competition_max_rows_per_id,
-                "row_stride": int(self.competition_row_stride),
-            }
         return {
             "name": self.dataset_name,
             "seed": int(self.seed),
@@ -93,7 +70,7 @@ class ProductionConfig:
             "refine_globals": bool(self.refine_globals),
             "refine_steps": int(self.refine_steps),
             "refine_backend": self.refine_backend,
-            "group_key": "sample_id" if self.dataset_name == COMPETITION_ROW_DATASET_NAME else None,
+            "group_key": None,
         }
 
 
@@ -370,8 +347,7 @@ class ProductionEvolutionRunner:
                 "validation_config": "candidate_train_best_config",
             },
             "test_policy": (
-                "test split is not evaluated by evolve; use recheck --include-test to consume it explicitly. "
-                "For competition parquet datasets, reduced labeled test parquet files are also read only by recheck --include-test."
+                "test split is not evaluated by evolve; use recheck --include-test to consume it explicitly."
             ),
             "safe_staged_execution_rules": list(SAFE_STAGED_EXECUTION_RULES),
         }
@@ -536,49 +512,11 @@ def load_dataset_with_metadata(dataset_config: dict[str, Any]) -> tuple[dict[str
             "negative_count": int(dataset.y.shape[0] - np.sum(dataset.y)),
             "mapping": "synthetic structural break generator",
         }
-    if name == COMPETITION_DATASET_NAME:
-        dataset = load_competition_event_dataset(
-            dataset_config.get("data_dir", DEFAULT_COMPETITION_DATA_DIR),
-            split="train",
-            series_length=int(dataset_config.get("series_length", 160)),
-            max_samples=dataset_config.get("max_samples"),
-        )
-        return dataset.inputs, dataset.y, dataset.metadata
-    if name == COMPETITION_ROW_DATASET_NAME:
-        dataset = load_competition_row_dataset(
-            dataset_config.get("data_dir", DEFAULT_COMPETITION_DATA_DIR),
-            split="train",
-            series_length=int(dataset_config.get("series_length", 160)),
-            max_samples=dataset_config.get("max_samples"),
-            max_ids=dataset_config.get("max_ids"),
-            max_rows_per_id=dataset_config.get("max_rows_per_id"),
-            row_stride=int(dataset_config.get("row_stride", 1)),
-        )
-        return dataset.inputs, dataset.y, dataset.metadata
     raise ValueError(f"Unsupported dataset {name!r}.")
 
 
 def load_external_reduced_test(dataset_config: dict[str, Any]) -> tuple[dict[str, object], np.ndarray, dict[str, Any]] | None:
-    name = str(dataset_config.get("name", "synthetic-structural-break"))
-    if name == COMPETITION_DATASET_NAME:
-        dataset = load_competition_event_dataset(
-            dataset_config.get("data_dir", DEFAULT_COMPETITION_DATA_DIR),
-            split="reduced_test",
-            series_length=int(dataset_config.get("series_length", 160)),
-            max_samples=dataset_config.get("max_samples"),
-        )
-        return dataset.inputs, dataset.y, dataset.metadata
-    if name == COMPETITION_ROW_DATASET_NAME:
-        dataset = load_competition_row_dataset(
-            dataset_config.get("data_dir", DEFAULT_COMPETITION_DATA_DIR),
-            split="reduced_test",
-            series_length=int(dataset_config.get("series_length", 160)),
-            max_samples=dataset_config.get("max_samples"),
-            max_ids=dataset_config.get("max_ids"),
-            max_rows_per_id=dataset_config.get("max_rows_per_id"),
-            row_stride=int(dataset_config.get("row_stride", 1)),
-        )
-        return dataset.inputs, dataset.y, dataset.metadata
+    _ = dataset_config
     return None
 
 
@@ -591,18 +529,7 @@ def make_production_split_manifest(
     validation_fraction: float,
     test_fraction: float,
 ) -> SplitManifest:
-    if dataset_name == COMPETITION_ROW_DATASET_NAME:
-        if "sample_id" not in inputs:
-            raise KeyError("Row-level competition datasets require inputs['sample_id'] for grouped splitting.")
-        return make_grouped_split_manifest(
-            inputs,
-            y,
-            groups=np.asarray(inputs["sample_id"]),
-            group_key="sample_id",
-            seed=seed,
-            validation_fraction=validation_fraction,
-            test_fraction=test_fraction,
-        )
+    _ = dataset_name
     return make_split_manifest(
         inputs,
         y,

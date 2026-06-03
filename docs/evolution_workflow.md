@@ -47,108 +47,25 @@ For a real claim, add a loader that returns:
 
 Then create one split manifest and reuse it for every run. Do not tune on test.
 
-## Competition Parquet Loader
+## External Dataset Loaders
 
-The repository also includes a Crunch-style parquet loader:
-
-```bash
-evoforest-arch data-summary --data-dir /Users/gabrielkahen/Downloads/data --max-samples 200
-evoforest-arch evolve \
-  --dataset competition-parquet-event \
-  --data-dir /Users/gabrielkahen/Downloads/data \
-  --max-samples 200 \
-  --steps 1 \
-  --output runs/competition-smoke
-```
-
-The loader expects:
-
-- `X_train.parquet`
-- `y_train_index.parquet`
-- optional reduced holdout files `X_test.reduced.parquet` and
-  `y_test_index.reduced.parquet`
-
-It maps each id to one sequence by resampling period 1 into the pre-boundary half
-and period 2 into the post-boundary half. The target is `tau_index >= 0` from the
-index file. This is an id-level event-detection surrogate for the current graph
-interface. It is not the official row-level competition metric.
-
-Default commands do not read the reduced labeled test files:
-
-- `evolve` reads train parquet only.
-- `inspect` reads run artifacts only.
-- `data-summary` reads train parquet only unless `--include-reduced-test` is passed.
-- `recheck` reads train parquet only unless `--include-test` is passed.
-
-Use `recheck --include-test` only after the graph and search procedure are frozen.
-
-Full-data parquet jobs should run over SSH on the PC, for example:
-
-```bash
-ssh gabe@gabepc 'cd /home/gabe/evoforest-reimplementation-run && .venv/bin/evoforest-arch evolve --dataset competition-parquet-event --data-dir /home/gabe/evoforest-competition-data --steps 1 --max-configurations 96 --min-train-improvement -0.005 --output runs/competition-full'
-```
-
-For mutation usefulness checks on capped parquet data:
-
-```bash
-python -m benchmarks.competition_mutation_usefulness \
-  --data-dir /Users/gabrielkahen/Downloads/data \
-  --max-samples 1000 \
-  --max-configurations 96 \
-  --output benchmark_reports/competition
-```
-
-That benchmark is validation-focused and train-only. It reports whether validation
-improved separately from whether the mutation machinery produced diverse,
-non-duplicate graph changes.
-
-## Row-Level Competition Benchmark
-
-Use `competition-parquet-row` for the official row/time target table. It loads
-`y_train.parquet` rows as individual samples, stores `sample_id` and
-`sample_time` in the graph inputs, and builds each sequence as:
-
-- pre-boundary half: period-1 reference values for the id
-- post-boundary half: period-2 prefix available at the target row time
-
-Production runs use grouped split manifests keyed by `sample_id`, so no id can
-appear in more than one of train/validation/test. `RidgeEvaluator` also uses
-grouped folds for this dataset when selecting graph configurations on the train
-split.
-
-```bash
-evoforest-arch data-summary \
-  --row-level \
-  --data-dir /Users/gabrielkahen/Downloads/data \
-  --competition-series-length 64 \
-  --max-ids 120 \
-  --max-rows-per-id 16
-
-python -m benchmarks.competition_row_benchmark \
-  --data-dir /Users/gabrielkahen/Downloads/data \
-  --series-length 64 \
-  --max-ids 120 \
-  --max-rows-per-id 16 \
-  --steps 8 \
-  --output benchmark_reports/competition-row
-```
-
-The benchmark fits a fixed non-evolved row-local baseline on train ids, scores
-validation ids without refitting, then runs candidate graph evolution using the
-same grouped train/validation split. The reduced test parquet files are not read.
+External dataset loaders are deliberately not bundled with this public
+reimplementation. Keep domain-specific data adapters, private labels, and contest
+submission code in a separate workspace. If you add a loader for a public dataset,
+make it return the same three values described above and commit the split manifest
+used for every comparable run.
 
 ## Staged Execution Rules
 
 1. Run `evolve` on synthetic data with source mutations disabled.
-2. Run capped parquet smoke locally, using `--max-samples`, with reduced test files untouched.
-3. Inspect artifacts with `inspect`, export the best graph with `export-best`, and
+2. Inspect artifacts with `inspect`, export the best graph with `export-best`, and
    recheck validation with `recheck`.
-4. Add or adjust the real dataset loader and verify that the saved fingerprint rejects changed
+3. Add or adjust the real dataset loader and verify that the saved fingerprint rejects changed
    data.
-5. Run short real-data calibration jobs on train/validation only, using SSH for full data.
-6. Increase steps and islands only after resume, export, and validation rechecks are
+4. Run short real-data calibration jobs on train/validation only.
+5. Increase steps and islands only after resume, export, and validation rechecks are
    boringly reliable.
-7. Use `recheck --include-test` only once the graph and search procedure are frozen.
+6. Use `recheck --include-test` only once the graph and search procedure are frozen.
 
 ## Useful Commands
 

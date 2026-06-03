@@ -60,46 +60,6 @@ Each command writes paired JSON and Markdown reports. The top-level
   - Measures evaluation time while varying configuration caps, dataset size, and
     output-feature growth. Timing varies by machine; the report includes cache
     hits/misses, config counts, and feature counts so results are interpretable.
-- `competition_row_benchmark`
-  - Optional external-data benchmark for the Crunch parquet files. It loads
-    `y_train.parquet` at row/time granularity, splits by id, fits a fixed
-    non-evolved row-local baseline on train ids, and compares validation-only
-    graph evolution on held-out ids. It is not part of `benchmarks.run_all`
-    because it requires the downloaded parquet bundle.
-- `competition_row_multisplit_benchmark`
-  - Stronger row/time-level benchmark. It uses one fixed grouped outer test
-    holdout, multiple grouped validation splits inside the development pool,
-    embeds the deterministic row-local baseline as a graph output primitive, and
-    reports both seed-output-plus-baseline and output-only graph variants.
-- `competition_row_focused_graph_benchmark`
-  - Faster full-data row/time-level audit for graph-embedded row primitives. It
-    compares output-only graph variants for the deterministic row baseline,
-    expanded target-time basis, and multiscale recent-tail features under the
-    same grouped multi-split validation and fixed internal-test protocol.
-- `competition_event_benchmark`
-  - Optional external-data benchmark for the paper's likely id-level ADIA
-    protocol. It loads one structural-break label per id from the index parquet,
-    uses grouped id splits, compares a strong fixed structural-break baseline
-    against source-backed EvoForest mutations, and reports validation-selected
-    graph archive ensembles.
-- `competition_event_campaign`
-  - Multi-seed wrapper around `competition_event_benchmark`. Use this on the PC
-    to scale toward the paper-style `600+` step campaign and aggregate per-seed
-    baseline, evolved graph, ensemble, source-candidate, and leakage results.
-- `competition_event_multisplit_benchmark`
-  - Stronger id-level benchmark that uses one fixed grouped outer test holdout,
-    evolves against multiple grouped validation splits inside the development
-    pool, prunes accepted alternatives with the same robust objective, writes
-    consensus graph artifacts, and reports archive/OOF validation ensembles.
-- `competition_event_readout_benchmark`
-  - Optional external-data audit for a serialized event graph. It keeps the same
-    fixed grouped outer test protocol and compares the standard Ridge readout to
-    a train-only selected rank/interactions readout plus an OOF-selected blend.
-- `competition_event_source_suite_benchmark`
-  - Optional external-data audit for graph assembly strategy. It adds every
-    repair-checked trusted source mutation as a set, optionally adds built-in
-    mutation templates with `--include-builtins`, then backward-prunes the added
-    alternatives under grouped multi-split validation.
 
 ## Interpreting Results
 
@@ -111,7 +71,7 @@ A passing benchmark does not mean:
 
 - the implementation is the authors' original code;
 - the private prompts, private LLM repair stack, or generated graph were recovered;
-- the ADIA competition pipeline was reproduced;
+- any private competition pipeline was reproduced;
 - the paper's reported score should be expected.
 
 Runtime rows should be compared on the same machine and Python environment. They
@@ -125,117 +85,6 @@ python -m benchmarks.synthetic_suite --output benchmark_reports
 python -m benchmarks.ablation_suite --output benchmark_reports
 python -m benchmarks.search_dynamics --output benchmark_reports
 python -m benchmarks.runtime_scaling --output benchmark_reports
-python -m benchmarks.competition_row_benchmark \
-  --data-dir /Users/gabrielkahen/Downloads/data \
-  --series-length 64 \
-  --max-ids 120 \
-  --max-rows-per-id 16 \
-  --steps 8 \
-  --output benchmark_reports/competition-row
-python -m benchmarks.competition_event_benchmark \
-  --data-dir /Users/gabrielkahen/Downloads/data \
-  --series-length 160 \
-  --steps 24 \
-  --max-configurations 96 \
-  --output benchmark_reports/competition-event
-python -m benchmarks.competition_event_campaign \
-  --data-dir /Users/gabrielkahen/Downloads/data \
-  --seeds 211,223,227 \
-  --series-length 160 \
-  --steps 96 \
-  --max-configurations 64 \
-  --resume-existing \
-  --output benchmark_reports/competition-event-campaign
-python -m benchmarks.competition_event_multisplit_benchmark \
-  --data-dir /Users/gabrielkahen/Downloads/data \
-  --split-seeds 211,223,307 \
-  --series-length 160 \
-  --steps 96 \
-  --max-configurations 64 \
-  --objective-mode auc \
-  --output benchmark_reports/competition-event-multisplit
 ```
 
-```bash
-python -m benchmarks.competition_event_readout_benchmark \
-  --data-dir /Users/gabrielkahen/Downloads/data \
-  --graph benchmark_reports/competition-event-multisplit/pruned_consensus_graph.json \
-  --split-seeds 211,223,307 \
-  --series-length 160 \
-  --max-configurations 64 \
-  --output benchmark_reports/competition-event-readout
-```
-
-```bash
-python -m benchmarks.competition_event_source_suite_benchmark \
-  --data-dir /Users/gabrielkahen/Downloads/data \
-  --split-seeds 211,223,307 \
-  --series-length 160 \
-  --max-configurations 64 \
-  --objective-mode auc \
-  --include-builtins \
-  --disable-source-screen \
-  --output benchmark_reports/competition-event-template-suite
-```
-
-```bash
-python -m benchmarks.competition_row_multisplit_benchmark \
-  --data-dir /Users/gabrielkahen/Downloads/data \
-  --split-seeds 113,127,149 \
-  --series-length 480 \
-  --max-ids 2000 \
-  --max-rows-per-id 32 \
-  --max-configurations 16 \
-  --objective-mode auc \
-  --disable-builtins \
-  --output benchmark_reports/competition-row-multisplit
-```
-
-Add `--prune-scoring-mode fixed-config` when the full-search pruning loop is
-too slow for a heavier row run. It still selects removals only from grouped
-validation splits, but it reuses each split's current graph config for each
-trial removal instead of rerunning CV configuration search.
-
-```bash
-python -m benchmarks.competition_row_focused_graph_benchmark \
-  --data-dir /Users/gabrielkahen/Downloads/data \
-  --split-seeds 113,127,149 \
-  --series-length 480 \
-  --max-ids 10000 \
-  --max-rows-per-id 32 \
-  --output benchmark_reports/competition-row-focused-graph
-```
-
-The committed PC report
-`benchmark_reports/competition-row-focused-graph-pc-10k-32-l480` is a full
-10k-id audit. It reports `0.6567` mean validation AUC and `0.6420` mean
-internal-test AUC for `row_baseline_time_tail_graph`, with reduced-test access
-set to `False`. Treat that as evidence of a stronger graph primitive set, not as
-evidence that the current graph reliably reaches `0.65` on untouched tests.
-
-The committed archive/OOF row report
-`benchmark_reports/competition-row-multisplit-pc-2k-32-l480-ensemble-cfg4-skipprune`
-is a faster 2k-id PC audit with `skip_pruning=True`. It reports a
-validation-only selected `best_archive_member` (`row_baseline_graph`) at
-`0.6839` mean validation AUC and `0.6670` minimum split validation AUC, with
-reduced-test access set to `False`. The same selected member reaches only
-`0.6438` mean and `0.6416` minimum AUC on the internal non-selection test, and
-the OOF archive selector does not select a multi-member improvement. Treat this
-as useful grouped-validation signal, not reliable `0.65` untouched-test
-evidence.
-
-The committed fixed-config pruning report
-`benchmark_reports/competition-row-multisplit-pc-2k-32-l480-ensemble-cfg16-fixedprune`
-uses the same 2k-id, three-split row protocol with `max_configurations=16`,
-`skip_pruning=False`, and `prune_scoring_mode="fixed-config"`. It selects the
-validation-only `top_7_archive` ensemble at `0.6845` mean validation AUC and
-`0.6651` minimum validation AUC, with reduced-test access set to `False`. Its
-internal non-selection test reaches `0.6522` mean AUC and `0.6500` rounded
-minimum AUC (`0.649997` exact). Treat this as the first current row ensemble
-evidence that approaches or exceeds `0.65` without reduced-test leakage, but not
-as a wide margin: the weakest internal split is still effectively on the
-threshold.
-
-The default suite scripts accept `--seed`, `--output`, and `--quick`. The
-external parquet benchmark accepts `--seed` and `--output` plus data-capping
-arguments such as `--max-ids` and `--max-rows-per-id`.
+The default suite scripts accept `--seed`, `--output`, and `--quick`.
