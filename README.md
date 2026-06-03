@@ -301,6 +301,16 @@ that single graph. Treat this as evidence that grouped validation can clear
 `0.65`, not as evidence that the selected graph/ensemble reliably clears `0.65`
 on untouched internal tests.
 
+The heavier fixed-config pruning audit at
+`benchmark_reports/competition-row-multisplit-pc-2k-32-l480-ensemble-cfg16-fixedprune`
+ran the same 2k-id, three-split protocol with `max_configurations=16` and
+`skip_pruning=False`. It selected the `top_7_archive` validation-only ensemble:
+mean validation AUC `0.6845`, minimum validation AUC `0.6651`, reduced-test
+access `False`, and non-selection internal-test mean/min AUC `0.6522`/`0.6500`
+(`0.649997` exact minimum). That is the strongest current evidence: the ensemble
+approaches or exceeds `0.65` across the audit, but the minimum internal split is
+effectively on the threshold rather than comfortably above it.
+
 For the 2026 real-time CrunchDAO contest interface, use the self-contained
 notebook in `submissions/structural_break_real_time/`. It defines the required
 `train()` and streaming `infer()` functions and adapts the same row/time/tail

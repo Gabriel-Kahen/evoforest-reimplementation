@@ -224,6 +224,18 @@ the OOF archive selector does not select a multi-member improvement. Treat this
 as useful grouped-validation signal, not reliable `0.65` untouched-test
 evidence.
 
+The committed fixed-config pruning report
+`benchmark_reports/competition-row-multisplit-pc-2k-32-l480-ensemble-cfg16-fixedprune`
+uses the same 2k-id, three-split row protocol with `max_configurations=16`,
+`skip_pruning=False`, and `prune_scoring_mode="fixed-config"`. It selects the
+validation-only `top_7_archive` ensemble at `0.6845` mean validation AUC and
+`0.6651` minimum validation AUC, with reduced-test access set to `False`. Its
+internal non-selection test reaches `0.6522` mean AUC and `0.6500` rounded
+minimum AUC (`0.649997` exact). Treat this as the first current row ensemble
+evidence that approaches or exceeds `0.65` without reduced-test leakage, but not
+as a wide margin: the weakest internal split is still effectively on the
+threshold.
+
 The default suite scripts accept `--seed`, `--output`, and `--quick`. The
 external parquet benchmark accepts `--seed` and `--output` plus data-capping
 arguments such as `--max-ids` and `--max-rows-per-id`.
