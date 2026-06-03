@@ -16,9 +16,12 @@ Crunch runner:
 - `infer(datasets, model_directory_path)`
 
 The implementation trains a ridge readout over streaming row features inspired
-by the committed `row_baseline_time_tail_graph`: historical-reference features,
-expanded time/observed-position features, and multiscale recent-tail features.
-At inference time it emits exactly one score per online observation.
+by the committed row graph audits: historical-reference features, expanded
+time/observed-position features, and a lightweight short/medium/long recent-tail
+summary using windows `8`, `32`, and `128`. Prefix-wide statistics are updated
+incrementally during inference instead of recomputed from scratch for each
+online observation. At inference time it emits exactly one score per online
+observation.
 
 ## Local Test
 

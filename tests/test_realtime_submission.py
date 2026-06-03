@@ -22,6 +22,27 @@ def test_realtime_submission_trains_and_streams_scores(tmp_path) -> None:
     assert np.std(scores) > 0.0
 
 
+def test_realtime_streaming_feature_state_matches_batch_extractor() -> None:
+    rng = np.random.default_rng(17)
+    historical = rng.normal(0.0, 1.0, size=160)
+    online = rng.normal(0.2, 1.3, size=90)
+    state = submission._StreamingFeatureState(historical, len(online))
+
+    for idx, value in enumerate(online):
+        emitted = state.append(float(value))
+        assert emitted is not None
+        fast_features, fast_names = emitted
+        batch_features, batch_names = submission.extract_streaming_features(
+            historical,
+            online[: idx + 1],
+            online_index=idx,
+            online_length=len(online),
+        )
+
+        assert fast_names == batch_names
+        np.testing.assert_allclose(fast_features, batch_features, rtol=1e-9, atol=1e-9)
+
+
 def test_realtime_submission_gets_signal_on_simple_mean_shift(tmp_path) -> None:
     train_data = make_realtime_series(n_series=40, seed=9)
     submission.train(train_data, str(tmp_path))

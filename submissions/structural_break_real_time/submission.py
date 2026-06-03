@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import bisect
 import math
 import os
 import pickle
@@ -13,7 +14,7 @@ DEFAULT_MAX_ROWS_PER_SERIES = 32
 DEFAULT_SERIES_LENGTH = 480
 DEFAULT_MAX_ONLINE_LENGTH = 1000
 ALPHAS = np.logspace(-4, 4, 17)
-TAIL_WINDOWS = (4, 8, 16, 32, 64, 128, 240)
+TAIL_WINDOWS = (8, 32, 128)
 EPS = 1e-8
 
 
@@ -36,15 +37,15 @@ def train(
         online = _as_1d(x_online)
         if online.size == 0:
             continue
-        for idx in _training_indices(online.size, tau_index, 32):
-            features, names = extract_streaming_features(
-                historical,
-                online[: idx + 1],
-                online_index=idx,
-                online_length=online.size,
-            )
-            x_rows.append(features)
-            y_rows.append(float(tau_index is not None and idx >= int(tau_index)))
+        selected_indices = set(int(idx) for idx in _training_indices(online.size, tau_index, 32))
+        state = _StreamingFeatureState(historical, online.size)
+        for idx, point in enumerate(online):
+            if idx in selected_indices:
+                features, names = state.append(float(point), emit=True)
+                x_rows.append(features)
+                y_rows.append(float(tau_index is not None and idx >= int(tau_index)))
+            else:
+                state.append(float(point), emit=False)
 
     if not x_rows:
         model = _fallback_model()
@@ -54,10 +55,11 @@ def train(
         model = fit_streaming_ridge(x, y, names)
 
     model["metadata"] = {
-        "model": "evoforest_realtime_streaming_ridge",
+        "model": "evoforest_realtime_lite_streaming_ridge",
         "series_length": 480,
         "max_rows_per_series": 32,
-        "tail_windows": [4, 8, 16, 32, 64, 128, 240],
+        "tail_windows": list(_tail_windows()),
+        "feature_runtime": "incremental_prefix_stats_with_short_medium_long_tail_windows",
         "score_transform": "sigmoid(raw_ridge_prediction)",
     }
     with open(os.path.join(model_directory_path, "evoforest_realtime_model.pkl"), "wb") as handle:
@@ -77,20 +79,10 @@ def infer(
         historical, x_online = _unpack_infer_item(item)
         historical = _as_1d(historical)
         online_length = _safe_len(x_online)
-        capacity = max(int(online_length) if online_length else 1000, 1)
-        prefix = np.empty(capacity, dtype=np.float64)
+        state = _StreamingFeatureState(historical, online_length)
         for online_index, point in enumerate(x_online):
-            if online_index >= prefix.shape[0]:
-                grown = np.empty(prefix.shape[0] * 2, dtype=np.float64)
-                grown[: prefix.shape[0]] = prefix
-                prefix = grown
-            prefix[online_index] = float(point)
-            features, _names = extract_streaming_features(
-                historical,
-                prefix[: online_index + 1],
-                online_index=online_index,
-                online_length=online_length,
-            )
+            del online_index
+            features, _names = state.append(float(point))
             raw = predict_raw(model, features)
             yield float(_sigmoid(raw))
 
@@ -238,7 +230,7 @@ def extract_streaming_features(
         "time_observed_interaction",
     ]
 
-    for width in (4, 8, 16, 32, 64, 128, 240):
+    for width in _tail_windows():
         tail_values, tail_names = _tail_feature_values(historical, online, width, hist_mean, hist_std)
         values.extend(tail_values)
         names.extend(tail_names)
@@ -307,6 +299,225 @@ def _tail_feature_values(
         f"tail_range_{width}",
     ]
     return values, names
+
+
+class _StreamingFeatureState:
+    def __init__(self, historical: np.ndarray, online_length: int | None) -> None:
+        self.historical = _as_1d(historical)
+        self.online_length = online_length
+        capacity = max(int(online_length) if online_length else 1000, 1)
+        self.online = np.empty(capacity, dtype=np.float64)
+        self.sorted_online: list[float] = []
+
+        self.hist_mean = float(np.mean(self.historical)) if self.historical.size else 0.0
+        self.hist_std = _safe_std_1d(self.historical)
+        hist_diff = np.diff(self.historical) if self.historical.size > 1 else np.zeros(1, dtype=np.float64)
+        self.hist_absdiff = float(np.mean(np.abs(hist_diff))) if hist_diff.size else 0.0
+        self.hist_diff_std = _safe_std_1d(hist_diff)
+        self.hist_slope = _slope_1d(self.historical)
+        self.hist_autocorr = _autocorr1_1d(self.historical)
+        self.hist_drawdown, self.hist_drawup = _drawdown_drawup_1d(self.historical)
+        self.hist_q = _quantiles(self.historical)
+
+        self.n = 0
+        self.sum_x = 0.0
+        self.sumsq_x = 0.0
+        self.sum_i_x = 0.0
+        self.first = 0.0
+        self.last = 0.0
+        self.diff_count = 0
+        self.diff_sum = 0.0
+        self.diff_sumsq = 0.0
+        self.diff_abs_sum = 0.0
+        self.adjacent_product_sum = 0.0
+        self.running_max = 0.0
+        self.running_min = 0.0
+        self.max_drawdown_raw = 0.0
+        self.max_drawup_raw = 0.0
+        self.centered_cumsum = 0.0
+        self.peak_abs_cumsum = 0.0
+        self.peak_abs_index = 0
+
+    def append(self, point: float, *, emit: bool = True) -> tuple[np.ndarray, list[str]] | None:
+        value = float(point)
+        if self.n >= self.online.shape[0]:
+            grown = np.empty(max(self.online.shape[0] * 2, 1), dtype=np.float64)
+            grown[: self.online.shape[0]] = self.online
+            self.online = grown
+
+        idx = int(self.n)
+        self.online[idx] = value
+        if idx == 0:
+            self.first = value
+            self.running_max = value
+            self.running_min = value
+        else:
+            diff = value - self.last
+            self.diff_count += 1
+            self.diff_sum += diff
+            self.diff_sumsq += diff * diff
+            self.diff_abs_sum += abs(diff)
+            self.adjacent_product_sum += value * self.last
+            self.max_drawdown_raw = max(self.max_drawdown_raw, self.running_max - value)
+            self.max_drawup_raw = max(self.max_drawup_raw, value - self.running_min)
+            self.running_max = max(self.running_max, value)
+            self.running_min = min(self.running_min, value)
+
+        self.last = value
+        self.sum_x += value
+        self.sumsq_x += value * value
+        self.sum_i_x += float(idx) * value
+        self.centered_cumsum += value - self.hist_mean
+        abs_cumsum = abs(self.centered_cumsum)
+        if abs_cumsum > self.peak_abs_cumsum:
+            self.peak_abs_cumsum = abs_cumsum
+            self.peak_abs_index = idx
+        bisect.insort(self.sorted_online, value)
+        self.n += 1
+        if not emit:
+            return None
+        return self.features()
+
+    def features(self) -> tuple[np.ndarray, list[str]]:
+        n_online = int(self.n)
+        online = self.online[:n_online]
+        last = float(self.last)
+        online_mean = float(self.sum_x / max(n_online, 1))
+        online_std = _safe_std_from_moments(n_online, self.sum_x, self.sumsq_x)
+        online_absdiff = float(self.diff_abs_sum / self.diff_count) if self.diff_count else 0.0
+        online_diff_std = _safe_std_from_moments(self.diff_count, self.diff_sum, self.diff_sumsq)
+        online_slope = self._slope()
+        online_autocorr = self._autocorr1()
+        online_drawdown = float(self.max_drawdown_raw / max(online_std, 1e-8))
+        online_drawup = float(self.max_drawup_raw / max(online_std, 1e-8))
+        online_q = _quantiles_sorted(self.sorted_online)
+        denom = max(int(self.online_length) - 1, 1) if self.online_length else 1000
+        online_index = n_online - 1
+        time_norm = min(max(float(online_index) / float(denom), 0.0), 1.0)
+        observed_fraction = min(float(n_online) / 1000.0, 1.0)
+
+        values = [
+            last,
+            (last - self.hist_mean) / self.hist_std,
+            (last - online_mean) / online_std,
+            (online_mean - self.hist_mean) / self.hist_std,
+            math.log((online_std + 1e-8) / (self.hist_std + 1e-8)),
+            online_absdiff - self.hist_absdiff,
+            math.log((online_absdiff + 1e-8) / (self.hist_absdiff + 1e-8)),
+            math.log((online_diff_std + 1e-8) / (self.hist_diff_std + 1e-8)),
+            online_slope,
+            online_slope - self.hist_slope,
+            online_autocorr - self.hist_autocorr,
+            online_drawdown,
+            online_drawup,
+            online_drawdown - self.hist_drawdown,
+            online_drawup - self.hist_drawup,
+            self.peak_abs_cumsum / self.hist_std,
+            float(self.peak_abs_index / max(n_online - 1, 1)),
+            float(self.centered_cumsum / max(self.peak_abs_cumsum, 1e-8)),
+            float(np.mean(np.abs(online_q - self.hist_q))),
+            float(np.max(np.abs(online_q - self.hist_q))),
+            time_norm,
+            math.log1p(max(float(online_index), 0.0)) / math.log1p(1000),
+            time_norm * time_norm,
+            time_norm * time_norm * time_norm,
+            math.sqrt(max(time_norm, 0.0)),
+            math.sin(math.pi * time_norm),
+            math.cos(math.pi * time_norm),
+            math.sin(2.0 * math.pi * time_norm),
+            math.cos(2.0 * math.pi * time_norm),
+            observed_fraction,
+            observed_fraction * observed_fraction,
+            time_norm * observed_fraction,
+        ]
+        names = [
+            "last_value",
+            "last_vs_hist_mean_z",
+            "last_vs_online_mean_z",
+            "online_vs_hist_mean_z",
+            "online_hist_std_log_ratio",
+            "absdiff_delta",
+            "absdiff_log_ratio",
+            "diff_std_log_ratio",
+            "online_slope",
+            "slope_delta",
+            "autocorr_delta",
+            "online_drawdown",
+            "online_drawup",
+            "drawdown_delta",
+            "drawup_delta",
+            "hist_centered_cusum_peak",
+            "hist_centered_cusum_peak_location",
+            "terminal_cusum_balance",
+            "quantile_l1_distance",
+            "quantile_max_distance",
+            "time_norm",
+            "time_log_norm",
+            "time_sq",
+            "time_cube",
+            "time_sqrt",
+            "time_sin1",
+            "time_cos1",
+            "time_sin2",
+            "time_cos2",
+            "observed_fraction",
+            "observed_sq",
+            "time_observed_interaction",
+        ]
+        for width in _tail_windows():
+            tail_values, tail_names = _tail_feature_values(self.historical, online, width, self.hist_mean, self.hist_std)
+            values.extend(tail_values)
+            names.extend(tail_names)
+        return np.nan_to_num(np.asarray(values, dtype=np.float64), nan=0.0, posinf=0.0, neginf=0.0), names
+
+    def _slope(self) -> float:
+        n = int(self.n)
+        if n < 2:
+            return 0.0
+        numerator = (2.0 * self.sum_i_x / float(n - 1)) - self.sum_x
+        denom = float(n * (n + 1)) / (3.0 * float(n - 1))
+        return float(numerator / max(denom, 1e-8))
+
+    def _autocorr1(self) -> float:
+        n = int(self.n)
+        if n < 3:
+            return 0.0
+        mean = self.sum_x / float(n)
+        sum_except_first = self.sum_x - self.first
+        sum_except_last = self.sum_x - self.last
+        sumsq_except_last = self.sumsq_x - self.last * self.last
+        numerator = self.adjacent_product_sum - mean * (sum_except_first + sum_except_last) + float(n - 1) * mean * mean
+        denom = sumsq_except_last - 2.0 * mean * sum_except_last + float(n - 1) * mean * mean
+        return float(numerator / max(denom, 1e-8))
+
+
+def _safe_std_from_moments(count: int, total: float, total_sq: float) -> float:
+    if int(count) < 2:
+        return 1.0
+    mean = float(total) / float(count)
+    variance = max(float(total_sq) / float(count) - mean * mean, 0.0)
+    return max(math.sqrt(variance), 1e-8)
+
+
+def _quantiles_sorted(sorted_values: list[float]) -> np.ndarray:
+    n = len(sorted_values)
+    if n == 0:
+        return np.zeros(9, dtype=np.float64)
+    values: list[float] = []
+    for q in (0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9):
+        position = float(n - 1) * q
+        low = int(math.floor(position))
+        high = int(math.ceil(position))
+        if low == high:
+            values.append(float(sorted_values[low]))
+        else:
+            fraction = position - float(low)
+            values.append(float(sorted_values[low]) * (1.0 - fraction) + float(sorted_values[high]) * fraction)
+    return np.asarray(values, dtype=np.float64)
+
+
+def _tail_windows() -> tuple[int, ...]:
+    return (8, 32, 128)
 
 
 def select_alpha(x: np.ndarray, y: np.ndarray, alphas: np.ndarray) -> float:
