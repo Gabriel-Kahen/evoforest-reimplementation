@@ -27,7 +27,7 @@ The implementation focuses on the reusable system design:
   best evaluated configuration's feature/dependency diagnostics.
 - Deterministic scientist/engineer agents that convert diagnostics into YAML-style
   mutation documents with hypotheses, removals, appended globals, and adds.
-- Optional HTTP JSON LLM scientist/engineer agents that use paper-style prompt
+- Optional OpenAI, Claude, or Gemini LLM scientist/engineer agents that use paper-style prompt
   artifacts and emit the same structured mutation documents. In island mode the
   scientist agent defaults to the paper's fixed temperature schedule
   `(0.35, 0.5, 0.6, 0.75)`, while engineer synthesis defaults to temperature `0`.
@@ -118,15 +118,53 @@ python -m benchmarks.run_all --quick --output benchmark_reports/quick
 
 See [docs/benchmarks.md](docs/benchmarks.md) for the full benchmark methodology.
 
-Live LLM mutation synthesis is opt-in. Point the generic HTTP JSON client at a
-chat-completions-compatible endpoint:
+Live LLM mutation synthesis is opt-in. Start from the checked-in example and
+choose exactly one provider block:
 
 ```bash
-export EVOFOREST_LLM_URL="https://your-llm-endpoint.example/v1/chat/completions"
-export EVOFOREST_LLM_API_KEY="..."
-export EVOFOREST_LLM_MODEL="..."
-evoforest-arch demo --steps 4 --llm-provider http-json --output runs/llm-demo
+cp .env.example .env
 ```
+
+OpenAI:
+
+```dotenv
+EVOFOREST_LLM_PROVIDER=openai
+OPENAI_API_KEY=...
+EVOFOREST_LLM_MODEL=...
+```
+
+Claude:
+
+```dotenv
+EVOFOREST_LLM_PROVIDER=claude
+ANTHROPIC_API_KEY=...
+EVOFOREST_LLM_MODEL=...
+```
+
+Gemini:
+
+```dotenv
+EVOFOREST_LLM_PROVIDER=gemini
+GEMINI_API_KEY=...
+EVOFOREST_LLM_MODEL=...
+```
+
+Optional shared settings:
+
+```dotenv
+EVOFOREST_LLM_TIMEOUT_SECONDS=120
+EVOFOREST_LLM_MAX_TOKENS=4096
+```
+
+Then run with provider resolution from `.env`:
+
+```bash
+evoforest-arch demo --steps 4 --llm-provider env --env-file .env --output runs/llm-demo
+```
+
+You can also select the provider explicitly with `--llm-provider openai`,
+`--llm-provider claude`, or `--llm-provider gemini`; credentials and model still
+load from `.env`.
 
 The paper-style island scientist schedule can be overridden with
 `--llm-island-temperatures 0.35,0.5,0.6,0.75`. Use
@@ -144,6 +182,18 @@ Ridge fit.
 To let trusted LLM-generated mutation documents include source-backed lambda
 alternatives, also pass `--allow-source-mutations`. This executes local Python
 source from mutation YAML and should only be used with trusted prompts and endpoints.
+
+LLM mode is fail-fast. If the configured provider is missing, the HTTP request
+fails, the scientist response cannot be parsed into hypotheses, or the engineer
+response cannot be parsed and validated as a mutation document, the run raises an
+error instead of falling back to deterministic agents. Prompt artifacts written
+before the error are kept under the run's `prompts/` directory.
+
+The production workflow can use the same `.env` wiring:
+
+```bash
+evoforest-arch evolve --steps 4 --llm-provider env --env-file .env --output runs/production-llm
+```
 
 The demo generates synthetic structural-break data, builds a seed graph, evaluates
 graph configurations with a Ridge readout, derives scientist/engineer mutation
@@ -166,7 +216,7 @@ falls back to a deterministic NumPy surrogate when a graph path is not torch-ena
 The asynchronous island mode uses local thread workers rather than dedicated GPU
 islands. It preserves the paper's fixed four-temperature scientist schedule by
 default, but the scientist/engineer loop can also run deterministically offline or
-call an opt-in generic HTTP JSON LLM endpoint. It does not include the authors'
+call an opt-in OpenAI, Claude, or Gemini provider. It does not include the authors'
 private model, exact prompts, or full private code-generation backend. The source-backed
 mutation path recreates the paper's lambda-alternative representation for trusted
 local experiments, but it is not a security sandbox. Alternative-level age and

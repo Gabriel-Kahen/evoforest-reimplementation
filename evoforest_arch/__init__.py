@@ -5,13 +5,19 @@ from evoforest_arch.evaluator import EvaluationResult, RidgeEvaluator
 from evoforest_arch.evolution import EvolutionLoop
 from evoforest_arch.graph import EvalContext, FeatureBlock, Graph, GraphNode, NodeAlternative, ResidualWeightRule
 from evoforest_arch.llm import (
+    ClaudeLLMClient,
     DEFAULT_ISLAND_TEMPERATURES,
-    HTTPJSONLLMClient,
+    GeminiLLMClient,
     LLMEngineerAgent,
     LLMScientistAgent,
+    OpenAILLMClient,
     PromptBuilder,
     PromptRecord,
+    SUPPORTED_LLM_PROVIDERS,
     StaticLLMClient,
+    llm_client_from_env,
+    llm_provider_from_env,
+    load_env_file,
 )
 from evoforest_arch.maintenance import GraphMaintenance, MaintenanceReport
 from evoforest_arch.mutations import GlobalSpec, MutationDocument, MutationEngine, MutationSpec, NodeSpec, RemoveSpec
@@ -23,6 +29,7 @@ from evoforest_arch.synthetic import make_structural_break_data
 from evoforest_arch.task_context import TaskContextSummary, TensorSummary, build_task_context
 
 __all__ = [
+    "ClaudeLLMClient",
     "EvalContext",
     "EvaluationResult",
     "EngineerAgent",
@@ -34,7 +41,7 @@ __all__ = [
     "GlobalRefiner",
     "GraphMaintenance",
     "DEFAULT_ISLAND_TEMPERATURES",
-    "HTTPJSONLLMClient",
+    "GeminiLLMClient",
     "Hypothesis",
     "LLMEngineerAgent",
     "LLMScientistAgent",
@@ -44,6 +51,7 @@ __all__ = [
     "MutationSpec",
     "NodeAlternative",
     "NodeSpec",
+    "OpenAILLMClient",
     "PromptBuilder",
     "PromptRecord",
     "ProductionConfig",
@@ -53,6 +61,7 @@ __all__ = [
     "ResidualWeightRule",
     "RidgeEvaluator",
     "ScientistAgent",
+    "SUPPORTED_LLM_PROVIDERS",
     "StaticLLMClient",
     "TaskContextSummary",
     "TensorSummary",
@@ -63,6 +72,9 @@ __all__ = [
     "compile_lambda_source",
     "export_best_graph",
     "inspect_run",
+    "llm_client_from_env",
+    "llm_provider_from_env",
+    "load_env_file",
     "make_structural_break_data",
     "recheck_run",
 ]

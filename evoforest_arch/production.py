@@ -9,6 +9,7 @@ from typing import Any
 
 import numpy as np
 
+from evoforest_arch.agents import EngineerAgent, ScientistAgent
 from evoforest_arch.evaluator import EvaluationResult, RidgeEvaluator
 from evoforest_arch.evolution import EvolutionLoop
 from evoforest_arch.feedback import feedback_summary, toon_report
@@ -18,6 +19,7 @@ from evoforest_arch.mutations import MutationEngine
 from evoforest_arch.seed import build_seed_graph
 from evoforest_arch.splits import SplitManifest, make_split_manifest, read_split_manifest, split_dataset, write_split_manifest
 from evoforest_arch.synthetic import make_structural_break_data
+from evoforest_arch.task_context import build_task_context
 
 
 SAFE_STAGED_EXECUTION_RULES = (
@@ -137,11 +139,22 @@ class ProductionContext:
 
 
 class ProductionEvolutionRunner:
-    def __init__(self, config: ProductionConfig, graph: Graph | None = None) -> None:
+    def __init__(
+        self,
+        config: ProductionConfig,
+        graph: Graph | None = None,
+        *,
+        scientist: ScientistAgent | None = None,
+        engineer: EngineerAgent | None = None,
+        task_context: str = "",
+    ) -> None:
         self.config = config
         self.graph = graph or build_seed_graph()
         self.evaluator = RidgeEvaluator(**config.evaluator_config())
         self.mutation_engine = MutationEngine(allow_source=config.allow_source_mutations)
+        self.scientist = scientist
+        self.engineer = engineer
+        self.task_context = task_context
 
     def run(self, *, resume: bool = False) -> dict[str, Any]:
         context = self._resume_context() if resume else self._new_context()
@@ -149,6 +162,9 @@ class ProductionEvolutionRunner:
             context.current_graph,
             evaluator=self.evaluator,
             mutation_engine=self.mutation_engine,
+            scientist=self.scientist,
+            engineer=self.engineer,
+            task_context=self.task_context,
             seed=self.config.seed,
         )
         loop.rng.bit_generator.state = context.state.rng_state
@@ -156,15 +172,19 @@ class ProductionEvolutionRunner:
         mode = "a" if resume else "w"
         train_inputs, train_y = context.splits["train"]
         validation_inputs, validation_y = context.splits["validation"]
+        self._install_task_context(context, loop, train_inputs, train_y)
         with events_path.open(mode, encoding="utf-8") as events:
             for step in range(context.state.step + 1, context.state.step + int(self.config.steps) + 1):
-                document = loop._propose_document(
-                    context.current_graph,
-                    context.best_train_result,
-                    step,
-                    memorandum=self._read_memorandum(context.run_dir),
-                    execution_errors="\n".join(context.state.errors[-8:]),
-                )
+                try:
+                    document = loop._propose_document(
+                        context.current_graph,
+                        context.best_train_result,
+                        step,
+                        memorandum=self._read_memorandum(context.run_dir),
+                        execution_errors="\n".join(context.state.errors[-8:]),
+                    )
+                finally:
+                    loop._write_prompt_records(context.run_dir, step)
                 loop._write_mutation_document(context.run_dir, step, document)
                 outcome = loop._try_evaluate_candidate(context.current_graph, document, train_inputs, train_y)
                 if outcome.failed:
@@ -222,6 +242,19 @@ class ProductionEvolutionRunner:
                 self._write_memorandum(context)
 
         return inspect_run(context.run_dir)
+
+    def _install_task_context(
+        self,
+        context: ProductionContext,
+        loop: EvolutionLoop,
+        train_inputs: dict[str, object],
+        train_y: np.ndarray,
+    ) -> None:
+        task_context = self.task_context.strip()
+        if not task_context:
+            task_context = build_task_context(train_inputs, train_y, self.evaluator, source="production train split").to_text()
+        loop._install_task_context(task_context)
+        (context.run_dir / "task_context.md").write_text(task_context if task_context.endswith("\n") else task_context + "\n", encoding="utf-8")
 
     def _new_context(self) -> ProductionContext:
         run_dir = self.config.output_dir

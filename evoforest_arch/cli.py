@@ -2,16 +2,20 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import pathlib
 
 from evoforest_arch.evaluator import RidgeEvaluator
 from evoforest_arch.evolution import EvolutionLoop
 from evoforest_arch.llm import (
     DEFAULT_ISLAND_TEMPERATURES,
-    HTTPJSONLLMClient,
     LLMEngineerAgent,
     LLMScientistAgent,
     PromptBuilder,
+    SUPPORTED_LLM_PROVIDERS,
+    llm_client_from_env,
+    llm_provider_from_env,
+    load_env_file,
 )
 from evoforest_arch.mutations import MutationEngine
 from evoforest_arch.production import ProductionConfig, ProductionEvolutionRunner, export_best_graph, inspect_run, recheck_run
@@ -50,7 +54,9 @@ def main(argv: list[str] | None = None) -> int:
     demo.add_argument("--islands", type=int, default=1)
     demo.add_argument("--async-islands", action="store_true")
     demo.add_argument("--island-workers", type=int, default=None)
-    demo.add_argument("--llm-provider", choices=("none", "http-json"), default="none")
+    llm_provider_choices = ("none", "env", *SUPPORTED_LLM_PROVIDERS)
+    demo.add_argument("--llm-provider", choices=llm_provider_choices, default="none")
+    demo.add_argument("--env-file", type=pathlib.Path, default=pathlib.Path(".env"))
     demo.add_argument("--llm-scientist-temperature", type=float, default=0.35)
     demo.add_argument(
         "--llm-island-temperatures",
@@ -86,6 +92,20 @@ def main(argv: list[str] | None = None) -> int:
     evolve.add_argument("--min-train-improvement", type=float, default=1e-6)
     evolve.add_argument("--min-validation-improvement", type=float, default=1e-6)
     evolve.add_argument("--allow-source-mutations", action="store_true")
+    evolve.add_argument("--llm-provider", choices=llm_provider_choices, default="none")
+    evolve.add_argument("--env-file", type=pathlib.Path, default=pathlib.Path(".env"))
+    evolve.add_argument("--llm-scientist-temperature", type=float, default=0.35)
+    evolve.add_argument(
+        "--llm-island-temperatures",
+        type=parse_temperature_schedule,
+        default=DEFAULT_ISLAND_TEMPERATURES,
+        help=(
+            "Comma-separated scientist temperatures for island mode, or 'none' to use "
+            "--llm-scientist-temperature for every island."
+        ),
+    )
+    evolve.add_argument("--llm-engineer-temperature", type=float, default=0.0)
+    evolve.add_argument("--task-context-file", type=pathlib.Path, default=None)
     evolve.add_argument("--resume", action="store_true")
     evolve.add_argument("--output", type=pathlib.Path, required=True)
     evolve.set_defaults(func=run_evolve)
@@ -107,7 +127,10 @@ def main(argv: list[str] | None = None) -> int:
     recheck_parser.set_defaults(func=run_recheck)
 
     args = parser.parse_args(argv)
-    return args.func(args)
+    try:
+        return args.func(args)
+    except (RuntimeError, ValueError) as exc:
+        parser.exit(2, f"error: {exc}\n")
 
 
 def run_demo(args: argparse.Namespace) -> int:
@@ -122,25 +145,9 @@ def run_demo(args: argparse.Namespace) -> int:
         refine_steps=args.refine_steps,
         refine_backend=args.refine_backend,
     )
-    scientist = None
-    engineer = None
     task_context = args.task_context_file.read_text(encoding="utf-8") if args.task_context_file is not None else ""
     mutation_engine = MutationEngine(allow_source=args.allow_source_mutations)
-    if args.llm_provider == "http-json":
-        client = HTTPJSONLLMClient.from_env()
-        prompt_builder = PromptBuilder(allow_source=args.allow_source_mutations)
-        scientist = LLMScientistAgent(
-            client,
-            prompt_builder=prompt_builder,
-            temperature=args.llm_scientist_temperature,
-            island_temperatures=args.llm_island_temperatures,
-        )
-        engineer = LLMEngineerAgent(
-            client,
-            prompt_builder=prompt_builder,
-            temperature=args.llm_engineer_temperature,
-            allow_source=args.allow_source_mutations,
-        )
+    scientist, engineer = build_llm_agents(args, task_context=task_context)
     loop = EvolutionLoop(
         graph,
         evaluator=evaluator,
@@ -173,6 +180,8 @@ def run_demo(args: argparse.Namespace) -> int:
 
 
 def run_evolve(args: argparse.Namespace) -> int:
+    task_context = args.task_context_file.read_text(encoding="utf-8") if args.task_context_file is not None else ""
+    scientist, engineer = build_llm_agents(args, task_context=task_context)
     config = ProductionConfig(
         output_dir=args.output,
         steps=args.steps,
@@ -194,9 +203,46 @@ def run_evolve(args: argparse.Namespace) -> int:
         min_validation_improvement=args.min_validation_improvement,
         allow_source_mutations=args.allow_source_mutations,
     )
-    summary = ProductionEvolutionRunner(config).run(resume=args.resume)
+    summary = ProductionEvolutionRunner(
+        config,
+        scientist=scientist,
+        engineer=engineer,
+        task_context=task_context,
+    ).run(resume=args.resume)
     print(json.dumps(summary, indent=2), flush=True)
     return 0
+
+
+def build_llm_agents(args: argparse.Namespace, *, task_context: str = "") -> tuple[LLMScientistAgent | None, LLMEngineerAgent | None]:
+    provider = resolve_llm_provider(args.llm_provider, args.env_file)
+    if provider is None:
+        return None, None
+    client = llm_client_from_env(args.env_file)
+    prompt_builder = PromptBuilder(task_context=task_context or PromptBuilder().task_context, allow_source=args.allow_source_mutations)
+    return (
+        LLMScientistAgent(
+            client,
+            prompt_builder=prompt_builder,
+            temperature=args.llm_scientist_temperature,
+            island_temperatures=args.llm_island_temperatures,
+        ),
+        LLMEngineerAgent(
+            client,
+            prompt_builder=prompt_builder,
+            temperature=args.llm_engineer_temperature,
+            allow_source=args.allow_source_mutations,
+        ),
+    )
+
+
+def resolve_llm_provider(provider: str, env_file: pathlib.Path) -> str | None:
+    if provider == "none":
+        return None
+    if provider == "env":
+        return llm_provider_from_env(env_file, required=True)
+    load_env_file(env_file)
+    os.environ["EVOFOREST_LLM_PROVIDER"] = provider
+    return provider
 
 
 def run_inspect(args: argparse.Namespace) -> int:

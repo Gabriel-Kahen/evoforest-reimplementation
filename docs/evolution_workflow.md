@@ -39,6 +39,25 @@ evoforest-arch evolve --steps 4 --seed 17 --n-series 240 --length 160 --output r
 That is enough to test the workflow. It is not enough to claim a strong evolved
 model on a real benchmark.
 
+LLM-backed production evolution is opt-in and can be configured through `.env`:
+
+```dotenv
+EVOFOREST_LLM_PROVIDER=openai
+OPENAI_API_KEY=...
+EVOFOREST_LLM_MODEL=...
+```
+
+Use `EVOFOREST_LLM_PROVIDER=claude` with `ANTHROPIC_API_KEY`, or
+`EVOFOREST_LLM_PROVIDER=gemini` with `GEMINI_API_KEY`, to switch providers.
+
+```bash
+evoforest-arch evolve --steps 4 --llm-provider env --env-file .env --output runs/production-llm
+```
+
+When LLM mode is enabled, provider configuration and LLM outputs are fail-fast.
+The runner does not fall back to deterministic mutation agents if the provider is
+missing, the HTTP request fails, or the returned mutation document is invalid.
+
 For a real claim, add a loader that returns:
 
 - `inputs`: a dictionary of graph input tensors and scalar metadata.

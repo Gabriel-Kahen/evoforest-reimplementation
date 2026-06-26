@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import ast
 from dataclasses import dataclass
 import json
 import os
+import pathlib
 import re
 from typing import Protocol, Sequence
 import urllib.error
+import urllib.parse
 import urllib.request
 
 import numpy as np
@@ -19,6 +22,8 @@ from evoforest_arch.primitives import PrimitiveRegistry
 
 
 DEFAULT_ISLAND_TEMPERATURES = (0.35, 0.5, 0.6, 0.75)
+DEFAULT_ENV_FILE = pathlib.Path(".env")
+SUPPORTED_LLM_PROVIDERS = ("openai", "claude", "gemini")
 
 
 class LLMClient(Protocol):
@@ -75,54 +80,171 @@ class StaticLLMClient:
         return self.responses.pop(0)
 
 
-@dataclass(frozen=True)
-class HTTPJSONLLMClient:
-    """Small generic JSON-over-HTTP client for OpenAI-compatible chat servers."""
+def load_env_file(path: str | pathlib.Path | None = DEFAULT_ENV_FILE, *, override: bool = False) -> bool:
+    """Load simple KEY=VALUE entries from a dotenv file into os.environ."""
+    if path is None:
+        return False
+    env_path = pathlib.Path(path)
+    if not env_path.exists():
+        return False
+    for line_number, raw_line in enumerate(env_path.read_text(encoding="utf-8").splitlines(), start=1):
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export ") :].strip()
+        key, separator, raw_value = line.partition("=")
+        if not separator:
+            raise ValueError(f"Invalid dotenv line {line_number} in {env_path}: expected KEY=VALUE.")
+        key = key.strip()
+        if not key or not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", key):
+            raise ValueError(f"Invalid dotenv key {key!r} on line {line_number} in {env_path}.")
+        if not override and key in os.environ:
+            continue
+        os.environ[key] = _parse_env_value(raw_value)
+    return True
 
-    url: str
-    api_key: str | None = None
-    model: str | None = None
+
+def llm_provider_from_env(path: str | pathlib.Path | None = DEFAULT_ENV_FILE, *, required: bool = False) -> str | None:
+    load_env_file(path)
+    provider = os.getenv("EVOFOREST_LLM_PROVIDER", "").strip()
+    if not provider:
+        if required:
+            raise ValueError(
+                "Set EVOFOREST_LLM_PROVIDER in the environment or .env file when --llm-provider env is used."
+            )
+        return None
+    normalized = _normalize_provider(provider)
+    if normalized not in SUPPORTED_LLM_PROVIDERS:
+        raise ValueError(
+            f"Unsupported EVOFOREST_LLM_PROVIDER={provider!r}; expected one of {', '.join(SUPPORTED_LLM_PROVIDERS)}."
+        )
+    return normalized
+
+
+def llm_client_from_env(env_file: str | pathlib.Path | None = DEFAULT_ENV_FILE) -> LLMClient:
+    provider = llm_provider_from_env(env_file, required=True)
+    if provider == "openai":
+        return OpenAILLMClient.from_env(env_file)
+    if provider == "claude":
+        return ClaudeLLMClient.from_env(env_file)
+    if provider == "gemini":
+        return GeminiLLMClient.from_env(env_file)
+    raise ValueError(f"Unsupported LLM provider {provider!r}.")
+
+
+@dataclass(frozen=True)
+class OpenAILLMClient:
+    """OpenAI chat-completions client."""
+
+    api_key: str
+    model: str
     timeout_seconds: float = 120.0
 
     @classmethod
-    def from_env(cls) -> "HTTPJSONLLMClient":
-        url = os.getenv("EVOFOREST_LLM_URL")
-        if not url:
-            raise ValueError("Set EVOFOREST_LLM_URL before using --llm-provider http-json.")
+    def from_env(cls, env_file: str | pathlib.Path | None = DEFAULT_ENV_FILE) -> "OpenAILLMClient":
+        load_env_file(env_file)
         return cls(
-            url=url,
-            api_key=os.getenv("EVOFOREST_LLM_API_KEY"),
-            model=os.getenv("EVOFOREST_LLM_MODEL"),
+            api_key=_required_env(("OPENAI_API_KEY", "EVOFOREST_OPENAI_API_KEY"), "openai"),
+            model=_required_env(("EVOFOREST_LLM_MODEL", "EVOFOREST_OPENAI_MODEL"), "openai"),
+            timeout_seconds=_env_float("EVOFOREST_LLM_TIMEOUT_SECONDS", 120.0),
         )
 
     def complete(self, system_prompt: str, user_prompt: str, *, temperature: float = 0.0) -> str:
         payload: dict[str, object] = {
+            "model": self.model,
             "temperature": float(temperature),
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
         }
-        if self.model:
-            payload["model"] = self.model
-        headers = {"Content-Type": "application/json"}
-        if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
-        request = urllib.request.Request(
-            self.url,
-            data=json.dumps(payload).encode("utf-8"),
-            headers=headers,
-            method="POST",
+        max_tokens = _optional_env_int("EVOFOREST_LLM_MAX_TOKENS")
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
+        data = _post_json(
+            "https://api.openai.com/v1/chat/completions",
+            payload,
+            headers={"Authorization": f"Bearer {self.api_key}"},
+            timeout_seconds=self.timeout_seconds,
         )
-        try:
-            with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
-                body = response.read().decode("utf-8")
-        except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"LLM HTTP request failed with status {exc.code}: {detail[:500]}") from exc
-        except urllib.error.URLError as exc:
-            raise RuntimeError(f"LLM HTTP request failed: {exc}") from exc
-        return _extract_llm_content(json.loads(body))
+        return _extract_openai_content(data)
+
+
+@dataclass(frozen=True)
+class ClaudeLLMClient:
+    """Anthropic Claude Messages API client."""
+
+    api_key: str
+    model: str
+    timeout_seconds: float = 120.0
+    max_tokens: int = 4096
+
+    @classmethod
+    def from_env(cls, env_file: str | pathlib.Path | None = DEFAULT_ENV_FILE) -> "ClaudeLLMClient":
+        load_env_file(env_file)
+        return cls(
+            api_key=_required_env(("ANTHROPIC_API_KEY", "EVOFOREST_CLAUDE_API_KEY"), "claude"),
+            model=_required_env(("EVOFOREST_LLM_MODEL", "EVOFOREST_CLAUDE_MODEL"), "claude"),
+            timeout_seconds=_env_float("EVOFOREST_LLM_TIMEOUT_SECONDS", 120.0),
+            max_tokens=_env_int("EVOFOREST_LLM_MAX_TOKENS", 4096),
+        )
+
+    def complete(self, system_prompt: str, user_prompt: str, *, temperature: float = 0.0) -> str:
+        payload: dict[str, object] = {
+            "model": self.model,
+            "max_tokens": self.max_tokens,
+            "temperature": float(temperature),
+            "system": system_prompt,
+            "messages": [{"role": "user", "content": user_prompt}],
+        }
+        data = _post_json(
+            "https://api.anthropic.com/v1/messages",
+            payload,
+            headers={
+                "x-api-key": self.api_key,
+                "anthropic-version": "2023-06-01",
+            },
+            timeout_seconds=self.timeout_seconds,
+        )
+        return _extract_claude_content(data)
+
+
+@dataclass(frozen=True)
+class GeminiLLMClient:
+    """Google Gemini generateContent client."""
+
+    api_key: str
+    model: str
+    timeout_seconds: float = 120.0
+
+    @classmethod
+    def from_env(cls, env_file: str | pathlib.Path | None = DEFAULT_ENV_FILE) -> "GeminiLLMClient":
+        load_env_file(env_file)
+        return cls(
+            api_key=_required_env(("GEMINI_API_KEY", "GOOGLE_API_KEY", "EVOFOREST_GEMINI_API_KEY"), "gemini"),
+            model=_required_env(("EVOFOREST_LLM_MODEL", "EVOFOREST_GEMINI_MODEL"), "gemini"),
+            timeout_seconds=_env_float("EVOFOREST_LLM_TIMEOUT_SECONDS", 120.0),
+        )
+
+    def complete(self, system_prompt: str, user_prompt: str, *, temperature: float = 0.0) -> str:
+        payload: dict[str, object] = {
+            "systemInstruction": {"parts": [{"text": system_prompt}]},
+            "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
+            "generationConfig": {"temperature": float(temperature)},
+        }
+        max_tokens = _optional_env_int("EVOFOREST_LLM_MAX_TOKENS")
+        if max_tokens is not None:
+            payload["generationConfig"]["maxOutputTokens"] = max_tokens  # type: ignore[index]
+        model_path = self.model if self.model.startswith("models/") else f"models/{self.model}"
+        quoted_model = urllib.parse.quote(model_path, safe="/")
+        query = urllib.parse.urlencode({"key": self.api_key})
+        data = _post_json(
+            f"https://generativelanguage.googleapis.com/v1beta/{quoted_model}:generateContent?{query}",
+            payload,
+            timeout_seconds=self.timeout_seconds,
+        )
+        return _extract_gemini_content(data)
 
 
 @dataclass
@@ -280,13 +402,11 @@ class LLMScientistAgent(ScientistAgent):
         client: LLMClient,
         *,
         prompt_builder: PromptBuilder | None = None,
-        fallback: ScientistAgent | None = None,
         temperature: float = 0.35,
         island_temperatures: Sequence[float] | None = DEFAULT_ISLAND_TEMPERATURES,
     ) -> None:
         self.client = client
         self.prompt_builder = prompt_builder or PromptBuilder()
-        self.fallback = fallback or ScientistAgent()
         self.temperature = float(temperature)
         self.island_temperatures = (
             tuple(float(item) for item in island_temperatures)
@@ -323,7 +443,7 @@ class LLMScientistAgent(ScientistAgent):
             return hypotheses
         except Exception as exc:
             error = str(exc)
-            return self.fallback.generate(graph, result, max_hypotheses=max_hypotheses)
+            raise
         finally:
             self._prompt_records.append(PromptRecord("scientist", system, user, response, error))
 
@@ -344,18 +464,15 @@ class LLMEngineerAgent(EngineerAgent):
         client: LLMClient,
         *,
         prompt_builder: PromptBuilder | None = None,
-        fallback: EngineerAgent | None = None,
         registry: PrimitiveRegistry | None = None,
         temperature: float = 0.0,
         allow_source: bool = False,
     ) -> None:
         self.client = client
         self.prompt_builder = prompt_builder or PromptBuilder(allow_source=allow_source)
-        self.fallback = fallback or EngineerAgent()
         self.registry = registry or PrimitiveRegistry.default()
         self.temperature = float(temperature)
         self.allow_source = bool(allow_source)
-        self.templates = self.fallback.templates
         self._prompt_records: list[PromptRecord] = []
 
     def synthesize(
@@ -391,7 +508,7 @@ class LLMEngineerAgent(EngineerAgent):
             return document
         except Exception as exc:
             error = str(exc)
-            return self.fallback.synthesize(graph, result, hypotheses, step, island, rng)
+            raise
         finally:
             self._prompt_records.append(PromptRecord("engineer", system, user, response, error))
 
@@ -492,7 +609,35 @@ def _infer_target_node(text: str, graph: Graph) -> str:
     return "output" if "output" in graph.nodes else next(iter(graph.nodes))
 
 
-def _extract_llm_content(data: object) -> str:
+def _post_json(
+    url: str,
+    payload: dict[str, object],
+    *,
+    headers: dict[str, str] | None = None,
+    timeout_seconds: float,
+) -> dict[str, object]:
+    request_headers = {"Content-Type": "application/json", **(headers or {})}
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers=request_headers,
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+            body = response.read().decode("utf-8")
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"LLM HTTP request failed with status {exc.code}: {detail[:500]}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"LLM HTTP request failed: {exc}") from exc
+    data = json.loads(body)
+    if not isinstance(data, dict):
+        raise ValueError("LLM response JSON must be an object.")
+    return data
+
+
+def _extract_openai_content(data: object) -> str:
     if not isinstance(data, dict):
         raise ValueError("LLM response JSON must be an object.")
     choices = data.get("choices")
@@ -524,6 +669,45 @@ def _extract_llm_content(data: object) -> str:
     raise ValueError("Could not find text content in LLM response JSON.")
 
 
+def _extract_claude_content(data: object) -> str:
+    if not isinstance(data, dict):
+        raise ValueError("Claude response JSON must be an object.")
+    content = data.get("content")
+    if not isinstance(content, list):
+        raise ValueError("Claude response JSON did not contain a content list.")
+    parts = []
+    for item in content:
+        if isinstance(item, dict) and item.get("type") == "text" and "text" in item:
+            parts.append(str(item["text"]))
+    if not parts:
+        raise ValueError("Claude response JSON did not contain text content.")
+    return "\n".join(parts)
+
+
+def _extract_gemini_content(data: object) -> str:
+    if not isinstance(data, dict):
+        raise ValueError("Gemini response JSON must be an object.")
+    candidates = data.get("candidates")
+    if not isinstance(candidates, list) or not candidates:
+        raise ValueError("Gemini response JSON did not contain candidates.")
+    first = candidates[0]
+    if not isinstance(first, dict):
+        raise ValueError("Gemini candidate must be an object.")
+    content = first.get("content")
+    if not isinstance(content, dict):
+        raise ValueError("Gemini candidate did not contain content.")
+    blocks = content.get("parts")
+    if not isinstance(blocks, list):
+        raise ValueError("Gemini content did not contain parts.")
+    parts = []
+    for block in blocks:
+        if isinstance(block, dict) and "text" in block:
+            parts.append(str(block["text"]))
+    if not parts:
+        raise ValueError("Gemini response JSON did not contain text content.")
+    return "\n".join(parts)
+
+
 def _stringify_content(content: object) -> str:
     if isinstance(content, str):
         return content
@@ -536,3 +720,82 @@ def _stringify_content(content: object) -> str:
                 parts.append(str(item))
         return "\n".join(parts)
     return str(content)
+
+
+def _normalize_provider(provider: str) -> str:
+    return provider.strip().lower().replace("_", "-")
+
+
+def _required_env(names: tuple[str, ...], provider: str) -> str:
+    for name in names:
+        value = os.getenv(name)
+        if value:
+            return value
+    joined = " or ".join(names)
+    raise ValueError(f"Set {joined} in the environment or .env file before using the {provider} LLM provider.")
+
+
+def _env_float(name: str, default: float) -> float:
+    value = os.getenv(name)
+    if not value:
+        return float(default)
+    try:
+        return float(value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a float, got {value!r}.") from exc
+
+
+def _env_int(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if not value:
+        return int(default)
+    try:
+        return int(value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer, got {value!r}.") from exc
+
+
+def _optional_env_int(name: str) -> int | None:
+    value = os.getenv(name)
+    if not value:
+        return None
+    try:
+        return int(value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer, got {value!r}.") from exc
+
+
+def _parse_env_value(raw_value: str) -> str:
+    value = raw_value.strip()
+    if not value:
+        return ""
+    if value[0] in {"'", '"'}:
+        try:
+            parsed = ast.literal_eval(value)
+        except (SyntaxError, ValueError) as exc:
+            raise ValueError(f"Invalid quoted dotenv value: {value!r}.") from exc
+        return str(parsed)
+    return _strip_inline_comment(value).strip()
+
+
+def _strip_inline_comment(value: str) -> str:
+    in_single_quote = False
+    in_double_quote = False
+    escaped = False
+    for index, character in enumerate(value):
+        if escaped:
+            escaped = False
+            continue
+        if character == "\\":
+            escaped = True
+            continue
+        if character == "'" and not in_double_quote:
+            in_single_quote = not in_single_quote
+            continue
+        if character == '"' and not in_single_quote:
+            in_double_quote = not in_double_quote
+            continue
+        if character == "#" and not in_single_quote and not in_double_quote:
+            if index == 0 or value[index - 1].isspace():
+                return value[:index]
+    return value

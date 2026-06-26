@@ -129,14 +129,16 @@ class EvolutionLoop:
         with events_path.open("w", encoding="utf-8") as events:
             for step in range(1, steps + 1):
                 memorandum = self._read_memorandum(output_dir)
-                document = self._propose_document(
-                    current_graph,
-                    best_result,
-                    step,
-                    memorandum=memorandum,
-                    execution_errors=self._error_context(errors),
-                )
-                self._write_prompt_records(output_dir, step)
+                try:
+                    document = self._propose_document(
+                        current_graph,
+                        best_result,
+                        step,
+                        memorandum=memorandum,
+                        execution_errors=self._error_context(errors),
+                    )
+                finally:
+                    self._write_prompt_records(output_dir, step)
                 self._write_mutation_document(output_dir, step, document)
                 outcome = self._try_evaluate_candidate(current_graph, document, inputs, y)
                 if outcome.failed:
@@ -247,15 +249,17 @@ class EvolutionLoop:
                 state = states[(global_step - 1) % islands]
                 island_dir = output_dir / f"island_{state.island}"
                 memorandum = self._read_memorandum(island_dir)
-                document = self._propose_document(
-                    state.current_graph,
-                    state.best_result,
-                    global_step,
-                    island=state.island,
-                    memorandum=memorandum,
-                    execution_errors=self._error_context(state.errors),
-                )
-                self._write_prompt_records(output_dir, global_step, island=state.island)
+                try:
+                    document = self._propose_document(
+                        state.current_graph,
+                        state.best_result,
+                        global_step,
+                        island=state.island,
+                        memorandum=memorandum,
+                        execution_errors=self._error_context(state.errors),
+                    )
+                finally:
+                    self._write_prompt_records(output_dir, global_step, island=state.island)
                 self._write_mutation_document(output_dir, global_step, document, island=state.island)
                 outcome = self._try_evaluate_candidate(state.current_graph, document, inputs, y)
                 if outcome.failed:
@@ -424,15 +428,17 @@ class EvolutionLoop:
                         next_step = global_step + len(tasks) + 1
                         island_dir = output_dir / f"island_{state.island}"
                         memorandum = self._read_memorandum(island_dir)
-                        document = self._propose_document(
-                            state.current_graph,
-                            state.best_result,
-                            next_step,
-                            island=state.island,
-                            memorandum=memorandum,
-                            execution_errors=self._error_context(state.errors),
-                        )
-                        self._write_prompt_records(output_dir, next_step, island=state.island)
+                        try:
+                            document = self._propose_document(
+                                state.current_graph,
+                                state.best_result,
+                                next_step,
+                                island=state.island,
+                                memorandum=memorandum,
+                                execution_errors=self._error_context(state.errors),
+                            )
+                        finally:
+                            self._write_prompt_records(output_dir, next_step, island=state.island)
                         self._write_mutation_document(output_dir, next_step, document, island=state.island)
                         base_graph = state.current_graph.clone()
                         task = asyncio.get_running_loop().run_in_executor(

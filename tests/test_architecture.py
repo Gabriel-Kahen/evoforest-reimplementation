@@ -10,7 +10,7 @@ from evoforest_arch.evaluator import RidgeEvaluator
 from evoforest_arch.evolution import EvolutionLoop
 from evoforest_arch.feedback import toon_report
 from evoforest_arch.graph import CallableFamily, EvalContext, FeatureBlock, Graph, ResidualWeightRule
-from evoforest_arch.llm import LLMEngineerAgent, LLMScientistAgent, PromptBuilder, StaticLLMClient
+from evoforest_arch.llm import ClaudeLLMClient, GeminiLLMClient, LLMEngineerAgent, LLMScientistAgent, OpenAILLMClient, PromptBuilder, StaticLLMClient, llm_client_from_env, llm_provider_from_env
 from evoforest_arch.maintenance import GraphMaintenance
 from evoforest_arch.mutations import GlobalSpec, MutationDocument, MutationEngine, MutationSpec, NodeSpec, RemoveSpec
 from evoforest_arch.rank_readout import fit_rank_feature_expansion, select_rank_ensemble
@@ -555,6 +555,118 @@ def test_llm_agents_write_prompt_artifacts_and_mutation_yaml(tmp_path) -> None:
     assert "[OUTCOME HISTORY]" in (tmp_path / "memorandum.md").read_text(encoding="utf-8")
     assert "## Tensor Inventory" in (tmp_path / "task_context.md").read_text(encoding="utf-8")
     assert len(client.requests) == 2
+
+
+def test_llm_scientist_failure_aborts_without_deterministic_fallback(tmp_path) -> None:
+    dataset = make_structural_break_data(n_series=40, length=70, seed=27)
+    graph = build_seed_graph()
+    client = StaticLLMClient(())
+
+    with pytest.raises(RuntimeError, match="no remaining responses"):
+        EvolutionLoop(
+            graph,
+            evaluator=RidgeEvaluator(n_splits=3, seed=27, max_configurations=4),
+            scientist=LLMScientistAgent(client),
+            engineer=LLMEngineerAgent(client),
+            seed=27,
+        ).run(dataset.inputs(), dataset.y, steps=1, output_dir=tmp_path)
+
+    prompt_files = sorted((tmp_path / "prompts").glob("step_0001_*.md"))
+    assert len(prompt_files) == 1
+    prompt_text = prompt_files[0].read_text(encoding="utf-8")
+    assert "## Error" in prompt_text
+    assert "StaticLLMClient has no remaining responses" in prompt_text
+    assert not (tmp_path / "mutations" / "step_0001.yaml").exists()
+
+
+def test_llm_engineer_failure_aborts_without_deterministic_fallback() -> None:
+    dataset = make_structural_break_data(n_series=35, length=70, seed=32)
+    graph = build_seed_graph()
+    result = RidgeEvaluator(n_splits=3, seed=32, max_configurations=4).evaluate(graph, dataset.inputs(), dataset.y)
+    hypotheses = (
+        ScientistAgent().generate(graph, result, max_hypotheses=1)[0],
+    )
+    client = StaticLLMClient(("rationale: \"empty\"\nhypotheses:\n  []\nnodes:\n  []\nremove:\n  []\nglobals:\n  []\nadd:\n  []\n",))
+
+    with pytest.raises(ValueError, match="empty mutation document"):
+        LLMEngineerAgent(client).synthesize(graph, result, hypotheses, step=1, island=None, rng=np.random.default_rng(32))
+
+
+def test_llm_provider_can_be_loaded_from_env_file(tmp_path, monkeypatch) -> None:
+    for key in (
+        "EVOFOREST_LLM_PROVIDER",
+        "EVOFOREST_LLM_MODEL",
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "GEMINI_API_KEY",
+        "EVOFOREST_LLM_TIMEOUT_SECONDS",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "EVOFOREST_LLM_PROVIDER=openai",
+                "OPENAI_API_KEY='secret key'",
+                "EVOFOREST_LLM_MODEL=gpt-test",
+                "EVOFOREST_LLM_TIMEOUT_SECONDS=7.5",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    assert llm_provider_from_env(env_file, required=True) == "openai"
+    client = OpenAILLMClient.from_env(env_file)
+    assert client.api_key == "secret key"
+    assert client.model == "gpt-test"
+    assert client.timeout_seconds == 7.5
+    assert isinstance(llm_client_from_env(env_file), OpenAILLMClient)
+
+
+def test_claude_and_gemini_clients_load_from_env_files(tmp_path, monkeypatch) -> None:
+    for key in (
+        "EVOFOREST_LLM_PROVIDER",
+        "EVOFOREST_LLM_MODEL",
+        "ANTHROPIC_API_KEY",
+        "GEMINI_API_KEY",
+        "EVOFOREST_LLM_MAX_TOKENS",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+    claude_env = tmp_path / "claude.env"
+    claude_env.write_text(
+        "EVOFOREST_LLM_PROVIDER=claude\nANTHROPIC_API_KEY=anthropic-secret\nEVOFOREST_LLM_MODEL=claude-test\nEVOFOREST_LLM_MAX_TOKENS=1234\n",
+        encoding="utf-8",
+    )
+    claude = llm_client_from_env(claude_env)
+    assert isinstance(claude, ClaudeLLMClient)
+    assert claude.api_key == "anthropic-secret"
+    assert claude.model == "claude-test"
+    assert claude.max_tokens == 1234
+
+    monkeypatch.delenv("EVOFOREST_LLM_PROVIDER", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("EVOFOREST_LLM_MODEL", raising=False)
+    monkeypatch.delenv("EVOFOREST_LLM_MAX_TOKENS", raising=False)
+    gemini_env = tmp_path / "gemini.env"
+    gemini_env.write_text(
+        "EVOFOREST_LLM_PROVIDER=gemini\nGEMINI_API_KEY=gemini-secret\nEVOFOREST_LLM_MODEL=gemini-test\n",
+        encoding="utf-8",
+    )
+    gemini = llm_client_from_env(gemini_env)
+    assert isinstance(gemini, GeminiLLMClient)
+    assert gemini.api_key == "gemini-secret"
+    assert gemini.model == "gemini-test"
+
+
+def test_missing_env_llm_provider_is_an_error_when_required(tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv("EVOFOREST_LLM_PROVIDER", raising=False)
+    env_file = tmp_path / ".env"
+    env_file.write_text("OPENAI_API_KEY=secret\nEVOFOREST_LLM_MODEL=gpt-test\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="EVOFOREST_LLM_PROVIDER"):
+        llm_provider_from_env(env_file, required=True)
 
 
 def test_prompt_builder_advertises_source_schema_only_when_enabled() -> None:

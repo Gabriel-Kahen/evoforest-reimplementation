@@ -31,8 +31,8 @@ the following modules.
     structured mutation documents.
 - `evoforest_arch.llm`
   - Paper-style global rules, scientist and engineer prompt builders, prompt
-    records, deterministic test clients, and an opt-in generic HTTP JSON LLM
-    client.
+    records, deterministic test clients, and opt-in OpenAI, Claude, and Gemini
+    clients.
 - `evoforest_arch.task_context`
   - Deterministic cached task-context summaries with tensor inventory, target
     balance, scorer mechanics, and implementation constraints.
@@ -98,6 +98,9 @@ the following modules.
   mutations are explicitly enabled, source-backed `lambda ctx, values: ...`
   alternatives. The default agents are deterministic, while optional LLM-backed
   agents use the same document contract and persist their prompts and responses.
+  LLM-backed agents are fail-fast: request failures, unparseable hypotheses, invalid
+  mutation documents, and missing provider configuration raise errors instead of
+  falling back to deterministic agents.
   In island mode, LLM scientist calls default to the paper's fixed schedule
   `(0.35, 0.5, 0.6, 0.75)` by island index, and LLM engineer calls default to
   zero temperature for mutation synthesis.
@@ -150,7 +153,8 @@ Known approximations:
   parents, inputs, and fixed globals during one evaluator pass. Trusted source-backed
   alternatives that deliberately perform side effects are outside that assumption.
 - The LLM scientist/engineer loop is represented by deterministic local agents by
-  default, plus optional HTTP JSON LLM-backed agents. Source-backed alternatives
+  default, plus optional OpenAI, Claude, or Gemini LLM-backed agents configured
+  from environment variables or a `.env` file. Source-backed alternatives
   recreate the paper's lambda-style graph edits for trusted local use, but this
   does not include the authors' private model stack, exact prompt corpus, or
   production sandbox/repair system. Memorandum updates are deterministic summaries
