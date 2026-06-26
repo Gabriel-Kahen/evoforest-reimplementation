@@ -18,6 +18,7 @@ class EvaluationResult:
     predictions: np.ndarray
     alphas: list[float]
     diagnostics: dict[str, object]
+    feature_matrix: np.ndarray | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -75,7 +76,7 @@ class RidgeEvaluator:
         seed: int = 0,
         alphas: np.ndarray = DEFAULT_ALPHAS,
         max_configurations: int = 64,
-        refine_globals: bool = False,
+        refine_globals: bool = True,
         refine_steps: int = 20,
         refine_backend: str = "auto",
         irls_steps: int = 2,
@@ -109,7 +110,7 @@ class RidgeEvaluator:
         search_cache_hits = 0
         search_cache_misses = 0
         refinement_diagnostics: dict[str, object] = {"enabled": False}
-        if self.refine_globals:
+        if self.refine_globals and working_graph.globals.trainable_names():
             from evoforest_arch.refinement import GlobalRefiner
 
             base_config = working_graph.default_config()
@@ -122,6 +123,7 @@ class RidgeEvaluator:
             selected = working_graph.default_config()
             selected.update(config)
             result = self._evaluate_single_config(working_graph, inputs, y, selected, shared_cache)
+            feature_pool = [(result.feature_matrix, result.feature_names)]
             cache_row = result.diagnostics.get("cache", {})
             if isinstance(cache_row, dict):
                 search_cache_hits += int(cache_row.get("hits", 0))
@@ -134,8 +136,10 @@ class RidgeEvaluator:
             configs, total_configurations = self._configuration_candidates(working_graph)
             best: EvaluationResult | None = None
             config_rows: list[dict[str, object]] = []
+            feature_pool: list[tuple[np.ndarray | None, list[str]]] = []
             for candidate_config in configs:
                 result = self._evaluate_single_config(working_graph, inputs, y, candidate_config, shared_cache)
+                feature_pool.append((result.feature_matrix, result.feature_names))
                 cache_row = result.diagnostics.get("cache", {})
                 if isinstance(cache_row, dict):
                     search_cache_hits += int(cache_row.get("hits", 0))
@@ -171,6 +175,8 @@ class RidgeEvaluator:
             "shared_across_configurations": True,
             "key": "ancestor_conditioned_subpath",
         }
+        result.diagnostics["scoring_context"] = self._scoring_context(result)
+        self._attach_valid_feature_pool_diagnostics(result, y, feature_pool)
         result.diagnostics["scoring_context"] = self._scoring_context(result)
         result.diagnostics["refinement"] = refinement_diagnostics
         if update_graph:
@@ -219,7 +225,7 @@ class RidgeEvaluator:
                     "iterations": ridge_fit.irls_iterations,
                 }
             )
-        auc = roc_auc_score(y, preds)
+        auc = float(np.mean(fold_aucs)) if fold_aucs else roc_auc_score(y, preds)
         selected_alternatives = graph.selected_alternatives(config)
         if self.diagnostics_mode == "full":
             feature_dependencies = feature_dependency_rows(names, graph.output_dependency_map(config))
@@ -268,7 +274,27 @@ class RidgeEvaluator:
             predictions=preds,
             alphas=alphas,
             diagnostics=diagnostics,
+            feature_matrix=x,
         )
+
+    def _attach_valid_feature_pool_diagnostics(
+        self,
+        result: EvaluationResult,
+        y: np.ndarray,
+        feature_pool: list[tuple[np.ndarray | None, list[str]]],
+    ) -> None:
+        matrices = [matrix for matrix, _names in feature_pool if matrix is not None and matrix.size]
+        if not matrices:
+            return
+        x_pool = np.column_stack(matrices)
+        names = [name for _matrix, names_ in feature_pool for name in names_]
+        pool_fit = self._fit_global_diagnostic_model(x_pool, y, None, None)
+        result.diagnostics["valid_feature_pool"] = {
+            "n_configurations": int(len(matrices)),
+            "n_features": int(x_pool.shape[1]),
+            "n_feature_names": int(len(names)),
+        }
+        result.diagnostics["global_ridge_pool"] = pool_fit.to_dict(y)
 
     def _folds(self, inputs: dict[str, object], y: np.ndarray) -> tuple[list[tuple[np.ndarray, np.ndarray]], dict[str, object]]:
         if self.group_key is None or self.group_key not in inputs:
@@ -420,11 +446,13 @@ class RidgeEvaluator:
         search = result.diagnostics.get("configuration_search", {})
         folds = result.diagnostics.get("folds", {})
         global_ridge = result.diagnostics.get("global_ridge", {})
+        global_ridge_pool = result.diagnostics.get("global_ridge_pool", {})
         linear_shap = result.diagnostics.get("linear_shap", {})
         return {
             "scoring": "configuration-based (best config AUC = evoforest score)",
             "best_config_auc": float(result.auc),
             "global_ridge_auc": float(global_ridge.get("auc", 0.0)) if isinstance(global_ridge, dict) else 0.0,
+            "global_feature_pool_ridge_auc": float(global_ridge_pool.get("auc", 0.0)) if isinstance(global_ridge_pool, dict) else 0.0,
             "config_auc_range": search.get("auc_range", [float(result.auc), float(result.auc)]),
             "fold_auc_std": float(folds.get("auc_std", 0.0)) if isinstance(folds, dict) else 0.0,
             "effective_rank": float(result.diagnostics.get("effective_rank", 0.0)),

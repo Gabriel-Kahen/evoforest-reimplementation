@@ -17,9 +17,10 @@ The implementation focuses on the reusable system design:
   residual reweighting.
 - A Ridge-based cross-validation evaluator with capped configuration search.
 - Ancestor-conditioned subpath caching shared across evaluated configurations.
-- A two-phase evaluation path: optional global refinement, then frozen Ridge scoring.
-  The refinement phase can use optional PyTorch L-BFGS on differentiable graph paths
-  or fall back to deterministic NumPy coordinate search.
+- A paper-style two-phase evaluation path: PyTorch L-BFGS global refinement is
+  attempted by default when trainable globals are active, then globals are frozen
+  for Ridge scoring. A deterministic NumPy coordinate backend remains available
+  only when explicitly requested for compatibility experiments.
 - Structured diagnostics plus TOON-like reports with scoring context, feature
   correlations, residual signals, exact additive linear contribution summaries,
   a diagnostic global Ridge fit, effective rank, and fold stability.
@@ -27,10 +28,12 @@ The implementation focuses on the reusable system design:
   best evaluated configuration's feature/dependency diagnostics.
 - Deterministic scientist/engineer agents that convert diagnostics into YAML-style
   mutation documents with hypotheses, removals, appended globals, and adds.
-- Optional OpenAI, Claude, or Gemini LLM scientist/engineer agents that use paper-style prompt
-  artifacts and emit the same structured mutation documents. In island mode the
-  scientist agent defaults to the paper's fixed temperature schedule
-  `(0.35, 0.5, 0.6, 0.75)`, while engineer synthesis defaults to temperature `0`.
+- Optional OpenAI, Claude, or Gemini LLM scientist, engineer, and memorandum
+  agents that use paper-style prompt artifacts. LLM mutation synthesis is
+  lambda-first and accepts paper-style node-keyed YAML such as `add: output:
+  - "lambda ctx, values: ..."`. In island mode the scientist agent defaults to
+  the paper's fixed temperature schedule `(0.35, 0.5, 0.6, 0.75)`, while
+  engineer synthesis and memorandum updates default to temperature `0`.
 - Cached task-context summaries with tensor inventory, target balance, scorer
   mechanics, and implementation constraints injected into LLM prompts.
 - Node-level mutation support so a document can introduce a new intermediate,
@@ -69,7 +72,7 @@ pytest -q
 ## Run Demo
 
 ```bash
-evoforest-arch demo --steps 12 --islands 2 --async-islands --refine-globals --refine-backend auto --output runs/demo
+evoforest-arch demo --steps 12 --islands 2 --async-islands --refine-backend auto --output runs/demo
 ```
 
 ## Run Production Evolution Smoke
@@ -179,9 +182,11 @@ brief into LLM prompts, pass `--task-context-file path/to/context.md`.
 `--irls-steps` to control the number of residual-weighted refits after the initial
 Ridge fit.
 
-To let trusted LLM-generated mutation documents include source-backed lambda
-alternatives, also pass `--allow-source-mutations`. This executes local Python
-source from mutation YAML and should only be used with trusted prompts and endpoints.
+LLM-generated mutation documents may include source-backed lambda alternatives by
+default, matching the paper's mutation representation. For deterministic
+non-LLM runs, pass `--allow-source-mutations` to enable trusted local source
+mutation documents. Source lambdas are AST-validated and executed in-process;
+this is a trust boundary, not a security sandbox.
 
 LLM mode is fail-fast. If the configured provider is missing, the HTTP request
 fails, the scientist response cannot be parsed into hypotheses, or the engineer
@@ -211,15 +216,19 @@ logic, and local-label feature selection. It is meant as a clean architecture su
 for experiments with open-ended computational graph evolution.
 
 It also does not claim to recover the private 600-step evolved graph. The global
-refinement phase supports a PyTorch L-BFGS path for differentiable primitives and
-falls back to a deterministic NumPy surrogate when a graph path is not torch-enabled.
+refinement phase attempts PyTorch L-BFGS for differentiable primitives and
+records an explicit skipped-refinement reason when the torch path is unavailable
+or a gradient probe finds no active trainable global influence. The NumPy
+coordinate refiner is retained as an explicit compatibility backend, not as the
+paper-mode fallback.
 The asynchronous island mode uses local thread workers rather than dedicated GPU
 islands. It preserves the paper's fixed four-temperature scientist schedule by
 default, but the scientist/engineer loop can also run deterministically offline or
 call an opt-in OpenAI, Claude, or Gemini provider. It does not include the authors'
-private model, exact prompts, or full private code-generation backend. The source-backed
-mutation path recreates the paper's lambda-alternative representation for trusted
-local experiments, but it is not a security sandbox. Alternative-level age and
+private model, exact prompts, full private code-generation backend, or distributed
+GPU scheduler. The source-backed mutation path recreates the paper's
+lambda-alternative representation for trusted local experiments, but it is not a
+security sandbox. Alternative-level age and
 quality history is implemented as rolling clean-room summaries over participating
 alternatives in accepted stateful evaluations, not as the authors' private statistic
 schema. Linear SHAP-style diagnostics are exact additive decompositions of this

@@ -47,7 +47,7 @@ class ProductionConfig:
     folds: int = 3
     max_configurations: int = 64
     irls_steps: int = 2
-    refine_globals: bool = False
+    refine_globals: bool = True
     refine_steps: int = 20
     refine_backend: str = "auto"
     min_train_improvement: float = 1e-6
@@ -146,7 +146,9 @@ class ProductionEvolutionRunner:
         *,
         scientist: ScientistAgent | None = None,
         engineer: EngineerAgent | None = None,
+        memorandum_agent: object | None = None,
         task_context: str = "",
+        task_sources: tuple[tuple[str, str], ...] = (),
     ) -> None:
         self.config = config
         self.graph = graph or build_seed_graph()
@@ -154,7 +156,9 @@ class ProductionEvolutionRunner:
         self.mutation_engine = MutationEngine(allow_source=config.allow_source_mutations)
         self.scientist = scientist
         self.engineer = engineer
+        self.memorandum_agent = memorandum_agent
         self.task_context = task_context
+        self.task_sources = task_sources
 
     def run(self, *, resume: bool = False) -> dict[str, Any]:
         context = self._resume_context() if resume else self._new_context()
@@ -164,7 +168,9 @@ class ProductionEvolutionRunner:
             mutation_engine=self.mutation_engine,
             scientist=self.scientist,
             engineer=self.engineer,
+            memorandum_agent=self.memorandum_agent,
             task_context=self.task_context,
+            task_sources=self.task_sources,
             seed=self.config.seed,
         )
         loop.rng.bit_generator.state = context.state.rng_state
@@ -173,6 +179,7 @@ class ProductionEvolutionRunner:
         train_inputs, train_y = context.splits["train"]
         validation_inputs, validation_y = context.splits["validation"]
         self._install_task_context(context, loop, train_inputs, train_y)
+        self._write_memorandum(context, loop=loop)
         with events_path.open(mode, encoding="utf-8") as events:
             for step in range(context.state.step + 1, context.state.step + int(self.config.steps) + 1):
                 try:
@@ -188,13 +195,27 @@ class ProductionEvolutionRunner:
                 loop._write_mutation_document(context.run_dir, step, document)
                 outcome = loop._try_evaluate_candidate(context.current_graph, document, train_inputs, train_y)
                 if outcome.failed:
+                    document, outcome = loop._repair_candidate(
+                        context.current_graph,
+                        context.best_train_result,
+                        step,
+                        island=None,
+                        output_dir=context.run_dir,
+                        document=document,
+                        outcome=outcome,
+                        inputs=train_inputs,
+                        y=train_y,
+                        memorandum=self._read_memorandum(context.run_dir),
+                        errors=context.state.errors,
+                    )
+                if outcome.failed:
                     event = self._failed_event(context, step, document.to_dict(), outcome.error or "Unknown candidate failure.")
                     context.state.step = step
                     context.state.rng_state = loop.rng.bit_generator.state
                     self._record_event(context.state, event)
                     events.write(json.dumps(event) + "\n")
                     self._write_state(context.run_dir, context.state)
-                    self._write_memorandum(context)
+                    self._write_memorandum(context, loop=loop)
                     continue
 
                 if outcome.application is None or outcome.candidate_graph is None or outcome.result is None:
@@ -239,7 +260,7 @@ class ProductionEvolutionRunner:
                 self._record_event(context.state, event)
                 events.write(json.dumps(event) + "\n")
                 self._write_state(context.run_dir, context.state)
-                self._write_memorandum(context)
+                self._write_memorandum(context, loop=loop)
 
         return inspect_run(context.run_dir)
 
@@ -252,7 +273,13 @@ class ProductionEvolutionRunner:
     ) -> None:
         task_context = self.task_context.strip()
         if not task_context:
-            task_context = build_task_context(train_inputs, train_y, self.evaluator, source="production train split").to_text()
+            task_context = build_task_context(
+                train_inputs,
+                train_y,
+                self.evaluator,
+                source="production train split",
+                task_sources=self.task_sources,
+            ).to_text()
         loop._install_task_context(task_context)
         (context.run_dir / "task_context.md").write_text(task_context if task_context.endswith("\n") else task_context + "\n", encoding="utf-8")
 
@@ -431,23 +458,52 @@ class ProductionEvolutionRunner:
         }
         (context.run_dir / "checkpoint.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
-    def _write_memorandum(self, context: ProductionContext) -> None:
+    def _write_memorandum(self, context: ProductionContext, loop: EvolutionLoop | None = None) -> None:
+        if loop is not None and getattr(loop, "memorandum_agent", None) is not None:
+            loop._write_memorandum(
+                context.run_dir,
+                context.best_train_result,
+                context.state.history,
+                context.state.errors,
+                step=context.state.step,
+            )
+            return
+        feedback = feedback_summary(context.best_train_result)
         lines = [
             "# Production Evolution Memorandum",
-            "",
-            "[RUN]",
-            f"- Run id: {context.state.run_id}.",
-            f"- Step: {context.state.step}.",
-            f"- Best train AUC: {context.state.best_train_auc:.6f}.",
-            f"- Best validation AUC: {context.state.best_validation_auc:.6f}.",
-            f"- Test rechecks: {context.state.test_recheck_count}.",
             "",
             "[OUTCOME HISTORY]",
         ]
         lines.extend(context.state.history[-12:] or ["- No mutation outcomes recorded yet."])
-        lines.extend(["", "[ERROR LOG]"])
+        lines.extend(
+            [
+                "",
+                "[STATE]",
+                f"- Run id: {context.state.run_id}.",
+                f"- Step: {context.state.step}.",
+                f"- Best train AUC: {context.state.best_train_auc:.6f}.",
+                f"- Best validation AUC: {context.state.best_validation_auc:.6f}.",
+                f"- Test rechecks: {context.state.test_recheck_count}.",
+            ]
+        )
+        scoring = feedback.get("scoring_context", {})
+        if isinstance(scoring, dict):
+            lines.append(
+                "- Representation: "
+                f"effective_rank={float(scoring.get('effective_rank', 0.0)):.4f}, "
+                f"mean_max_corr={float(scoring.get('mean_max_corr', 0.0)):.4f}."
+            )
+        lines.extend(["", "[WHAT WORKS]"])
+        lines.extend([row for row in context.state.history if "ACCEPTED" in row][-6:] or ["- No accepted mutation patterns recorded yet."])
+        lines.extend(["", "[WHAT FAILED]"])
+        lines.extend([row for row in context.state.history if "REJECTED" in row or "FAILED" in row][-6:] or ["- No rejected or failed mutation patterns recorded yet."])
+        lines.extend(
+            [
+                "",
+                "[ERROR LOG]",
+            ]
+        )
         lines.extend(context.state.errors[-12:] or ["- No runtime errors recorded."])
-        lines.extend(["", "TOON diagnostics:", "```", toon_report(context.best_train_result), "```"])
         (context.run_dir / "memorandum.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     def _candidate_event(

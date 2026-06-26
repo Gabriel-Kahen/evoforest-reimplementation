@@ -19,7 +19,7 @@ the following modules.
   - Trusted source-backed lambda alternatives that mirror the paper's YAML
     mutation representation.
 - `evoforest_arch.evaluator`
-  - Capped configuration enumeration, optional global refinement, Ridge
+  - Capped configuration enumeration, default paper-mode global refinement, Ridge
     cross-validation, fitting-node execution, diagnostic global Ridge fitting,
     and exact additive linear contribution diagnostics.
 - `evoforest_arch.feedback`
@@ -37,11 +37,14 @@ the following modules.
   - Deterministic cached task-context summaries with tensor inventory, target
     balance, scorer mechanics, and implementation constraints.
 - `evoforest_arch.refinement`
-  - Optional PyTorch `nn.ParameterDict` plus L-BFGS refinement for differentiable
-    fixed paths, with deterministic NumPy fallback for unsupported paths.
+  - PyTorch `nn.ParameterDict` plus L-BFGS refinement for differentiable fixed
+    paths, with an explicit gradient-probe skip when trainable globals do not
+    influence the selected path. A deterministic NumPy backend remains available
+    only when explicitly requested.
 - `evoforest_arch.mutations`
-  - YAML-style mutation documents, mutation specs, removals, appended globals,
-    source-backed alternatives, and a registry-driven mutation engine.
+  - YAML-style mutation documents, paper-style node-keyed lambda additions,
+    mutation specs, removals, appended globals, source-backed alternatives, and
+    a registry-driven deterministic compatibility mutation engine.
 - `evoforest_arch.maintenance`
   - Graph cleanup for duplicate alternatives, unreachable nodes, empty nodes,
     unused globals, and DAG validity.
@@ -70,15 +73,17 @@ the following modules.
   computed once when all of its ancestors agree, but recomputed when a parent
   alternative changes.
 - The Ridge readout standardizes features, selects alpha from a log-scale grid using
-  a leave-one-out leverage criterion inside each fold, records fold AUC dispersion,
-  and summarizes the evaluated configuration AUC range.
+  a leave-one-out leverage criterion inside each fold, scores each configuration by
+  mean fold ROC-AUC, records fold AUC dispersion, and summarizes the evaluated
+  configuration AUC range.
 - `ridge_g` residual rules are applied through an explicit IRLS loop: after the
   initial Ridge fit, residuals are converted to weights and Ridge is refit for the
   configured number of `irls_steps`, with per-fold iteration diagnostics recorded.
-- After a configuration is scored, the evaluator fits a diagnostic global Ridge model
-  on the best configuration's feature matrix. Feature diagnostics include exact
-  additive linear contribution summaries for both the out-of-fold CV models and the
-  global diagnostic model. The contribution basis is the standardized Ridge term
+- After configuration scoring, the evaluator fits a diagnostic Ridge model on the
+  valid feature pool accumulated across evaluated configurations. Feature
+  diagnostics for the best configuration include exact additive linear contribution
+  summaries for both the out-of-fold CV models and the best-configuration global
+  diagnostic model. The contribution basis is the standardized Ridge term
   `z_j * coefficient_j`, which reconstructs each linear prediction with the model
   intercept up to numerical precision.
 - For stateful evaluations, the best configuration updates persistent
@@ -87,27 +92,30 @@ the following modules.
   importance, standalone AUC, residual coverage, redundancy, fold-weight stability,
   and configuration AUC. These summaries are serialized in the graph and surfaced
   in feedback/TOON artifacts.
-- Optional global refinement runs before configuration scoring, then globals are
-  frozen for Ridge evaluation. When PyTorch is installed and the selected path has
-  torch evaluators, trainable globals are materialized as `nn.Parameter`s and
-  optimized by L-BFGS together with an ephemeral linear readout.
+- Paper-mode global refinement runs before configuration scoring when trainable
+  globals are active, then globals are frozen for Ridge evaluation. When PyTorch is
+  installed and the selected path has torch evaluators, trainable globals are
+  materialized as `nn.Parameter`s, checked by a short gradient probe, and optimized
+  by L-BFGS together with an ephemeral linear readout.
 - Mutation proposals follow a two-role pipeline: a scientist agent turns feature and
   subnode diagnostics into hypotheses, and an engineer agent emits structured
   YAML-style documents with rationale, new nodes, removals, appended globals, and
   additions. Additions can reference built-in primitives or, when trusted source
   mutations are explicitly enabled, source-backed `lambda ctx, values: ...`
-  alternatives. The default agents are deterministic, while optional LLM-backed
-  agents use the same document contract and persist their prompts and responses.
+  alternatives. LLM-backed engineer prompts are lambda-first and also accept the
+  paper's node-keyed YAML form. The default agents are deterministic, while
+  optional LLM-backed agents use the same document contract and persist their
+  prompts and responses.
   LLM-backed agents are fail-fast: request failures, unparseable hypotheses, invalid
-  mutation documents, and missing provider configuration raise errors instead of
-  falling back to deterministic agents.
+  mutation documents, malformed memorandum updates, and missing provider
+  configuration raise errors instead of falling back to deterministic agents.
   In island mode, LLM scientist calls default to the paper's fixed schedule
   `(0.35, 0.5, 0.6, 0.75)` by island index, and LLM engineer calls default to
   zero temperature for mutation synthesis.
 - At run startup, a task-context summary is written to `task_context.md` and injected
-  into default LLM prompt builders. It records the runtime tensor inventory, target
-  balance, scorer mechanics, and implementation constraints so mutations are
-  grounded in the actual task interface.
+  into default LLM prompt builders. It records optional task-source excerpts,
+  runtime tensor inventory, target balance, scorer mechanics, and implementation
+  constraints so mutations are grounded in the actual task interface.
 - After each mutation, maintenance validates the DAG, collapses exact duplicate
   alternatives, prunes unreachable structure, and removes unused globals.
 - Generated candidates that fail during mutation application or evaluation are
@@ -127,9 +135,10 @@ the following modules.
   the fixed scientist-temperature schedule independently of candidate evaluation
   completion order.
 - Memoranda are sectioned into `[OUTCOME HISTORY]`, `[STATE]`, `[WHAT WORKS]`,
-  `[WHAT FAILED]`, and `[ERROR LOG]`. The clean-room writer is deterministic and
-  hypothesis-free: it summarizes observed outcomes and diagnostics without adding
-  new recommendations.
+  `[WHAT FAILED]`, and `[ERROR LOG]`. In LLM mode a separate memorandum agent
+  writes this paper-style hypothesis-free memory and must return all required
+  sections. Offline deterministic runs use a compact non-TOON raw summary of
+  observed outcomes and diagnostics.
 
 ## Design Principles
 
@@ -142,33 +151,32 @@ faithful software substrate for the paper's architectural pattern.
 
 Known approximations:
 
-- The paper's private implementation is PyTorch-first. This repo supports a PyTorch
-  L-BFGS path for the included differentiable primitives, but arbitrary new
-  clean-room primitives need a `torch_fn` to participate in that path. Unsupported
-  paths fall back to a deterministic NumPy coordinate refiner.
+- The paper's private implementation is PyTorch-first. This repo now treats the
+  PyTorch L-BFGS path as paper mode. Arbitrary clean-room primitives need a
+  `torch_fn` to participate in that path; otherwise refinement records a skipped
+  torch reason. The deterministic NumPy coordinate refiner is explicit
+  compatibility behavior.
 - The paper's long run used asynchronous GPU islands; this repo includes
   asynchronous local worker islands with the paper-style scientist temperature
   schedule, but not a multi-GPU distributed scheduler.
 - Cross-configuration caching assumes alternatives are deterministic over their
   parents, inputs, and fixed globals during one evaluator pass. Trusted source-backed
   alternatives that deliberately perform side effects are outside that assumption.
-- The LLM scientist/engineer loop is represented by deterministic local agents by
-  default, plus optional OpenAI, Claude, or Gemini LLM-backed agents configured
-  from environment variables or a `.env` file. Source-backed alternatives
-  recreate the paper's lambda-style graph edits for trusted local use, but this
-  does not include the authors' private model stack, exact prompt corpus, or
-  production sandbox/repair system. Memorandum updates are deterministic summaries
-  of observed events and diagnostics rather than private LLM-authored prose.
-  Task-context summaries are deterministic runtime summaries rather than private
-  LLM-authored domain briefs.
+- The LLM scientist/engineer/memorandum loop is represented by deterministic local
+  agents by default, plus optional OpenAI, Claude, or Gemini LLM-backed agents
+  configured from environment variables or a `.env` file. Source-backed
+  alternatives recreate the paper's lambda-style graph edits for trusted local
+  use, but this does not include the authors' private model stack, exact prompt
+  corpus, production sandbox, or distributed GPU scheduler. Task-context summaries
+  are deterministic runtime/source summaries rather than private LLM-authored
+  domain briefs.
 - The diagnostic table is TOON-like and includes feature dependencies, subnode
   aggregates, importance, standalone AUC, max correlation, high-correlation counts,
   residual correlations, class effect size, exact additive Ridge contribution
-  summaries, diagnostic global Ridge AUC, fold-weight stability, fold AUC dispersion,
-  effective rank, and evaluated configuration AUC range. It is not the full private
+  summaries, diagnostic global Ridge AUC, valid-feature-pool Ridge AUC,
+  fold-weight stability, fold AUC dispersion, effective rank, and evaluated
+  configuration AUC range. It is not the full private
   diagnostic schema. Alternative-level history is a clean-room rolling aggregate over
   the best stateful evaluation path rather than the authors' private statistic table,
   the SHAP-style fields are exact for this repo's standardized linear Ridge basis
-  rather than a private implementation, and `n_features_global` is a clean-room
-  evaluated configuration feature-column count rather than the authors' exact private
-  feature pool accounting.
+  rather than a private implementation.

@@ -34,6 +34,7 @@ class TensorSummary:
 @dataclass(frozen=True)
 class TaskContextSummary:
     title: str
+    source_brief: tuple[str, ...]
     tensors: tuple[TensorSummary, ...]
     target_rows: int
     positive_count: int
@@ -47,9 +48,11 @@ class TaskContextSummary:
             "# Task Context Summary",
             "",
             self.title,
-            "",
-            "## Tensor Inventory",
         ]
+        if self.source_brief:
+            lines.extend(["", "## Task Source Brief"])
+            lines.extend(f"- {item}" for item in self.source_brief)
+        lines.extend(["", "## Tensor Inventory"])
         lines.extend(tensor.to_line() for tensor in self.tensors)
         lines.extend(
             [
@@ -66,12 +69,19 @@ class TaskContextSummary:
         return "\n".join(lines) + "\n"
 
 
-def build_task_context(inputs: dict[str, Any], y: np.ndarray, evaluator: Any, *, source: str = "runtime inputs") -> TaskContextSummary:
+def build_task_context(
+    inputs: dict[str, Any],
+    y: np.ndarray,
+    evaluator: Any,
+    *,
+    source: str = "runtime inputs",
+    task_sources: tuple[tuple[str, str], ...] = (),
+) -> TaskContextSummary:
     y = np.asarray(y, dtype=np.float64).reshape(-1)
     positives = int(np.sum(y > 0.5))
     negatives = int(y.shape[0] - positives)
     scorer = (
-        f"Fitness is best configuration ROC-AUC from stratified {int(getattr(evaluator, 'n_splits', 3))}-fold Ridge CV.",
+        f"Fitness is best configuration mean ROC-AUC across stratified {int(getattr(evaluator, 'n_splits', 3))}-fold Ridge CV folds.",
         f"Configuration enumeration is capped at {int(getattr(evaluator, 'max_configurations', 64))} candidates per evaluation.",
         "Features are standardized inside each fold; Ridge is solved by closed-form SVD.",
         f"Alpha is selected from {len(getattr(evaluator, 'alphas', []))} log-scale values using leave-one-out leverage MSE.",
@@ -83,10 +93,11 @@ def build_task_context(inputs: dict[str, Any], y: np.ndarray, evaluator: Any, *,
         "All output alternatives are evaluated and stacked as Ridge features for each configuration.",
         "Graph alternatives should be deterministic over parents, inputs, and fixed globals during one evaluator pass because subpaths are cached.",
         "Globals are persistent trainable parameters; new globals are append-only at mutation time and unused globals may be pruned.",
-        "Mutation documents must preserve DAG validity and use known primitives unless trusted source-backed mutations are explicitly enabled.",
+        "Mutation documents must preserve DAG validity; paper-style source-backed lambda alternatives are first-class when LLM mutation synthesis is enabled.",
     )
     return TaskContextSummary(
         title=f"Clean-room EvoForest task context generated from {source}.",
+        source_brief=_source_brief(task_sources),
         tensors=tuple(_summarize_input(name, value) for name, value in sorted(inputs.items())),
         target_rows=int(y.shape[0]),
         positive_count=positives,
@@ -95,6 +106,16 @@ def build_task_context(inputs: dict[str, Any], y: np.ndarray, evaluator: Any, *,
         scorer=scorer,
         constraints=constraints,
     )
+
+
+def _source_brief(task_sources: tuple[tuple[str, str], ...]) -> tuple[str, ...]:
+    rows: list[str] = []
+    for label, text in task_sources:
+        clean = " ".join(text.strip().split())
+        if not clean:
+            continue
+        rows.append(f"{label}: {clean[:900]}{'...' if len(clean) > 900 else ''}")
+    return tuple(rows)
 
 
 def _summarize_input(name: str, value: Any) -> TensorSummary:

@@ -44,6 +44,7 @@ class GraphMaintenance:
                 signature = (
                     alternative.primitive,
                     alternative.parents,
+                    alternative.source,
                     alternative.description,
                     alternative.tags,
                     alternative.global_refs,

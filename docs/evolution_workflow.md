@@ -24,6 +24,9 @@ Each new run writes:
 - `events.jsonl`: candidate outcomes.
 - `validation_rechecks.jsonl`: explicit recheck records.
 
+Island demo runs keep candidate outcomes in `events.jsonl` and write global-best
+migration records separately to `migrations.jsonl`.
+
 Archive promotion is stricter than the demo loop. A candidate must improve on the
 train split and improve on the validation split. The candidate's graph configuration
 is selected on train, then validation is rechecked with that config fixed.

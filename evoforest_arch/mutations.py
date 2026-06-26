@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import hashlib
 import json
 
 from evoforest_arch.graph import Graph
@@ -115,6 +116,8 @@ class MutationDocument:
     @classmethod
     def from_yaml(cls, text: str) -> "MutationDocument":
         text = extract_mutation_yaml(text)
+        if _looks_like_paper_style_yaml(text):
+            return _from_paper_style_yaml(text)
         data: dict[str, object] = {"hypotheses": [], "nodes": [], "remove": [], "globals": [], "add": [], "rationale": ""}
         section: str | None = None
         for raw_line in text.splitlines():
@@ -274,6 +277,103 @@ def extract_mutation_yaml(text: str) -> str:
         if "add:" in candidate or "remove:" in candidate or "rationale:" in candidate:
             return candidate
     return stripped
+
+
+def _looks_like_paper_style_yaml(text: str) -> bool:
+    lines = [line.rstrip() for line in text.splitlines()]
+    in_add = False
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if not line.startswith(" "):
+            key, _, _value = line.partition(":")
+            in_add = key.strip() == "add"
+            continue
+        if in_add and not stripped.startswith("- ") and stripped.endswith(":"):
+            return True
+    return False
+
+
+def _from_paper_style_yaml(text: str) -> MutationDocument:
+    rationale = ""
+    hypotheses: list[str] = []
+    removals: list[RemoveSpec] = []
+    additions: list[MutationSpec] = []
+    section: str | None = None
+    current_add_node: str | None = None
+    add_counts: dict[str, int] = {}
+
+    for raw_line in text.splitlines():
+        line = raw_line.rstrip()
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if not line.startswith(" "):
+            key, _, value = line.partition(":")
+            section = key.strip()
+            current_add_node = None
+            if section == "rationale" and value.strip():
+                rationale = _yaml_scalar(value.strip())
+            continue
+        if section == "hypotheses" and stripped.startswith("- "):
+            hypotheses.append(_yaml_scalar(stripped[2:].strip()))
+            continue
+        if section == "remove" and stripped.startswith("- "):
+            target, alternative = _split_remove_target(_yaml_scalar(stripped[2:].strip()))
+            removals.append(RemoveSpec(target_node=target, alternative_id=alternative))
+            continue
+        if section == "add":
+            if stripped.endswith(":") and not stripped.startswith("- "):
+                current_add_node = stripped[:-1].strip()
+                continue
+            if stripped.startswith("- ") and current_add_node:
+                item = _yaml_scalar(stripped[2:].strip())
+                count = add_counts.get(current_add_node, 0)
+                add_counts[current_add_node] = count + 1
+                additions.append(
+                    MutationSpec(
+                        kind="add_alternative",
+                        target_node=current_add_node,
+                        primitive="source",
+                        alternative_id=_paper_source_alternative_id(current_add_node, item, count),
+                        parents=(),
+                        source=item,
+                        description="Paper-style source-backed lambda alternative.",
+                    )
+                )
+
+    return MutationDocument(
+        hypotheses=tuple(hypotheses),
+        rationale=rationale,
+        remove=tuple(removals),
+        add=tuple(additions),
+    )
+
+
+def _yaml_scalar(value: str) -> str:
+    value = value.strip()
+    if not value:
+        return ""
+    if value[0] in {"'", '"'}:
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            if len(value) >= 2 and value[-1] == value[0]:
+                return value[1:-1]
+    return value
+
+
+def _split_remove_target(value: str) -> tuple[str, str]:
+    if "." in value:
+        return tuple(value.split(".", maxsplit=1))  # type: ignore[return-value]
+    return "", value
+
+
+def _paper_source_alternative_id(target_node: str, source: str, count: int) -> str:
+    digest = hashlib.sha1(source.encode("utf-8")).hexdigest()[:10]
+    clean_target = "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in target_node).strip("_") or "node"
+    return f"{clean_target}_source_{digest}_{count}"
 
 
 def built_in_mutations() -> list[MutationSpec]:

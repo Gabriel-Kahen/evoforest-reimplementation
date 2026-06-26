@@ -45,7 +45,7 @@ def build_report(output_dir: Path, seed: int = 17, quick: bool = False) -> dict[
         max_configurations=4,
         refine_globals=True,
         refine_steps=1,
-        refine_backend="numpy",
+        refine_backend="auto",
     ).evaluate(build_seed_graph(), dataset.inputs(), dataset.y)
 
     run_dir = output_dir / "artifacts" / "conformance_evolution"
@@ -130,13 +130,13 @@ def build_report(output_dir: Path, seed: int = 17, quick: bool = False) -> dict[
         requirement(
             "global_parameters",
             "Persistent trainable globals are present and referenced by graph alternatives.",
-            {"gate_scale", "projection_vector", "residual_huber_scale"} <= set(graph.globals.trainable_names()),
+            {"gate_scale", "projection_vector"} <= set(graph.globals.trainable_names()) and "residual_huber_scale" in graph.globals.names(),
             {"trainable_globals": graph.globals.trainable_names(), "referenced_globals": sorted(graph.referenced_globals())},
         ),
         requirement(
             "two_phase_evaluation",
-            "Optional global refinement runs before frozen Ridge structural scoring.",
-            refinement.get("enabled") is True and refinement.get("requested_backend") == "numpy",
+            "Paper-mode global refinement uses PyTorch L-BFGS or explicitly reports a skipped torch probe.",
+            refinement.get("requested_backend") == "auto" and refinement.get("backend") == "torch_l_bfgs",
             refinement,
         ),
         requirement(

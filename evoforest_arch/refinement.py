@@ -52,14 +52,10 @@ class GlobalRefiner:
                 return TorchLBFGSRefiner(self.steps, self.backend).refine(graph, inputs, y, config)
             except UnsupportedTorchRefinement as exc:
                 if self.backend == "torch":
-                    loss = self._loss(graph, inputs, y, config)
-                    return RefinementResult(False, 0, loss, loss, 0, graph.globals.trainable_names(), "torch_l_bfgs", self.backend, str(exc))
-                fallback_reason = str(exc)
-            else:
-                fallback_reason = ""
-        else:
-            fallback_reason = ""
-        return self._refine_numpy(graph, inputs, y, config, fallback_reason=fallback_reason)
+                    raise
+                loss = self._loss(graph, inputs, y, config)
+                return RefinementResult(False, 0, loss, loss, 0, graph.globals.trainable_names(), "torch_l_bfgs", self.backend, str(exc))
+        return self._refine_numpy(graph, inputs, y, config)
 
     def _refine_numpy(
         self,
@@ -252,6 +248,29 @@ class TorchLBFGSRefiner:
 
         with torch.no_grad():
             initial_loss = float(loss_value().detach().cpu())
+
+        probe_loss = loss_value()
+        probe_loss.backward()
+        active_with_grad = [
+            name
+            for name, parameter in parameters.items()
+            if parameter.grad is not None
+            and bool(torch.all(torch.isfinite(parameter.grad)))
+            and float(torch.max(torch.abs(parameter.grad)).detach().cpu()) > 1e-12
+        ]
+        optimizer.zero_grad()
+        if not active_with_grad:
+            return RefinementResult(
+                False,
+                0,
+                initial_loss,
+                initial_loss,
+                0,
+                trainable,
+                "torch_l_bfgs",
+                self.requested_backend,
+                "Gradient probe found no active trainable global influence on the selected path.",
+            )
 
         def closure() -> Any:
             optimizer.zero_grad()
