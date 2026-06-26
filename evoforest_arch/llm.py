@@ -17,7 +17,7 @@ from evoforest_arch.agents import EngineerAgent, Hypothesis, ScientistAgent
 from evoforest_arch.evaluator import EvaluationResult
 from evoforest_arch.feedback import feedback_summary, toon_report
 from evoforest_arch.graph import Graph
-from evoforest_arch.mutations import MutationDocument
+from evoforest_arch.mutations import MutationDocument, RemoveSpec
 from evoforest_arch.primitives import PrimitiveRegistry
 
 
@@ -256,7 +256,7 @@ class PromptBuilder:
     )
     max_graph_chars: int = 18000
     registry: PrimitiveRegistry | None = None
-    allow_source: bool = False
+    allow_source: bool = True
 
     def scientist_prompts(
         self,
@@ -268,19 +268,27 @@ class PromptBuilder:
         island: int | None = None,
         max_hypotheses: int = 8,
     ) -> tuple[str, str]:
-        system = self.global_rules()
+        system = "\n".join(
+            [
+                "You are an elite computational scientist and algorithm designer specializing in algorithm evolution, representation learning, and structural optimization.",
+                "Analyze EvoForest graphs, diagnose bottlenecks, and propose high-value structural directions rather than incremental tweaks.",
+                "",
+                "===================== TASK CONTEXT =====================",
+                self.task_context,
+                "========================================================",
+                "",
+                self.global_rules(),
+            ]
+        )
         user = "\n".join(
             [
                 f"Generate {max_hypotheses}-12 structured actionable hypotheses for the next step.",
                 "Do not output code or YAML.",
-                "Each hypothesis should include Hypothesis, Rationale, Expected Improvement, Risk Mode, and a brief self-evaluation.",
+                "Each hypothesis must include Hypothesis, Rationale, Expected Improvement, Risk Mode, and Self-Evaluation scores for Improvement, Creativity, Implementability, and Risk.",
                 f"Step: {step}",
                 f"Island: {island if island is not None else 'single'}",
                 "",
-                "==== TASK CONTEXT ====",
-                self.task_context,
-                "",
-                "==== CURRENT EVOFOREST (JSON WITH STATS) ====",
+                "==== CURRENT EVOFOREST (YAML WITH STATS) ====",
                 self.annotated_graph(graph, result),
                 "",
                 "==== FEATURE DIAGNOSTICS (TOON - PRIMARY EVIDENCE) ====",
@@ -317,20 +325,42 @@ class PromptBuilder:
         schema_lines = [
             "Act as the EvoForest engineer. Select, combine, or reject the scientist hypotheses and emit one structured mutation document.",
             "Output YAML only. Do not wrap the YAML in explanations.",
-            "Use only the schema below; list items are JSON objects so the document remains machine-parseable.",
-            "",
-            "rationale: \"why this mutation is coherent\"",
-            "hypotheses:",
-            "  - \"short hypothesis text\"",
-            "nodes:",
-            "  - {\"name\": \"optional_new_node\", \"kind\": \"intermediate\", \"description\": \"what it computes\"}",
-            "remove:",
-            "  - {\"target_node\": \"node\", \"alternative_id\": \"alt\", \"reason\": \"why it is safe to remove\"}",
-            "globals:",
-            "  - {\"name\": \"new_global\", \"value\": [0.1], \"trainable\": true, \"description\": \"append-only parameter\"}",
-            "add:",
-            "  - {\"kind\": \"add_alternative\", \"target_node\": \"node\", \"primitive\": \"primitive_name\", \"alternative_id\": \"unique_alt_id\", \"parents\": [\"parent_node\"], \"description\": \"what changes\"}",
         ]
+        if self.allow_source:
+            schema_lines.extend(
+                [
+                    "Prefer the paper-style lambda schema below for executable graph edits.",
+                    "",
+                    "remove:",
+                    "  - node.alternative_id",
+                    "add:",
+                    "  output:",
+                    "    - \"lambda ctx, values: <expression>\"",
+                    "",
+                    "You may also use the extended machine schema below when a mutation needs explicit parents, nodes, or globals.",
+                ]
+            )
+        else:
+            schema_lines.extend(
+                [
+                    "Use the extended machine schema below. Source-backed lambda edits are disabled in this run.",
+                ]
+            )
+        schema_lines.extend(
+            [
+                "rationale: \"why this mutation is coherent\"",
+                "hypotheses:",
+                "  - \"short hypothesis text\"",
+                "nodes:",
+                "  - {\"name\": \"optional_new_node\", \"kind\": \"intermediate\", \"description\": \"what it computes\"}",
+                "remove:",
+                "  - {\"target_node\": \"node\", \"alternative_id\": \"alt\", \"reason\": \"why it is safe to remove\"}",
+                "globals:",
+                "  - {\"name\": \"new_global\", \"value\": [0.1], \"trainable\": true, \"description\": \"append-only parameter\"}",
+                "add:",
+                "  - {\"kind\": \"add_alternative\", \"target_node\": \"node\", \"primitive\": \"primitive_name\", \"alternative_id\": \"unique_alt_id\", \"parents\": [\"parent_node\"], \"description\": \"what changes\"}",
+            ]
+        )
         if self.allow_source:
             schema_lines.extend(
                 [
@@ -339,6 +369,9 @@ class PromptBuilder:
                     "  \"source\": \"lambda ctx, values: <expression>\"",
                     "  \"global_refs\": [\"optional_existing_or_new_global\"]",
                     "The lambda receives ctx and values, where values maps parent node names to evaluated parent outputs.",
+                    "Available lambda symbols: np, math, FeatureBlock, CallableFamily, ResidualWeightRule.",
+                    "Use ctx.read_input('series'), ctx.read_input('boundary'), or declared parent values as needed.",
+                    "Paper-style nested lambda entries are treated as source-backed alternatives with no explicit parents; use ctx.read_input(...) in those lambdas.",
                 ]
             )
         user = "\n".join(
@@ -354,14 +387,13 @@ class PromptBuilder:
                 f"Step: {step}",
                 f"Island: {island if island is not None else 'single'}",
                 "",
-                "==== CURRENT EVOFOREST (JSON WITH STATS) ====",
+                "==== CURRENT EVOFOREST (YAML WITH STATS) ====",
                 self.annotated_graph(graph, result),
                 "",
                 "==== EXECUTION ERRORS FROM PREVIOUS ATTEMPTS ====",
                 execution_errors.strip() or "(none)",
                 "",
-                "==== EXPERIMENT LOG (MEMORANDUM, BACKGROUND ONLY) ====",
-                memorandum.strip() or "(no memorandum yet)",
+                "Do not rely on the raw memorandum here. TOON and memorandum evidence should reach this stage through the scientist hypotheses.",
             ]
         )
         return system, user
@@ -383,6 +415,46 @@ class PromptBuilder:
             ]
         )
 
+    def memorandum_prompts(
+        self,
+        result: EvaluationResult,
+        *,
+        previous_memorandum: str = "",
+        history: Sequence[str] = (),
+        error_log: Sequence[str] = (),
+        step: int = 0,
+        island: int | None = None,
+    ) -> tuple[str, str]:
+        system = "\n".join(
+            [
+                "You maintain an experiment log for one island of an evolutionary EvoForest search.",
+                "Record observations: what happened, what changed, and what is noteworthy.",
+                "Do not add hypotheses or recommendations.",
+                "Use only values present in TOON diagnostics or mutation outcomes. Never fabricate numbers.",
+                "Keep the memorandum under 500 words and include these sections exactly:",
+                "[OUTCOME HISTORY], [STATE], [WHAT WORKS], [WHAT FAILED], [ERROR LOG].",
+            ]
+        )
+        user = "\n".join(
+            [
+                f"Step: {step}",
+                f"Island: {island if island is not None else 'single'}",
+                "",
+                "==== PREVIOUS MEMORANDUM ====",
+                previous_memorandum.strip() or "(none)",
+                "",
+                "==== RECENT OUTCOMES ====",
+                "\n".join(history[-8:]) if history else "- No mutation outcomes recorded yet.",
+                "",
+                "==== RECENT EXECUTION ERRORS ====",
+                "\n".join(error_log[-8:]) if error_log else "- No runtime errors recorded.",
+                "",
+                "==== FEATURE DIAGNOSTICS (TOON) ====",
+                toon_report(result),
+            ]
+        )
+        return system, user
+
     def annotated_graph(self, graph: Graph, result: EvaluationResult) -> str:
         payload = {
             "graph": graph.to_dict(),
@@ -390,7 +462,7 @@ class PromptBuilder:
             "best_config": result.config,
             "feedback": feedback_summary(result),
         }
-        text = json.dumps(payload, indent=2, sort_keys=True)
+        text = _to_yaml_like(payload)
         if len(text) <= self.max_graph_chars:
             return text
         return text[: self.max_graph_chars] + "\n... [truncated]"
@@ -466,7 +538,7 @@ class LLMEngineerAgent(EngineerAgent):
         prompt_builder: PromptBuilder | None = None,
         registry: PrimitiveRegistry | None = None,
         temperature: float = 0.0,
-        allow_source: bool = False,
+        allow_source: bool = True,
     ) -> None:
         self.client = client
         self.prompt_builder = prompt_builder or PromptBuilder(allow_source=allow_source)
@@ -501,7 +573,7 @@ class LLMEngineerAgent(EngineerAgent):
         try:
             response = self.client.complete(system, user, temperature=self.temperature)
             document = MutationDocument.from_yaml(response)
-            document = self._fill_missing_fields(document, hypotheses)
+            document = self._fill_missing_fields(graph, document, hypotheses)
             self._validate_supported_document(graph, document)
             if not (document.nodes or document.add or document.remove or document.globals):
                 raise ValueError("LLM engineer returned an empty mutation document.")
@@ -518,13 +590,13 @@ class LLMEngineerAgent(EngineerAgent):
         return records
 
     @staticmethod
-    def _fill_missing_fields(document: MutationDocument, hypotheses: tuple[Hypothesis, ...]) -> MutationDocument:
+    def _fill_missing_fields(graph: Graph, document: MutationDocument, hypotheses: tuple[Hypothesis, ...]) -> MutationDocument:
         return MutationDocument(
             hypotheses=document.hypotheses or tuple(item.to_text() for item in hypotheses),
             rationale=document.rationale or "LLM engineer selected a structured mutation from scientist hypotheses.",
             nodes=document.nodes,
             add=document.add,
-            remove=document.remove,
+            remove=tuple(_resolve_remove_spec(graph, spec) for spec in document.remove),
             globals=document.globals,
         )
 
@@ -563,6 +635,62 @@ class LLMEngineerAgent(EngineerAgent):
                     raise ValueError(f"Parent node {parent!r} does not exist.")
 
 
+class LLMMemorandumAgent:
+    def __init__(
+        self,
+        client: LLMClient,
+        *,
+        prompt_builder: PromptBuilder | None = None,
+        temperature: float = 0.0,
+    ) -> None:
+        self.client = client
+        self.prompt_builder = prompt_builder or PromptBuilder()
+        self.temperature = float(temperature)
+        self._prompt_records: list[PromptRecord] = []
+
+    def update(
+        self,
+        result: EvaluationResult,
+        *,
+        previous_memorandum: str = "",
+        history: Sequence[str] = (),
+        error_log: Sequence[str] = (),
+        step: int = 0,
+        island: int | None = None,
+    ) -> str:
+        system, user = self.prompt_builder.memorandum_prompts(
+            result,
+            previous_memorandum=previous_memorandum,
+            history=history,
+            error_log=error_log,
+            step=step,
+            island=island,
+        )
+        response = ""
+        error = ""
+        try:
+            response = self.client.complete(system, user, temperature=self.temperature)
+            memorandum = response.strip()
+            missing = [
+                section
+                for section in ("[OUTCOME HISTORY]", "[STATE]", "[WHAT WORKS]", "[WHAT FAILED]", "[ERROR LOG]")
+                if section not in memorandum
+            ]
+            if missing:
+                raise ValueError(f"LLM memorandum response is missing required sections: {', '.join(missing)}.")
+            return memorandum + "\n"
+        except Exception as exc:
+            error = str(exc)
+            raise
+        finally:
+            self._prompt_records.append(PromptRecord("memorandum", system, user, response, error))
+
+    def pop_prompt_records(self) -> tuple[PromptRecord, ...]:
+        records = tuple(self._prompt_records)
+        self._prompt_records.clear()
+        return records
+
+
 def parse_hypotheses(text: str, graph: Graph, max_hypotheses: int) -> tuple[Hypothesis, ...]:
     blocks = _hypothesis_blocks(text)
     hypotheses: list[Hypothesis] = []
@@ -578,11 +706,28 @@ def parse_hypotheses(text: str, graph: Graph, max_hypotheses: int) -> tuple[Hypo
                 rationale=_field(clean, "Rationale") or clean,
                 expected_improvement=_field(clean, "Expected Improvement") or "improved complementary structure or pruning",
                 risk=_field(clean, "Risk Mode") or _field(clean, "Risk") or "Balanced",
+                improvement_score=_score_field(clean, "Improvement", 5),
+                creativity_score=_score_field(clean, "Creativity", 5),
+                implementability_score=_score_field(clean, "Implementability", 5),
+                risk_score=_score_field(clean, "Risk", 5),
             )
         )
         if len(hypotheses) >= max_hypotheses:
             break
     return tuple(hypotheses)
+
+
+def _resolve_remove_spec(graph: Graph, spec: RemoveSpec) -> RemoveSpec:
+    if spec.target_node:
+        return spec
+    matches = [
+        node_name
+        for node_name, node in graph.nodes.items()
+        if any(alternative.id == spec.alternative_id for alternative in node.alternatives)
+    ]
+    if len(matches) != 1:
+        return spec
+    return RemoveSpec(target_node=matches[0], alternative_id=spec.alternative_id, reason=spec.reason)
 
 
 def _hypothesis_blocks(text: str) -> list[str]:
@@ -601,12 +746,45 @@ def _field(text: str, name: str) -> str:
     return match.group(1).strip(" \n-") if match else ""
 
 
+def _score_field(text: str, name: str, default: int) -> int:
+    matches = re.findall(rf"{re.escape(name)}\s*(?:\(|:)?\s*(\d{{1,2}})(?:\s*/\s*10)?", text, flags=re.I)
+    if not matches:
+        return int(default)
+    value = max(1, min(10, int(matches[-1])))
+    return value
+
+
 def _infer_target_node(text: str, graph: Graph) -> str:
     lowered = text.lower()
     for name in sorted(graph.nodes, key=len, reverse=True):
         if re.search(rf"\b{re.escape(name.lower())}\b", lowered):
             return name
     return "output" if "output" in graph.nodes else next(iter(graph.nodes))
+
+
+def _to_yaml_like(value: object, indent: int = 0) -> str:
+    prefix = "  " * indent
+    if isinstance(value, dict):
+        rows: list[str] = []
+        for key, item in value.items():
+            if isinstance(item, (dict, list, tuple)):
+                rows.append(f"{prefix}{key}:")
+                rows.append(_to_yaml_like(item, indent + 1))
+            else:
+                rows.append(f"{prefix}{key}: {json.dumps(item)}")
+        return "\n".join(rows)
+    if isinstance(value, (list, tuple)):
+        if not value:
+            return f"{prefix}[]"
+        rows = []
+        for item in value:
+            if isinstance(item, (dict, list, tuple)):
+                rows.append(f"{prefix}-")
+                rows.append(_to_yaml_like(item, indent + 1))
+            else:
+                rows.append(f"{prefix}- {json.dumps(item)}")
+        return "\n".join(rows)
+    return f"{prefix}{json.dumps(value)}"
 
 
 def _post_json(

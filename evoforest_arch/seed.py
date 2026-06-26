@@ -22,7 +22,7 @@ def build_seed_graph() -> Graph:
     graph.globals.add(
         "residual_huber_scale",
         [1.0],
-        trainable=True,
+        trainable=False,
         description="Shared threshold for residual-based Ridge reweighting.",
     )
 

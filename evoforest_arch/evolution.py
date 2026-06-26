@@ -95,16 +95,22 @@ class EvolutionLoop:
         mutation_engine: MutationEngine | None = None,
         scientist: ScientistAgent | None = None,
         engineer: EngineerAgent | None = None,
+        memorandum_agent: object | None = None,
         task_context: str = "",
+        task_sources: tuple[tuple[str, str], ...] = (),
         seed: int = 0,
+        repair_attempts: int = 1,
     ) -> None:
         self.graph = graph
         self.evaluator = evaluator or RidgeEvaluator(seed=seed)
         self.mutation_engine = mutation_engine or MutationEngine()
         self.scientist = scientist or ScientistAgent()
         self.engineer = engineer or EngineerAgent()
+        self.memorandum_agent = memorandum_agent
         self.task_context = task_context
+        self.task_sources = task_sources
         self.rng = np.random.default_rng(seed)
+        self.repair_attempts = max(0, int(repair_attempts))
 
     def run(
         self,
@@ -116,6 +122,7 @@ class EvolutionLoop:
         output_dir.mkdir(parents=True, exist_ok=True)
         self._prepare_task_context(output_dir, inputs, y)
         self._reset_archive(output_dir)
+        self._reset_migration_log(output_dir)
         events_path = output_dir / "events.jsonl"
         current_graph = self.graph.clone()
         best_result = self.evaluator.evaluate(current_graph, inputs, y, update_graph=True)
@@ -141,6 +148,20 @@ class EvolutionLoop:
                     self._write_prompt_records(output_dir, step)
                 self._write_mutation_document(output_dir, step, document)
                 outcome = self._try_evaluate_candidate(current_graph, document, inputs, y)
+                if outcome.failed:
+                    document, outcome = self._repair_candidate(
+                        current_graph,
+                        best_result,
+                        step,
+                        island=None,
+                        output_dir=output_dir,
+                        document=document,
+                        outcome=outcome,
+                        inputs=inputs,
+                        y=y,
+                        memorandum=memorandum,
+                        errors=errors,
+                    )
                 if outcome.failed:
                     event = self._failed_event(
                         step=step,
@@ -210,6 +231,7 @@ class EvolutionLoop:
         output_dir.mkdir(parents=True, exist_ok=True)
         task_context = self._prepare_task_context(output_dir, inputs, y)
         self._reset_archive(output_dir)
+        self._reset_migration_log(output_dir)
         events_path = output_dir / "events.jsonl"
         islands = max(1, int(islands))
         steps_per_island = max(0, int(steps_per_island))
@@ -263,6 +285,20 @@ class EvolutionLoop:
                 self._write_mutation_document(output_dir, global_step, document, island=state.island)
                 outcome = self._try_evaluate_candidate(state.current_graph, document, inputs, y)
                 if outcome.failed:
+                    document, outcome = self._repair_candidate(
+                        state.current_graph,
+                        state.best_result,
+                        global_step,
+                        island=state.island,
+                        output_dir=output_dir,
+                        document=document,
+                        outcome=outcome,
+                        inputs=inputs,
+                        y=y,
+                        memorandum=memorandum,
+                        errors=state.errors,
+                    )
+                if outcome.failed:
                     event = self._failed_event(
                         step=global_step,
                         mode="sequential_island",
@@ -314,7 +350,8 @@ class EvolutionLoop:
                             step=global_step,
                             island=state.island,
                         )
-                if state.best_result.auc >= global_best_result.auc:
+                new_global_best = state.best_result.auc > global_best_result.auc
+                if new_global_best:
                     global_best_graph = state.best_graph.clone()
                     global_best_result = state.best_result
                     self._write_checkpoint(output_dir, global_best_graph, global_best_result, step=global_step, island=state.island)
@@ -328,12 +365,27 @@ class EvolutionLoop:
                         mode="sequential_island",
                         island=state.island,
                     )
+                    global_best_graph, global_best_result, migration = self._migrate_global_best(
+                        states,
+                        global_best_graph,
+                        global_best_result,
+                        source_island=state.island,
+                        global_best_version=global_best_version,
+                    )
+                    if migration:
+                        migration["step"] = global_step
+                        self._write_migration_event(output_dir, migration)
                 if migration_interval > 0 and global_step % migration_interval == 0:
-                    weakest = min(states, key=lambda item: item.best_result.auc)
-                    if weakest.best_result.auc < global_best_result.auc:
-                        weakest.current_graph = global_best_graph.clone()
-                        weakest.best_graph = global_best_graph.clone()
-                        weakest.best_result = global_best_result
+                    global_best_graph, global_best_result, migration = self._migrate_global_best(
+                        states,
+                        global_best_graph,
+                        global_best_result,
+                        source_island=state.island,
+                        global_best_version=global_best_version,
+                    )
+                    if migration:
+                        migration["step"] = global_step
+                        self._write_migration_event(output_dir, migration)
 
                 event = EvolutionEvent(
                     step=global_step,
@@ -394,6 +446,7 @@ class EvolutionLoop:
         output_dir.mkdir(parents=True, exist_ok=True)
         task_context = self._prepare_task_context(output_dir, inputs, y)
         self._reset_archive(output_dir)
+        self._reset_migration_log(output_dir)
         events_path = output_dir / "events.jsonl"
         islands = max(1, int(islands))
         steps_per_island = max(0, int(steps_per_island))
@@ -456,6 +509,22 @@ class EvolutionLoop:
                         global_step += 1
                         event_step = global_step
                         if outcome.failed:
+                            island_dir = output_dir / f"island_{state.island}"
+                            memorandum = self._read_memorandum(island_dir)
+                            document, outcome = self._repair_candidate(
+                                state.current_graph,
+                                state.best_result,
+                                event_step,
+                                island=state.island,
+                                output_dir=output_dir,
+                                document=document,
+                                outcome=outcome,
+                                inputs=inputs,
+                                y=y,
+                                memorandum=memorandum,
+                                errors=state.errors,
+                            )
+                        if outcome.failed:
                             event = self._failed_event(
                                 step=event_step,
                                 mode="async_island",
@@ -510,7 +579,8 @@ class EvolutionLoop:
                                     step=event_step,
                                     island=state.island,
                                 )
-                        if state.best_result.auc >= global_best_result.auc:
+                        new_global_best = state.best_result.auc > global_best_result.auc
+                        if new_global_best:
                             global_best_graph = state.best_graph.clone()
                             global_best_result = state.best_result
                             self._write_checkpoint(output_dir, global_best_graph, global_best_result, step=event_step, island=state.island)
@@ -524,8 +594,29 @@ class EvolutionLoop:
                                 mode="async_island",
                                 island=state.island,
                             )
+                            global_best_graph, global_best_result, migration = self._migrate_global_best(
+                                states,
+                                global_best_graph,
+                                global_best_result,
+                                source_island=state.island,
+                                global_best_version=global_best_version,
+                            )
+                            if migration:
+                                migration["step"] = event_step
+                                migration["round"] = round_index
+                                self._write_migration_event(output_dir, migration)
                         if migration_interval > 0 and event_step % migration_interval == 0:
-                            global_best_graph, global_best_result = self._migrate_global_best(states, global_best_graph, global_best_result)
+                            global_best_graph, global_best_result, migration = self._migrate_global_best(
+                                states,
+                                global_best_graph,
+                                global_best_result,
+                                source_island=state.island,
+                                global_best_version=global_best_version,
+                            )
+                            if migration:
+                                migration["step"] = event_step
+                                migration["round"] = round_index
+                                self._write_migration_event(output_dir, migration)
 
                         event = EvolutionEvent(
                             step=event_step,
@@ -586,7 +677,6 @@ class EvolutionLoop:
         engineer_kwargs = self._supported_kwargs(
             self.engineer.synthesize,
             {
-                "memorandum": memorandum,
                 "execution_errors": execution_errors,
             },
         )
@@ -620,6 +710,62 @@ class EvolutionLoop:
         except Exception as exc:
             return CandidateOutcome(error=self._format_exception(exc))
 
+    def _repair_candidate(
+        self,
+        base_graph: Graph,
+        result: EvaluationResult,
+        step: int,
+        *,
+        island: int | None,
+        output_dir: pathlib.Path,
+        document: MutationDocument,
+        outcome: CandidateOutcome,
+        inputs: dict[str, object],
+        y: np.ndarray,
+        memorandum: str,
+        errors: list[str],
+    ) -> tuple[MutationDocument, CandidateOutcome]:
+        if self.repair_attempts <= 0 or not hasattr(self.engineer, "client"):
+            return document, outcome
+        current_document = document
+        current_outcome = outcome
+        for attempt in range(1, self.repair_attempts + 1):
+            if current_outcome.error:
+                errors.append(f"- step={step}{' island=' + str(island) if island is not None else ''} repair attempt {attempt}: {current_outcome.error}")
+                del errors[:-20]
+            repair_errors = "\n".join(
+                row
+                for row in (
+                    self._error_context(errors),
+                    f"- failed candidate repair context: {current_outcome.error or 'Unknown candidate failure.'}",
+                )
+                if row
+            )
+            try:
+                repair_document = self._propose_document(
+                    base_graph,
+                    result,
+                    step,
+                    island=island,
+                    memorandum=memorandum,
+                    execution_errors=repair_errors,
+                )
+            except Exception as exc:
+                current_outcome = CandidateOutcome(error=self._format_exception(exc))
+                if current_outcome.error:
+                    errors.append(f"- step={step}{' island=' + str(island) if island is not None else ''} repair attempt {attempt} proposal failed: {current_outcome.error}")
+                    del errors[:-20]
+                break
+            finally:
+                self._write_prompt_records(output_dir, step, island=island)
+            self._write_mutation_document(output_dir, step, repair_document, island=island, attempt=attempt)
+            repair_outcome = self._try_evaluate_candidate(base_graph, repair_document, inputs, y)
+            current_document = repair_document
+            current_outcome = repair_outcome
+            if not repair_outcome.failed:
+                break
+        return current_document, current_outcome
+
     @staticmethod
     async def _with_candidate_metadata(
         state: IslandState,
@@ -635,13 +781,25 @@ class EvolutionLoop:
         states: list[IslandState],
         global_best_graph: Graph,
         global_best_result: EvaluationResult,
-    ) -> tuple[Graph, EvaluationResult]:
+        *,
+        source_island: int | None = None,
+        global_best_version: int | None = None,
+    ) -> tuple[Graph, EvaluationResult, dict[str, object] | None]:
         weakest = min(states, key=lambda item: item.best_result.auc)
         if weakest.best_result.auc < global_best_result.auc:
+            previous_score = float(weakest.best_result.auc)
             weakest.current_graph = global_best_graph.clone()
             weakest.best_graph = global_best_graph.clone()
             weakest.best_result = global_best_result
-        return global_best_graph, global_best_result
+            return global_best_graph, global_best_result, {
+                "mode": "migration",
+                "source_island": source_island,
+                "target_island": weakest.island,
+                "global_best_version": global_best_version,
+                "previous_best_score": previous_score,
+                "global_best_score": float(global_best_result.auc),
+            }
+        return global_best_graph, global_best_result, None
 
     def _salvage(
         self,
@@ -712,6 +870,17 @@ class EvolutionLoop:
             index_path.unlink()
 
     @staticmethod
+    def _reset_migration_log(output_dir: pathlib.Path) -> None:
+        path = output_dir / "migrations.jsonl"
+        if path.exists():
+            path.unlink()
+
+    @staticmethod
+    def _write_migration_event(output_dir: pathlib.Path, migration: dict[str, object]) -> None:
+        with (output_dir / "migrations.jsonl").open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(migration) + "\n")
+
+    @staticmethod
     def _write_archive_entry(
         output_dir: pathlib.Path,
         graph: Graph,
@@ -754,7 +923,7 @@ class EvolutionLoop:
     def _prepare_task_context(self, output_dir: pathlib.Path, inputs: dict[str, object], y: np.ndarray) -> str:
         context = self.task_context.strip()
         if not context:
-            context = build_task_context(inputs, y, self.evaluator, source="runtime inputs").to_text()
+            context = build_task_context(inputs, y, self.evaluator, source="runtime inputs", task_sources=self.task_sources).to_text()
         self._write_task_context(output_dir, context)
         self._install_task_context(context)
         return context
@@ -765,7 +934,7 @@ class EvolutionLoop:
         (output_dir / "task_context.md").write_text(context if context.endswith("\n") else context + "\n", encoding="utf-8")
 
     def _install_task_context(self, context: str) -> None:
-        for agent in (self.scientist, self.engineer):
+        for agent in (self.scientist, self.engineer, self.memorandum_agent):
             prompt_builder = getattr(agent, "prompt_builder", None)
             if prompt_builder is None or not hasattr(prompt_builder, "task_context"):
                 continue
@@ -773,13 +942,42 @@ class EvolutionLoop:
             if self.task_context or current.startswith(DEFAULT_TASK_CONTEXT_PREFIX):
                 prompt_builder.task_context = context
 
-    @staticmethod
     def _write_memorandum(
+        self,
         output_dir: pathlib.Path,
         result: EvaluationResult,
         history: list[str] | None = None,
         error_log: list[str] | None = None,
+        step: int = 0,
+        island: int | None = None,
     ) -> None:
+        if self.memorandum_agent is not None:
+            update = getattr(self.memorandum_agent, "update", None)
+            if not callable(update):
+                raise TypeError("memorandum_agent must provide an update(...) method.")
+            previous = self._read_memorandum(output_dir)
+            text = update(
+                result,
+                previous_memorandum=previous,
+                history=history or [],
+                error_log=error_log or [],
+                step=step,
+                island=island,
+            )
+            output_dir.mkdir(parents=True, exist_ok=True)
+            (output_dir / "memorandum.md").write_text(text if text.endswith("\n") else text + "\n", encoding="utf-8")
+            self._write_prompt_records(output_dir, step, island)
+            return
+        text = self._deterministic_memorandum_text(result, history, error_log)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "memorandum.md").write_text(text, encoding="utf-8")
+
+    @staticmethod
+    def _deterministic_memorandum_text(
+        result: EvaluationResult,
+        history: list[str] | None = None,
+        error_log: list[str] | None = None,
+    ) -> str:
         feedback = feedback_summary(result)
         lines = [
             "# Evolution Memorandum",
@@ -795,8 +993,7 @@ class EvolutionLoop:
         lines.extend(EvolutionLoop._memorandum_failed(history or [], feedback))
         lines.extend(["", "[ERROR LOG]"])
         lines.extend((error_log or [])[-8:] or ["- No runtime errors recorded."])
-        lines.extend(["", "TOON diagnostics:", "```", toon_report(result), "```"])
-        (output_dir / "memorandum.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return "\n".join(lines) + "\n"
 
     @staticmethod
     def _memorandum_state_lines(result: EvaluationResult, feedback: dict[str, object]) -> list[str]:
@@ -883,11 +1080,18 @@ class EvolutionLoop:
         return lines or ["- No rejected, failed, redundant, or unstable patterns recorded yet."]
 
     @staticmethod
-    def _write_mutation_document(output_dir: pathlib.Path, step: int, document: MutationDocument, island: int | None = None) -> None:
+    def _write_mutation_document(
+        output_dir: pathlib.Path,
+        step: int,
+        document: MutationDocument,
+        island: int | None = None,
+        attempt: int = 0,
+    ) -> None:
         mutation_dir = output_dir / "mutations"
         mutation_dir.mkdir(parents=True, exist_ok=True)
         prefix = f"island_{island}_" if island is not None else ""
-        (mutation_dir / f"{prefix}step_{step:04d}.yaml").write_text(document.to_yaml(), encoding="utf-8")
+        suffix = f"_repair_{attempt:02d}" if attempt else ""
+        (mutation_dir / f"{prefix}step_{step:04d}{suffix}.yaml").write_text(document.to_yaml(), encoding="utf-8")
 
     @staticmethod
     def _read_memorandum(output_dir: pathlib.Path) -> str:
@@ -898,7 +1102,7 @@ class EvolutionLoop:
 
     def _write_prompt_records(self, output_dir: pathlib.Path, step: int, island: int | None = None) -> None:
         records = []
-        for source in (self.scientist, self.engineer):
+        for source in (self.scientist, self.engineer, self.memorandum_agent):
             drain = getattr(source, "pop_prompt_records", None)
             if callable(drain):
                 records.extend(drain())

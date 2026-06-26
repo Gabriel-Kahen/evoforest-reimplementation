@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import math
 from typing import Any
 
@@ -66,6 +67,7 @@ def compile_lambda_source(source: str) -> object:
     expr = source.strip()
     if not expr.startswith("lambda "):
         raise ValueError("Source alternatives must be Python lambda expressions accepting (ctx, values).")
+    _validate_lambda_ast(expr)
     namespace = {
         "__builtins__": SAFE_BUILTINS,
         "np": np,
@@ -78,3 +80,22 @@ def compile_lambda_source(source: str) -> object:
     if not callable(compiled):
         raise TypeError("Source alternative did not evaluate to a callable.")
     return compiled
+
+
+def _validate_lambda_ast(source: str) -> None:
+    try:
+        tree = ast.parse(source, mode="eval")
+    except SyntaxError as exc:
+        raise ValueError(f"Invalid source lambda syntax: {exc}") from exc
+    if not isinstance(tree.body, ast.Lambda):
+        raise ValueError("Source alternatives must parse to one Python lambda expression.")
+    args = [arg.arg for arg in tree.body.args.args]
+    if args[:2] != ["ctx", "values"]:
+        raise ValueError("Source lambda must accept ctx and values as its first two arguments.")
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom, ast.Global, ast.Nonlocal, ast.NamedExpr, ast.Await, ast.Yield, ast.YieldFrom)):
+            raise ValueError(f"Unsupported source lambda syntax: {type(node).__name__}.")
+        if isinstance(node, ast.Attribute) and node.attr.startswith("__"):
+            raise ValueError("Source lambda may not access dunder attributes.")
+        if isinstance(node, ast.Name) and node.id.startswith("__"):
+            raise ValueError("Source lambda may not access dunder names.")

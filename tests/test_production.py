@@ -4,6 +4,8 @@ from dataclasses import replace
 import json
 
 from evoforest_arch.graph_io import graph_from_path
+from evoforest_arch.llm import LLMEngineerAgent, LLMMemorandumAgent, LLMScientistAgent, StaticLLMClient
+from evoforest_arch.mutations import MutationDocument, MutationSpec
 from evoforest_arch.production import ProductionConfig, ProductionEvolutionRunner, export_best_graph, inspect_run, recheck_run
 
 
@@ -18,6 +20,23 @@ def small_config(tmp_path, *, steps: int = 1, seed: int = 41, **kwargs: object) 
         max_configurations=4,
         irls_steps=1,
         **kwargs,
+    )
+
+
+def paper_memorandum(label: str) -> str:
+    return "\n".join(
+        [
+            "[OUTCOME HISTORY]",
+            f"- {label} outcome.",
+            "[STATE]",
+            f"- {label} state.",
+            "[WHAT WORKS]",
+            "- Valid graph candidates are retained.",
+            "[WHAT FAILED]",
+            "- Invalid candidates are recorded.",
+            "[ERROR LOG]",
+            "- No runtime errors recorded.",
+        ]
     )
 
 
@@ -97,3 +116,63 @@ def test_strict_production_promotion_does_not_archive_ties_or_small_deltas(tmp_p
     assert events[0]["accepted"] is False
     assert len(archive_rows) == 1
     assert state["archive_version"] == 0
+
+
+def test_production_llm_repairs_failed_source_and_uses_memorandum_agent(tmp_path) -> None:
+    config = small_config(tmp_path, steps=1, seed=47, allow_source_mutations=True)
+    bad_document = MutationDocument(
+        hypotheses=("Try a source alternative that fails at runtime.",),
+        rationale="Exercise production repair feedback.",
+        add=(
+            MutationSpec(
+                kind="add_alternative",
+                target_node="output",
+                primitive="source",
+                alternative_id="production_bad_source_output",
+                parents=("segment_stats",),
+                source="lambda ctx, values: values['missing_parent']",
+                description="Intentional production runtime failure.",
+            ),
+        ),
+    )
+    repair_document = MutationDocument(
+        hypotheses=("Repair with a registry-backed spectral alternative.",),
+        rationale="Use a known primitive after the source failure.",
+        add=(
+            MutationSpec(
+                kind="add_alternative",
+                target_node="shape_stats",
+                primitive="spectral_basic",
+                alternative_id="production_spectral_after_error",
+                parents=("series",),
+                description="Valid production repair after runtime failure.",
+            ),
+        ),
+    )
+    client = StaticLLMClient(
+        (
+            paper_memorandum("initial"),
+            "Hypothesis: Add a failing source output.\nRationale: Exercise failures.\nExpected Improvement: none.\nRisk Mode: Risky.",
+            bad_document.to_yaml(),
+            "Hypothesis: Use a safer shape_stats primitive.\nRationale: Prior source failed.\nExpected Improvement: recover valid search.\nRisk Mode: Conservative.",
+            repair_document.to_yaml(),
+            paper_memorandum("final"),
+        )
+    )
+
+    ProductionEvolutionRunner(
+        config,
+        scientist=LLMScientistAgent(client),
+        engineer=LLMEngineerAgent(client, allow_source=True),
+        memorandum_agent=LLMMemorandumAgent(client),
+    ).run()
+
+    run_dir = config.output_dir
+    events = [json.loads(line) for line in (run_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert len(events) == 1
+    assert events[0].get("failed") is not True
+    assert events[0]["mutation"]["add"][0]["alternative_id"] == "production_spectral_after_error"
+    assert (run_dir / "mutations" / "step_0001_repair_01.yaml").exists()
+    prompt_names = {path.name for path in (run_dir / "prompts").glob("*.md")}
+    assert any("memorandum" in name for name in prompt_names)
+    assert "KeyError" in str(client.requests[4]["user_prompt"])

@@ -10,6 +10,7 @@ from evoforest_arch.evolution import EvolutionLoop
 from evoforest_arch.llm import (
     DEFAULT_ISLAND_TEMPERATURES,
     LLMEngineerAgent,
+    LLMMemorandumAgent,
     LLMScientistAgent,
     PromptBuilder,
     SUPPORTED_LLM_PROVIDERS,
@@ -48,7 +49,8 @@ def main(argv: list[str] | None = None) -> int:
     demo.add_argument("--folds", type=int, default=3)
     demo.add_argument("--max-configurations", type=int, default=64)
     demo.add_argument("--irls-steps", type=int, default=2)
-    demo.add_argument("--refine-globals", action="store_true")
+    demo.add_argument("--refine-globals", dest="refine_globals", action="store_true", default=True)
+    demo.add_argument("--no-refine-globals", dest="refine_globals", action="store_false")
     demo.add_argument("--refine-steps", type=int, default=20)
     demo.add_argument("--refine-backend", choices=("auto", "numpy", "torch"), default="auto")
     demo.add_argument("--islands", type=int, default=1)
@@ -69,6 +71,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     demo.add_argument("--llm-engineer-temperature", type=float, default=0.0)
     demo.add_argument("--task-context-file", type=pathlib.Path, default=None)
+    demo.add_argument("--task-source-file", action="append", type=pathlib.Path, default=[])
     demo.add_argument("--allow-source-mutations", action="store_true")
     demo.add_argument("--output", type=pathlib.Path, default=pathlib.Path("runs/demo"))
     demo.set_defaults(func=run_demo)
@@ -86,7 +89,8 @@ def main(argv: list[str] | None = None) -> int:
     evolve.add_argument("--folds", type=int, default=3)
     evolve.add_argument("--max-configurations", type=int, default=64)
     evolve.add_argument("--irls-steps", type=int, default=2)
-    evolve.add_argument("--refine-globals", action="store_true")
+    evolve.add_argument("--refine-globals", dest="refine_globals", action="store_true", default=True)
+    evolve.add_argument("--no-refine-globals", dest="refine_globals", action="store_false")
     evolve.add_argument("--refine-steps", type=int, default=20)
     evolve.add_argument("--refine-backend", choices=("auto", "numpy", "torch"), default="auto")
     evolve.add_argument("--min-train-improvement", type=float, default=1e-6)
@@ -106,6 +110,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     evolve.add_argument("--llm-engineer-temperature", type=float, default=0.0)
     evolve.add_argument("--task-context-file", type=pathlib.Path, default=None)
+    evolve.add_argument("--task-source-file", action="append", type=pathlib.Path, default=[])
     evolve.add_argument("--resume", action="store_true")
     evolve.add_argument("--output", type=pathlib.Path, required=True)
     evolve.set_defaults(func=run_evolve)
@@ -146,15 +151,19 @@ def run_demo(args: argparse.Namespace) -> int:
         refine_backend=args.refine_backend,
     )
     task_context = args.task_context_file.read_text(encoding="utf-8") if args.task_context_file is not None else ""
-    mutation_engine = MutationEngine(allow_source=args.allow_source_mutations)
-    scientist, engineer = build_llm_agents(args, task_context=task_context)
+    task_sources = read_task_sources(args.task_source_file)
+    scientist, engineer, memorandum_agent = build_llm_agents(args, task_context=task_context)
+    source_allowed = args.allow_source_mutations or scientist is not None or engineer is not None
+    mutation_engine = MutationEngine(allow_source=source_allowed)
     loop = EvolutionLoop(
         graph,
         evaluator=evaluator,
         mutation_engine=mutation_engine,
         scientist=scientist,
         engineer=engineer,
+        memorandum_agent=memorandum_agent,
         task_context=task_context,
+        task_sources=task_sources,
         seed=args.seed,
     )
     if args.islands > 1 and args.async_islands:
@@ -181,7 +190,8 @@ def run_demo(args: argparse.Namespace) -> int:
 
 def run_evolve(args: argparse.Namespace) -> int:
     task_context = args.task_context_file.read_text(encoding="utf-8") if args.task_context_file is not None else ""
-    scientist, engineer = build_llm_agents(args, task_context=task_context)
+    task_sources = read_task_sources(args.task_source_file)
+    scientist, engineer, memorandum_agent = build_llm_agents(args, task_context=task_context)
     config = ProductionConfig(
         output_dir=args.output,
         steps=args.steps,
@@ -201,24 +211,31 @@ def run_evolve(args: argparse.Namespace) -> int:
         refine_backend=args.refine_backend,
         min_train_improvement=args.min_train_improvement,
         min_validation_improvement=args.min_validation_improvement,
-        allow_source_mutations=args.allow_source_mutations,
+        allow_source_mutations=args.allow_source_mutations or scientist is not None or engineer is not None,
     )
     summary = ProductionEvolutionRunner(
         config,
         scientist=scientist,
         engineer=engineer,
+        memorandum_agent=memorandum_agent,
         task_context=task_context,
+        task_sources=task_sources,
     ).run(resume=args.resume)
     print(json.dumps(summary, indent=2), flush=True)
     return 0
 
 
-def build_llm_agents(args: argparse.Namespace, *, task_context: str = "") -> tuple[LLMScientistAgent | None, LLMEngineerAgent | None]:
+def build_llm_agents(
+    args: argparse.Namespace,
+    *,
+    task_context: str = "",
+) -> tuple[LLMScientistAgent | None, LLMEngineerAgent | None, LLMMemorandumAgent | None]:
     provider = resolve_llm_provider(args.llm_provider, args.env_file)
     if provider is None:
-        return None, None
+        return None, None, None
     client = llm_client_from_env(args.env_file)
-    prompt_builder = PromptBuilder(task_context=task_context or PromptBuilder().task_context, allow_source=args.allow_source_mutations)
+    source_allowed = args.allow_source_mutations or provider is not None
+    prompt_builder = PromptBuilder(task_context=task_context or PromptBuilder().task_context, allow_source=source_allowed)
     return (
         LLMScientistAgent(
             client,
@@ -230,9 +247,18 @@ def build_llm_agents(args: argparse.Namespace, *, task_context: str = "") -> tup
             client,
             prompt_builder=prompt_builder,
             temperature=args.llm_engineer_temperature,
-            allow_source=args.allow_source_mutations,
+            allow_source=source_allowed,
+        ),
+        LLMMemorandumAgent(
+            client,
+            prompt_builder=prompt_builder,
+            temperature=0.0,
         ),
     )
+
+
+def read_task_sources(paths: list[pathlib.Path]) -> tuple[tuple[str, str], ...]:
+    return tuple((str(path), path.read_text(encoding="utf-8")) for path in paths)
 
 
 def resolve_llm_provider(provider: str, env_file: pathlib.Path) -> str | None:

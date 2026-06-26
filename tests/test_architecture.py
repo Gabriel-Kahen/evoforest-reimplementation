@@ -10,7 +10,7 @@ from evoforest_arch.evaluator import RidgeEvaluator
 from evoforest_arch.evolution import EvolutionLoop
 from evoforest_arch.feedback import toon_report
 from evoforest_arch.graph import CallableFamily, EvalContext, FeatureBlock, Graph, ResidualWeightRule
-from evoforest_arch.llm import ClaudeLLMClient, GeminiLLMClient, LLMEngineerAgent, LLMScientistAgent, OpenAILLMClient, PromptBuilder, StaticLLMClient, llm_client_from_env, llm_provider_from_env
+from evoforest_arch.llm import ClaudeLLMClient, GeminiLLMClient, LLMEngineerAgent, LLMMemorandumAgent, LLMScientistAgent, OpenAILLMClient, PromptBuilder, StaticLLMClient, llm_client_from_env, llm_provider_from_env
 from evoforest_arch.maintenance import GraphMaintenance
 from evoforest_arch.mutations import GlobalSpec, MutationDocument, MutationEngine, MutationSpec, NodeSpec, RemoveSpec
 from evoforest_arch.rank_readout import fit_rank_feature_expansion, select_rank_ensemble
@@ -393,6 +393,55 @@ def test_trusted_source_mutation_adds_lambda_alternative() -> None:
     assert any(name.endswith("source_squared_delta.squared_delta") for name in names)
 
 
+def test_paper_style_lambda_mutation_yaml_is_supported() -> None:
+    document = MutationDocument.from_yaml(
+        "\n".join(
+            [
+                "remove:",
+                "  - output.raw_concat",
+                "add:",
+                "  output:",
+                "    - \"lambda ctx, values: FeatureBlock(ctx.read_input('series')[:, :1], ['first_value'])\"",
+            ]
+        )
+    )
+
+    assert document.remove[0].target_node == "output"
+    assert document.remove[0].alternative_id == "raw_concat"
+    assert document.add[0].target_node == "output"
+    assert document.add[0].primitive == "source"
+    assert document.add[0].source.startswith("lambda ctx, values:")
+
+
+def test_paper_style_lambda_mutation_ids_are_stable_across_documents() -> None:
+    first = MutationDocument.from_yaml(
+        "\n".join(
+            [
+                "add:",
+                "  output:",
+                "    - \"lambda ctx, values: FeatureBlock(ctx.read_input('series')[:, :1], ['first_value'])\"",
+            ]
+        )
+    )
+    second = MutationDocument.from_yaml(
+        "\n".join(
+            [
+                "add:",
+                "  output:",
+                "    - \"lambda ctx, values: FeatureBlock(ctx.read_input('series')[:, 1:2], ['second_value'])\"",
+            ]
+        )
+    )
+
+    assert first.add[0].alternative_id != second.add[0].alternative_id
+    engine = MutationEngine(allow_source=True)
+    graph = engine.apply_document(build_seed_graph(), first).graph
+    graph = engine.apply_document(graph, second).graph
+    output_ids = {alternative.id for alternative in graph.nodes["output"].alternatives}
+    assert first.add[0].alternative_id in output_ids
+    assert second.add[0].alternative_id in output_ids
+
+
 def test_maintenance_prunes_unreachable_nodes_and_unused_globals() -> None:
     graph = build_seed_graph()
     graph.add_node("dead_branch", "intermediate", "Unreachable branch.")
@@ -413,9 +462,9 @@ def test_global_refinement_phase_runs_without_mutating_parent_graph() -> None:
         dataset.inputs(),
         dataset.y,
     )
-    assert result.diagnostics["refinement"]["enabled"] is True
     assert result.diagnostics["refinement"]["requested_backend"] == "auto"
-    assert result.diagnostics["refinement"]["backend"] in {"numpy_coordinate", "torch_l_bfgs"}
+    assert result.diagnostics["refinement"]["backend"] == "torch_l_bfgs"
+    assert "fallback_reason" in result.diagnostics["refinement"]
     assert result.diagnostics["configuration_search"]["evaluated"] == 4
     assert np.array_equal(graph.globals.get("gate_scale"), before)
 
@@ -592,6 +641,31 @@ def test_llm_engineer_failure_aborts_without_deterministic_fallback() -> None:
         LLMEngineerAgent(client).synthesize(graph, result, hypotheses, step=1, island=None, rng=np.random.default_rng(32))
 
 
+def test_llm_memorandum_agent_requires_paper_sections() -> None:
+    dataset = make_structural_break_data(n_series=35, length=70, seed=33)
+    graph = build_seed_graph()
+    result = RidgeEvaluator(n_splits=3, seed=33, max_configurations=4).evaluate(graph, dataset.inputs(), dataset.y)
+    response = "\n".join(
+        [
+            "[OUTCOME HISTORY]",
+            "- ACCEPTED: seed state.",
+            "[STATE]",
+            "- Effective rank is tracked.",
+            "[WHAT WORKS]",
+            "- Compact source-backed changes.",
+            "[WHAT FAILED]",
+            "- No failures yet.",
+            "[ERROR LOG]",
+            "- No runtime errors.",
+        ]
+    )
+    client = StaticLLMClient((response,))
+    memorandum = LLMMemorandumAgent(client).update(result, history=["- ACCEPTED: seed state."], step=1)
+
+    assert "[STATE]" in memorandum
+    assert client.requests[0]["temperature"] == 0.0
+
+
 def test_llm_provider_can_be_loaded_from_env_file(tmp_path, monkeypatch) -> None:
     for key in (
         "EVOFOREST_LLM_PROVIDER",
@@ -677,7 +751,9 @@ def test_prompt_builder_advertises_source_schema_only_when_enabled() -> None:
     _system, source_user = PromptBuilder(allow_source=True).engineer_prompts(graph, result, hypothesis)
     _system, primitive_user = PromptBuilder(allow_source=False).engineer_prompts(graph, result, hypothesis)
     assert '"source": "lambda ctx, values:' in source_user
+    assert 'add:\n  output:\n    - "lambda ctx, values:' in source_user
     assert '"source": "lambda ctx, values:' not in primitive_user
+    assert 'add:\n  output:\n    - "lambda ctx, values:' not in primitive_user
 
 
 def test_failed_llm_source_mutation_is_logged_and_fed_back(tmp_path) -> None:
@@ -727,14 +803,13 @@ def test_failed_llm_source_mutation_is_logged_and_fed_back(tmp_path) -> None:
         scientist=LLMScientistAgent(client),
         engineer=LLMEngineerAgent(client, allow_source=True),
         seed=26,
-    ).run(dataset.inputs(), dataset.y, steps=2, output_dir=tmp_path)
+    ).run(dataset.inputs(), dataset.y, steps=1, output_dir=tmp_path)
     assert result.auc > 0.7
     events = [json.loads(line) for line in (tmp_path / "events.jsonl").read_text(encoding="utf-8").splitlines()]
-    assert events[0]["failed"] is True
-    assert events[0]["score"] is None
-    assert "KeyError" in events[0]["error"]
-    assert "bad_source_output" in events[0]["mutation"]["add"][0]["alternative_id"]
-    assert "failed" not in events[1] or events[1]["failed"] is False
+    assert len(events) == 1
+    assert "failed" not in events[0] or events[0]["failed"] is False
+    assert events[0]["mutation"]["add"][0]["alternative_id"] == "spectral_after_error"
+    assert (tmp_path / "mutations" / "step_0001_repair_01.yaml").exists()
     memorandum = (tmp_path / "memorandum.md").read_text(encoding="utf-8")
     assert "[ERROR LOG]" in memorandum
     assert "KeyError" in memorandum
