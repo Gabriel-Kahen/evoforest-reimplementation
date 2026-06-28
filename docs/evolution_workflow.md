@@ -41,13 +41,14 @@ Production island runs additionally write:
   `jobs.jsonl`, `migrations.jsonl`, `archive/index.jsonl`, `mutations/`, and
   `prompts/`.
 
-Archive promotion is stricter than the demo loop. A candidate must improve on the
-train split and improve on the validation split. The candidate's graph configuration
-is selected on train, then validation is rechecked with that config fixed.
+Archive promotion is stricter than the demo loop under the default production
+profile. A candidate must improve on the train split and improve on the
+validation split. The candidate's graph configuration is selected on train, then
+validation is rechecked with that config fixed.
 
-Production async islands use the same validation-gated promotion policy. The
-paper reports a CV-AUC global-best frontier; this production path deliberately
-keeps validation as a safety gate.
+The paper profile intentionally changes that contract. `--profile paper` promotes
+island and global bests by train-split cross-validated ROC-AUC, records validation
+scores for reporting, and does not use validation as a promotion gate.
 
 ## Dataset Requirement
 
@@ -83,6 +84,22 @@ Production four-island mode is the default:
 
 ```bash
 evoforest-arch evolve --steps 16 --migration-interval 10 --output runs/production-islands
+```
+
+For the paper long-run contract:
+
+```bash
+evoforest-arch evolve --profile paper --llm-provider env --env-file .env --output runs/paper-profile
+```
+
+`--profile paper` resolves to 600 target steps, four async islands, four workers,
+dedicated `cuda:0,cuda:1,cuda:2,cuda:3` devices, 64 configurations, PyTorch
+L-BFGS refinement, the fixed scientist temperature schedule
+`0.35,0.5,0.6,0.75`, engineer temperature `0`, and CV ROC-AUC promotion. For a
+non-CUDA smoke test, override the device slots and disable refinement:
+
+```bash
+evoforest-arch evolve --profile paper --steps 0 --island-devices cpu:0,cpu:1,cpu:2,cpu:3 --no-refine-globals --output runs/paper-profile-smoke
 ```
 
 On a machine without CUDA, use explicit CPU-like slots for smoke tests:

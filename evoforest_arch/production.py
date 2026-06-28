@@ -38,11 +38,19 @@ SAFE_STAGED_EXECUTION_RULES = (
 
 PAPER_ISLAND_COUNT = 4
 PAPER_GPU_DEVICES = tuple(f"cuda:{index}" for index in range(PAPER_ISLAND_COUNT))
+PRODUCTION_PROFILE = "production"
+PAPER_PROFILE = "paper"
+SUPPORTED_PRODUCTION_PROFILES = (PRODUCTION_PROFILE, PAPER_PROFILE)
+VALIDATION_PROMOTION_POLICY = "validation_gated"
+CV_AUC_PROMOTION_POLICY = "cv_auc"
+SUPPORTED_PROMOTION_POLICIES = (VALIDATION_PROMOTION_POLICY, CV_AUC_PROMOTION_POLICY)
+PAPER_PROFILE_STEPS = 600
 
 
 @dataclass(frozen=True)
 class ProductionConfig:
     output_dir: pathlib.Path
+    profile: str = PRODUCTION_PROFILE
     steps: int = 4
     seed: int = 17
     dataset_name: str = "synthetic-structural-break"
@@ -58,6 +66,7 @@ class ProductionConfig:
     refine_globals: bool = True
     refine_steps: int = 20
     refine_backend: str = "auto"
+    promotion_policy: str = VALIDATION_PROMOTION_POLICY
     min_train_improvement: float = 1e-6
     min_validation_improvement: float = 1e-6
     allow_source_mutations: bool = False
@@ -89,6 +98,29 @@ class ProductionConfig:
             "group_key": None,
             "torch_device": self.torch_device,
         }
+
+    @classmethod
+    def paper_profile(cls, output_dir: pathlib.Path, **overrides: Any) -> "ProductionConfig":
+        defaults = paper_profile_defaults()
+        defaults.update(overrides)
+        return cls(output_dir=output_dir, **defaults)
+
+
+def paper_profile_defaults() -> dict[str, Any]:
+    return {
+        "profile": PAPER_PROFILE,
+        "steps": PAPER_PROFILE_STEPS,
+        "islands": PAPER_ISLAND_COUNT,
+        "async_islands": True,
+        "island_workers": PAPER_ISLAND_COUNT,
+        "island_devices": PAPER_GPU_DEVICES,
+        "max_configurations": 64,
+        "refine_globals": True,
+        "refine_backend": "torch",
+        "promotion_policy": CV_AUC_PROMOTION_POLICY,
+        "min_train_improvement": 0.0,
+        "min_validation_improvement": 0.0,
+    }
 
 
 @dataclass
@@ -314,6 +346,10 @@ class ProductionEvolutionRunner:
         task_sources: tuple[tuple[str, str], ...] = (),
     ) -> None:
         self.config = config
+        if self.config.profile not in SUPPORTED_PRODUCTION_PROFILES:
+            raise ValueError(f"Unsupported production profile {self.config.profile!r}; expected one of {', '.join(SUPPORTED_PRODUCTION_PROFILES)}.")
+        if self.config.promotion_policy not in SUPPORTED_PROMOTION_POLICIES:
+            raise ValueError(f"Unsupported promotion policy {self.config.promotion_policy!r}; expected one of {', '.join(SUPPORTED_PROMOTION_POLICIES)}.")
         self.graph = graph or build_seed_graph()
         self.evaluator = RidgeEvaluator(**config.evaluator_config())
         self.mutation_engine = MutationEngine(allow_source=config.allow_source_mutations)
@@ -612,7 +648,14 @@ class ProductionEvolutionRunner:
     ) -> None:
         if not islands:
             return
-        best = max(islands, key=lambda item: (float(item.best_validation_result.auc), float(item.best_train_result.auc), -item.island))
+        best = max(
+            islands,
+            key=lambda item: (
+                self._frontier_score(context, item.best_train_result, item.best_validation_result),
+                float(item.best_train_result.auc),
+                -item.island,
+            ),
+        )
         context.current_graph = best.best_graph.clone()
         context.best_graph = best.best_graph.clone()
         context.best_train_result = best.best_train_result
@@ -635,6 +678,7 @@ class ProductionEvolutionRunner:
             "device": best.device,
             "worker_id": f"island_{best.island}",
             "source": "seed",
+            "selection_metric": self._frontier_metric(context),
         }
         self._write_graph_artifacts(context, step=0, metadata=metadata)
         self._write_archive_entry(context, step=0, metadata=metadata)
@@ -850,11 +894,22 @@ class ProductionEvolutionRunner:
         source_island: int,
     ) -> None:
         candidates = [island for island in islands if island.island != source_island]
-        weaker = [island for island in candidates if float(island.best_validation_result.auc) < float(context.best_validation_result.auc)]
+        global_score = self._frontier_score(context, context.best_train_result, context.best_validation_result)
+        weaker = [
+            island
+            for island in candidates
+            if self._frontier_score(context, island.best_train_result, island.best_validation_result) < global_score
+        ]
         if not weaker:
             return
-        target = min(weaker, key=lambda item: (float(item.best_validation_result.auc), item.island))
-        previous_score = float(target.best_validation_result.auc)
+        target = min(
+            weaker,
+            key=lambda item: (
+                self._frontier_score(context, item.best_train_result, item.best_validation_result),
+                item.island,
+            ),
+        )
+        previous_score = self._frontier_score(context, target.best_train_result, target.best_validation_result)
         target.current_graph = context.best_graph.clone()
         target.best_graph = context.best_graph.clone()
         target.best_train_result = context.best_train_result
@@ -873,7 +928,11 @@ class ProductionEvolutionRunner:
             "target_device": target.device,
             "target_generation": int(target.generation),
             "global_best_version": int(context.state.archive_version),
-            "previous_best_validation_auc": previous_score,
+            "selection_metric": self._frontier_metric(context),
+            "previous_best_score": previous_score,
+            "global_best_score": global_score,
+            "previous_best_train_auc": float(target.best_train_result.auc),
+            "previous_best_validation_auc": float(target.best_validation_result.auc),
             "global_best_validation_auc": float(context.best_validation_result.auc),
             "global_best_train_auc": float(context.best_train_result.auc),
             "graph_hash": graph_hash(context.best_graph),
@@ -884,7 +943,7 @@ class ProductionEvolutionRunner:
             handle.write(json.dumps(event) + "\n")
         target.state.history.append(
             f"- MIGRATED: global_step={int(context.state.step)} source_island={source_island} "
-            f"validation={float(context.best_validation_result.auc):.6f}"
+            f"{self._frontier_metric(context)}={global_score:.6f}"
         )
         del target.state.history[:-40]
         target_context = self._island_context(context, target)
@@ -895,6 +954,7 @@ class ProductionEvolutionRunner:
             "global_step": int(context.state.step),
             "source": "migration",
             "source_island": source_island,
+            "selection_metric": self._frontier_metric(context),
         }
         self._write_graph_artifacts(target_context, step=int(target.state.step), metadata=metadata)
         self._write_archive_entry(target_context, step=int(target.state.step), metadata=metadata)
@@ -1341,10 +1401,56 @@ class ProductionEvolutionRunner:
     ) -> bool:
         train_delta = float(train_result.auc) - float(context.best_train_result.auc)
         validation_delta = float(validation_result.auc) - float(context.best_validation_result.auc)
-        return (
-            train_delta > float(self.config.min_train_improvement)
-            and validation_delta > float(self.config.min_validation_improvement)
-        )
+        acceptance = dict(context.manifest.get("acceptance", {}))
+        policy = str(acceptance.get("policy", self._acceptance_policy_name()))
+        min_train = float(acceptance.get("min_train_improvement", self.config.min_train_improvement))
+        min_validation = float(acceptance.get("min_validation_improvement", self.config.min_validation_improvement))
+        if policy == "paper_cv_auc_improvement":
+            return train_delta > min_train
+        return train_delta > min_train and validation_delta > min_validation
+
+    def _frontier_score(
+        self,
+        context: ProductionContext,
+        train_result: EvaluationResult,
+        validation_result: EvaluationResult,
+    ) -> float:
+        acceptance = dict(context.manifest.get("acceptance", {}))
+        if str(acceptance.get("policy", self._acceptance_policy_name())) == "paper_cv_auc_improvement":
+            return float(train_result.auc)
+        return float(validation_result.auc)
+
+    def _frontier_metric(self, context: ProductionContext) -> str:
+        acceptance = dict(context.manifest.get("acceptance", {}))
+        return str(acceptance.get("metric", "validation_roc_auc"))
+
+    def _acceptance_policy_name(self) -> str:
+        if self.config.promotion_policy == CV_AUC_PROMOTION_POLICY:
+            return "paper_cv_auc_improvement"
+        if self.config.min_train_improvement < 0.0:
+            return "validation_improvement_with_train_regression_floor"
+        return "train_improvement_and_validation_improvement"
+
+    def _profile_spec(self) -> dict[str, Any]:
+        if self.config.profile == PAPER_PROFILE:
+            return {
+                "name": PAPER_PROFILE,
+                "source": "EvoForest paper long-run contract",
+                "target_steps": PAPER_PROFILE_STEPS,
+                "islands": PAPER_ISLAND_COUNT,
+                "devices": list(PAPER_GPU_DEVICES),
+                "scientist_temperature_schedule": list(DEFAULT_ISLAND_TEMPERATURES),
+                "engineer_temperature": 0.0,
+                "max_configurations": 64,
+                "global_refinement": "pytorch_l_bfgs",
+                "promotion_metric": "train_cv_roc_auc",
+                "validation_gate": False,
+            }
+        return {
+            "name": PRODUCTION_PROFILE,
+            "promotion_metric": "validation_roc_auc",
+            "validation_gate": True,
+        }
 
     def _run_manifest(
         self,
@@ -1358,6 +1464,8 @@ class ProductionEvolutionRunner:
             "created_at_utc": datetime.now(timezone.utc).isoformat(),
             "implementation": "evoforest-reimplementation",
             "paper": {"arxiv_abs": "https://arxiv.org/abs/2604.19761"},
+            "profile": self.config.profile,
+            "profile_spec": self._profile_spec(),
             "git_commit": _git_commit(),
             "dataset": self.config.dataset_config(),
             "dataset_metadata": dataset_metadata or {},
@@ -1377,14 +1485,16 @@ class ProductionEvolutionRunner:
                 "state_dir": "islands",
             },
             "acceptance": {
-                "policy": (
-                    "validation_improvement_with_train_regression_floor"
-                    if self.config.min_train_improvement < 0.0
-                    else "train_improvement_and_validation_improvement"
-                ),
+                "policy": self._acceptance_policy_name(),
+                "metric": "train_cv_roc_auc" if self.config.promotion_policy == CV_AUC_PROMOTION_POLICY else "validation_roc_auc",
+                "validation_gate": self.config.promotion_policy == VALIDATION_PROMOTION_POLICY,
                 "min_train_improvement": float(self.config.min_train_improvement),
                 "min_validation_improvement": float(self.config.min_validation_improvement),
-                "validation_config": "candidate_train_best_config",
+                "validation_config": (
+                    "reported_with_candidate_train_best_config_not_used_for_promotion"
+                    if self.config.promotion_policy == CV_AUC_PROMOTION_POLICY
+                    else "candidate_train_best_config"
+                ),
             },
             "test_policy": (
                 "test split is not evaluated by evolve; use recheck --include-test to consume it explicitly."
@@ -1659,6 +1769,7 @@ def inspect_run(run_dir: str | pathlib.Path) -> dict[str, Any]:
     summary = {
         "run_id": state.run_id,
         "run_dir": str(path),
+        "profile": manifest.get("profile", PRODUCTION_PROFILE),
         "dataset": manifest["dataset"],
         "dataset_fingerprint": manifest["dataset_fingerprint"],
         "step": int(state.step),
@@ -1673,6 +1784,7 @@ def inspect_run(run_dir: str | pathlib.Path) -> dict[str, Any]:
         },
         "event_count": event_count,
         "test_recheck_count": int(state.test_recheck_count),
+        "acceptance": manifest.get("acceptance", {}),
         "artifacts": {
             "run_manifest": str(path / "run_manifest.json"),
             "splits": str(path / "splits.json"),

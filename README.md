@@ -99,6 +99,16 @@ local smoke test without CUDA, pass explicit CPU-like device slots:
 evoforest-arch evolve --steps 4 --island-devices cpu:0,cpu:1,cpu:2,cpu:3 --no-refine-globals --output runs/production-cpu-smoke
 ```
 
+For the closest clean-room match to the paper's reported long run, use the paper
+profile. It sets 600 target steps, four async islands, dedicated `cuda:0..3`
+devices, 64 configurations, PyTorch L-BFGS refinement, scientist temperatures
+`0.35,0.5,0.6,0.75`, engineer temperature `0`, and CV ROC-AUC promotion without
+the production validation gate:
+
+```bash
+evoforest-arch evolve --profile paper --llm-provider env --env-file .env --output runs/paper-profile
+```
+
 To continue an interrupted run, pass `--resume`; `--steps` then means additional
 steps:
 
@@ -237,7 +247,9 @@ own their graph state and are assigned one dedicated device each
 persists per-island state, graph artifacts, checkpoints, memoranda, job logs, and
 migration records so resume restores the island frontier instead of restarting
 from a seed graph. It preserves the paper's fixed four-temperature scientist
-schedule by default, but the scientist/engineer loop can also run
+schedule by default. The `--profile paper` preset switches promotion from the
+default held-out validation gate to the paper's CV ROC-AUC frontier and records
+that contract in the manifest. The scientist/engineer loop can run
 deterministically offline or call an opt-in OpenAI, Claude, or Gemini provider.
 It does not include the authors' private model, exact prompts, full private
 code-generation backend, or cluster scheduler.
