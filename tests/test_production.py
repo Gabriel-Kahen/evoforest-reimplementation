@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import replace
 import json
 
+import pytest
+
 from evoforest_arch.graph_io import graph_from_path
 from evoforest_arch.llm import LLMEngineerAgent, LLMMemorandumAgent, LLMScientistAgent, StaticLLMClient
 from evoforest_arch.mutations import MutationDocument, MutationSpec
@@ -176,3 +178,54 @@ def test_production_llm_repairs_failed_source_and_uses_memorandum_agent(tmp_path
     prompt_names = {path.name for path in (run_dir / "prompts").glob("*.md")}
     assert any("memorandum" in name for name in prompt_names)
     assert "KeyError" in str(client.requests[4]["user_prompt"])
+
+
+def test_production_async_islands_write_durable_artifacts_and_resume(tmp_path) -> None:
+    config = small_config(
+        tmp_path,
+        steps=4,
+        seed=4,
+        islands=2,
+        async_islands=True,
+        island_workers=2,
+        migration_interval=1,
+        min_train_improvement=-1.0,
+        min_validation_improvement=-1.0,
+    )
+    summary = ProductionEvolutionRunner(config).run()
+    run_dir = config.output_dir
+
+    assert summary["step"] == 4
+    assert summary["event_count"] == 4
+    assert summary["test_recheck_count"] == 0
+    assert summary["islands"]["mode"] == "async"
+    assert summary["islands"]["count"] == 2
+    assert summary["islands"]["migration_count"] >= 1
+    assert (run_dir / "migrations.jsonl").exists()
+    assert (run_dir / "jobs.jsonl").exists()
+    events = [json.loads(line) for line in (run_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert any(event.get("stale") for event in events)
+    for island_id in (0, 1):
+        island_dir = run_dir / "islands" / f"island_{island_id}"
+        assert (island_dir / "state.json").exists()
+        assert (island_dir / "current_graph.json").exists()
+        assert (island_dir / "best_graph.json").exists()
+        assert (island_dir / "checkpoint.json").exists()
+        assert (island_dir / "memorandum.md").exists()
+        assert (island_dir / "events.jsonl").exists()
+        assert (island_dir / "archive" / "index.jsonl").exists()
+
+    resumed = ProductionEvolutionRunner(ProductionConfig(output_dir=run_dir, steps=1)).run(resume=True)
+    assert resumed["step"] == 5
+    assert resumed["event_count"] == 5
+    assert resumed["islands"]["mode"] == "async"
+    assert resumed["islands"]["count"] == 2
+    assert len((run_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()) == 5
+    assert len((run_dir / "migrations.jsonl").read_text(encoding="utf-8").splitlines()) >= summary["islands"]["migration_count"]
+
+
+def test_production_islands_require_async_mode(tmp_path) -> None:
+    config = small_config(tmp_path, steps=1, islands=2, async_islands=False)
+
+    with pytest.raises(ValueError, match="async_islands=True"):
+        ProductionEvolutionRunner(config).run()

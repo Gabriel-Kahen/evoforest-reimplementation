@@ -129,11 +129,13 @@ the following modules.
   frontier checkpoints that correspond to the paper's global-best versions. When
   LLM-backed agents are enabled it also writes prompt/response records. Island
   mode keeps per-island artifacts and migrates the current global best to weaker
-  islands. The async island runner
-  evaluates one candidate per island concurrently in local worker threads and
-  processes successes or failures as they arrive. LLM-backed island runs preserve
-  the fixed scientist-temperature schedule independently of candidate evaluation
-  completion order.
+  islands. Demo async islands evaluate one candidate per island concurrently in
+  local worker threads and process successes or failures as they arrive. Production
+  async islands add durable `islands/island_N/` state, per-island graph artifacts,
+  memoranda, job lifecycle logs, stale-completion detection, and immediate
+  persistence of migration targets so resume keeps the same island frontier.
+  LLM-backed island runs preserve the fixed scientist-temperature schedule
+  independently of candidate evaluation completion order.
 - Memoranda are sectioned into `[OUTCOME HISTORY]`, `[STATE]`, `[WHAT WORKS]`,
   `[WHAT FAILED]`, and `[ERROR LOG]`. In LLM mode a separate memorandum agent
   writes this paper-style hypothesis-free memory and must return all required
@@ -156,9 +158,12 @@ Known approximations:
   `torch_fn` to participate in that path; otherwise refinement records a skipped
   torch reason. The deterministic NumPy coordinate refiner is explicit
   compatibility behavior.
-- The paper's long run used asynchronous GPU islands; this repo includes
+- The paper's long run used asynchronous GPU islands; this repo includes durable
   asynchronous local worker islands with the paper-style scientist temperature
   schedule, but not a multi-GPU distributed scheduler.
+- Production promotion remains stricter than the paper's reported global-best
+  CV-AUC frontier: a production candidate must improve both train CV score and a
+  held-out validation recheck before it can become an island or global best.
 - Cross-configuration caching assumes alternatives are deterministic over their
   parents, inputs, and fixed globals during one evaluator pass. Trusted source-backed
   alternatives that deliberately perform side effects are outside that assumption.

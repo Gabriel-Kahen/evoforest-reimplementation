@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import concurrent.futures
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import json
@@ -11,11 +12,11 @@ import numpy as np
 
 from evoforest_arch.agents import EngineerAgent, ScientistAgent
 from evoforest_arch.evaluator import EvaluationResult, RidgeEvaluator
-from evoforest_arch.evolution import EvolutionLoop
+from evoforest_arch.evolution import CandidateOutcome, EvolutionLoop
 from evoforest_arch.feedback import feedback_summary, toon_report
 from evoforest_arch.graph import Graph
 from evoforest_arch.graph_io import graph_hash, graph_from_path, write_graph
-from evoforest_arch.mutations import MutationEngine
+from evoforest_arch.mutations import MutationDocument, MutationEngine
 from evoforest_arch.seed import build_seed_graph
 from evoforest_arch.splits import SplitManifest, make_split_manifest, read_split_manifest, split_dataset, write_split_manifest
 from evoforest_arch.synthetic import make_structural_break_data
@@ -28,6 +29,8 @@ SAFE_STAGED_EXECUTION_RULES = (
     "Evolve only on the train split; promote archive entries only after an independent validation recheck.",
     "Keep the test split untouched during evolve; consume it only through an explicit recheck command.",
     "Resume only from serialized run state, graph artifacts, and the original split manifest.",
+    "For async island runs, persist every island's state, graph, checkpoint, and memorandum before resuming work.",
+    "Record global-best migrations separately and write the target island state immediately.",
     "Keep source-backed mutations disabled unless a trusted sandbox policy is supplied outside this package.",
 )
 
@@ -53,6 +56,10 @@ class ProductionConfig:
     min_train_improvement: float = 1e-6
     min_validation_improvement: float = 1e-6
     allow_source_mutations: bool = False
+    islands: int = 1
+    async_islands: bool = False
+    island_workers: int | None = None
+    migration_interval: int = 10
 
     def dataset_config(self) -> dict[str, Any]:
         return {
@@ -90,6 +97,7 @@ class RunState:
     history: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     test_recheck_count: int = 0
+    generation: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -105,6 +113,7 @@ class RunState:
             "history": list(self.history[-40:]),
             "errors": list(self.errors[-40:]),
             "test_recheck_count": int(self.test_recheck_count),
+            "generation": int(self.generation),
         }
 
     @classmethod
@@ -122,6 +131,7 @@ class RunState:
             history=[str(row) for row in payload.get("history", [])],
             errors=[str(row) for row in payload.get("errors", [])],
             test_recheck_count=int(payload.get("test_recheck_count", 0)),
+            generation=int(payload.get("generation", 0)),
         )
 
 
@@ -136,6 +146,29 @@ class ProductionContext:
     best_graph: Graph
     best_train_result: EvaluationResult
     best_validation_result: EvaluationResult
+
+
+@dataclass
+class ProductionIslandContext:
+    island: int
+    run_dir: pathlib.Path
+    state: RunState
+    current_graph: Graph
+    best_graph: Graph
+    best_train_result: EvaluationResult
+    best_validation_result: EvaluationResult
+    generation: int = 0
+
+
+@dataclass
+class PendingIslandCandidate:
+    island: ProductionIslandContext
+    loop: EvolutionLoop
+    document: MutationDocument
+    future: concurrent.futures.Future
+    proposed_step: int
+    island_step: int
+    generation: int
 
 
 class ProductionEvolutionRunner:
@@ -161,6 +194,24 @@ class ProductionEvolutionRunner:
         self.task_sources = task_sources
 
     def run(self, *, resume: bool = False) -> dict[str, Any]:
+        if self._should_run_async_islands(resume=resume):
+            return self._run_async_islands(resume=resume)
+        return self._run_single(resume=resume)
+
+    def _should_run_async_islands(self, *, resume: bool) -> bool:
+        if resume:
+            manifest_path = self.config.output_dir / "run_manifest.json"
+            if manifest_path.exists():
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                islands = dict(manifest.get("islands", {}))
+                return str(islands.get("mode", "single")) == "async" and int(islands.get("count", 1)) > 1
+        if int(self.config.islands) <= 1:
+            return False
+        if not self.config.async_islands:
+            raise ValueError("Production island runs require async_islands=True.")
+        return True
+
+    def _run_single(self, *, resume: bool = False) -> dict[str, Any]:
         context = self._resume_context() if resume else self._new_context()
         loop = EvolutionLoop(
             context.current_graph,
@@ -263,6 +314,534 @@ class ProductionEvolutionRunner:
                 self._write_memorandum(context, loop=loop)
 
         return inspect_run(context.run_dir)
+
+    def _run_async_islands(self, *, resume: bool = False) -> dict[str, Any]:
+        context, islands = self._resume_async_context() if resume else self._new_async_context()
+        train_inputs, train_y = context.splits["train"]
+        validation_inputs, validation_y = context.splits["validation"]
+        setup_loop = self._build_loop(context.current_graph, context.state.rng_state, island=None)
+        self._install_task_context(context, setup_loop, train_inputs, train_y)
+        task_context = (context.run_dir / "task_context.md").read_text(encoding="utf-8")
+        for island in islands:
+            (island.run_dir / "task_context.md").write_text(task_context, encoding="utf-8")
+            self._write_memorandum(self._island_context(context, island), loop=self._build_loop(island.current_graph, island.state.rng_state, island=island.island), island=island.island)
+
+        target_step = int(context.state.step) + int(self.config.steps)
+        mode = "a" if resume else "w"
+        if not resume:
+            for path in ("events.jsonl", "jobs.jsonl", "migrations.jsonl"):
+                output = context.run_dir / path
+                if output.exists():
+                    output.unlink()
+        worker_count = self._async_worker_count(context)
+        pending: dict[concurrent.futures.Future, PendingIslandCandidate] = {}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=worker_count) as executor:
+            with (context.run_dir / "events.jsonl").open(mode, encoding="utf-8") as root_events:
+                while int(context.state.step) < target_step or pending:
+                    while int(context.state.step) + len(pending) < target_step:
+                        available = [island for island in islands if all(job.island is not island for job in pending.values())]
+                        if not available:
+                            break
+                        island = min(available, key=lambda item: (int(item.state.step), item.island))
+                        job = self._submit_island_candidate(context, island, train_inputs, train_y, executor)
+                        pending[job.future] = job
+                    if not pending:
+                        break
+                    done, _pending = concurrent.futures.wait(tuple(pending), return_when=concurrent.futures.FIRST_COMPLETED)
+                    for future in sorted(done, key=lambda item: pending[item].proposed_step):
+                        job = pending.pop(future)
+                        try:
+                            outcome = future.result()
+                        except Exception as exc:
+                            outcome = CandidateOutcome(error=EvolutionLoop._format_exception(exc))
+                        self._commit_island_candidate(
+                            context,
+                            islands,
+                            job,
+                            outcome,
+                            validation_inputs,
+                            validation_y,
+                            root_events,
+                        )
+        return inspect_run(context.run_dir)
+
+    def _new_async_context(self) -> tuple[ProductionContext, list[ProductionIslandContext]]:
+        context = self._new_context()
+        islands = self._initialize_island_contexts(context, self._island_count(context))
+        return context, islands
+
+    def _resume_async_context(self) -> tuple[ProductionContext, list[ProductionIslandContext]]:
+        context = self._resume_context()
+        islands = self._load_island_contexts(context, self._island_count(context))
+        return context, islands
+
+    def _initialize_island_contexts(self, context: ProductionContext, count: int) -> list[ProductionIslandContext]:
+        islands: list[ProductionIslandContext] = []
+        for island_id in range(count):
+            island_dir = context.run_dir / "islands" / f"island_{island_id}"
+            island_dir.mkdir(parents=True, exist_ok=True)
+            island_graph = self.graph.clone()
+            train_inputs, train_y = context.splits["train"]
+            validation_inputs, validation_y = context.splits["validation"]
+            train_result = self.evaluator.evaluate(island_graph, train_inputs, train_y, update_graph=True)
+            validation_result = self.evaluator.evaluate(island_graph, validation_inputs, validation_y, config=train_result.config, update_graph=False)
+            rng = np.random.default_rng(int(self.config.seed) + 1009 * (island_id + 1))
+            state = RunState(
+                run_id=f"{context.state.run_id}_island_{island_id}",
+                step=0,
+                archive_version=0,
+                best_train_auc=float(train_result.auc),
+                best_validation_auc=float(validation_result.auc),
+                best_config=dict(train_result.config),
+                current_graph_path="current_graph.json",
+                best_graph_path="best_graph.json",
+                rng_state=rng.bit_generator.state,
+            )
+            island = ProductionIslandContext(
+                island=island_id,
+                run_dir=island_dir,
+                state=state,
+                current_graph=island_graph,
+                best_graph=island_graph.clone(),
+                best_train_result=train_result,
+                best_validation_result=validation_result,
+            )
+            island_context = self._island_context(context, island)
+            self._write_graph_artifacts(island_context, step=0, metadata={"island": island_id, "global_step": int(context.state.step)})
+            self._write_archive_entry(island_context, step=0, metadata={"island": island_id, "global_step": int(context.state.step), "source": "seed"})
+            self._write_checkpoint(island_context, step=0, metadata={"island": island_id, "global_step": int(context.state.step)})
+            self._write_state(island_dir, state)
+            self._write_memorandum(island_context, island=island_id)
+            islands.append(island)
+        return islands
+
+    def _load_island_contexts(self, context: ProductionContext, count: int) -> list[ProductionIslandContext]:
+        allow_source = bool(dict(context.manifest.get("mutation", {})).get("allow_source_mutations", False)) or self.config.allow_source_mutations
+        train_inputs, train_y = context.splits["train"]
+        validation_inputs, validation_y = context.splits["validation"]
+        islands: list[ProductionIslandContext] = []
+        for island_id in range(count):
+            island_dir = context.run_dir / "islands" / f"island_{island_id}"
+            state = self._read_state(island_dir)
+            current_graph = graph_from_path(island_dir / state.current_graph_path, allow_source=allow_source)
+            best_graph = graph_from_path(island_dir / state.best_graph_path, allow_source=allow_source)
+            train_result = self.evaluator.evaluate(best_graph, train_inputs, train_y, config=state.best_config, update_graph=False)
+            validation_result = self.evaluator.evaluate(best_graph, validation_inputs, validation_y, config=state.best_config, update_graph=False)
+            islands.append(
+                ProductionIslandContext(
+                    island=island_id,
+                    run_dir=island_dir,
+                    state=state,
+                    current_graph=current_graph,
+                    best_graph=best_graph,
+                    best_train_result=train_result,
+                    best_validation_result=validation_result,
+                    generation=int(state.generation),
+                )
+            )
+        return islands
+
+    def _submit_island_candidate(
+        self,
+        context: ProductionContext,
+        island: ProductionIslandContext,
+        train_inputs: dict[str, object],
+        train_y: np.ndarray,
+        executor: concurrent.futures.ThreadPoolExecutor,
+    ) -> PendingIslandCandidate:
+        island_step = int(island.state.step) + 1
+        proposed_step = int(context.state.step) + 1
+        loop = self._build_loop(island.current_graph, island.state.rng_state, island=island.island)
+        memorandum = self._read_memorandum(island.run_dir)
+        try:
+            document = loop._propose_document(
+                island.current_graph,
+                island.best_train_result,
+                island_step,
+                island=island.island,
+                memorandum=memorandum,
+                execution_errors="\n".join(island.state.errors[-8:]),
+            )
+        finally:
+            loop._write_prompt_records(island.run_dir, island_step, island=island.island)
+        island.state.rng_state = loop.rng.bit_generator.state
+        self._write_state(island.run_dir, island.state)
+        loop._write_mutation_document(island.run_dir, island_step, document, island=island.island)
+        base_graph = island.current_graph.clone()
+        job_id = f"g{proposed_step:04d}_i{island.island}_s{island_step:04d}_v{island.generation:04d}"
+        self._write_job_event(
+            context.run_dir,
+            island.run_dir,
+            {
+                "job_id": job_id,
+                "status": "submitted",
+                "global_step_hint": proposed_step,
+                "island": island.island,
+                "island_step": island_step,
+                "base_generation": int(island.generation),
+                "base_graph_hash": graph_hash(base_graph),
+                "mutation_path": f"islands/island_{island.island}/mutations/island_{island.island}_step_{island_step:04d}.yaml",
+            },
+        )
+        future = executor.submit(loop._try_evaluate_candidate, base_graph, document, train_inputs, train_y)
+        return PendingIslandCandidate(
+            island=island,
+            loop=loop,
+            document=document,
+            future=future,
+            proposed_step=proposed_step,
+            island_step=island_step,
+            generation=int(island.generation),
+        )
+
+    def _commit_island_candidate(
+        self,
+        context: ProductionContext,
+        islands: list[ProductionIslandContext],
+        job: PendingIslandCandidate,
+        outcome: CandidateOutcome,
+        validation_inputs: dict[str, object],
+        validation_y: np.ndarray,
+        root_events: Any,
+    ) -> None:
+        island = job.island
+        if int(island.generation) != int(job.generation):
+            event = self._stale_event(context, island, job)
+            self._commit_async_event(context, island, event, root_events)
+            self._write_job_event(context.run_dir, island.run_dir, {"job_id": event["job_id"], "status": "stale", "global_step": event["step"]})
+            return
+        if outcome.failed:
+            document, outcome = job.loop._repair_candidate(
+                island.current_graph,
+                island.best_train_result,
+                job.island_step,
+                island=island.island,
+                output_dir=island.run_dir,
+                document=job.document,
+                outcome=outcome,
+                inputs=context.splits["train"][0],
+                y=context.splits["train"][1],
+                memorandum=self._read_memorandum(island.run_dir),
+                errors=island.state.errors,
+            )
+            job.document = document
+            island.state.rng_state = job.loop.rng.bit_generator.state
+        if outcome.failed:
+            event = self._async_failed_event(context, island, job, outcome.error or "Unknown candidate failure.")
+            self._commit_async_event(context, island, event, root_events)
+            self._write_job_event(context.run_dir, island.run_dir, {"job_id": event["job_id"], "status": "failed", "global_step": event["step"]})
+            return
+        if outcome.application is None or outcome.candidate_graph is None or outcome.result is None:
+            event = self._async_failed_event(context, island, job, "Candidate evaluation returned an incomplete success outcome.")
+            self._commit_async_event(context, island, event, root_events)
+            self._write_job_event(context.run_dir, island.run_dir, {"job_id": event["job_id"], "status": "failed", "global_step": event["step"]})
+            return
+
+        candidate_train = outcome.result
+        candidate_validation = self.evaluator.evaluate(
+            outcome.candidate_graph,
+            validation_inputs,
+            validation_y,
+            config=candidate_train.config,
+            update_graph=False,
+        )
+        previous_island_train_auc = float(island.best_train_result.auc)
+        previous_island_validation_auc = float(island.best_validation_result.auc)
+        previous_global_train_auc = float(context.best_train_result.auc)
+        previous_global_validation_auc = float(context.best_validation_result.auc)
+        accepted = self._promotes(candidate_train, candidate_validation, self._island_context(context, island))
+        global_best = accepted and self._promotes(candidate_train, candidate_validation, context)
+        if accepted:
+            island.current_graph = outcome.candidate_graph
+            island.best_graph = outcome.candidate_graph.clone()
+            island.best_train_result = candidate_train
+            island.best_validation_result = candidate_validation
+            island.state.archive_version += 1
+            island.state.best_train_auc = float(candidate_train.auc)
+            island.state.best_validation_auc = float(candidate_validation.auc)
+            island.state.best_config = dict(candidate_train.config)
+            island.generation += 1
+            island.state.generation = int(island.generation)
+            island_context = self._island_context(context, island)
+            self._write_graph_artifacts(island_context, step=job.island_step, metadata={"island": island.island, "global_step": int(context.state.step) + 1})
+            self._write_archive_entry(
+                island_context,
+                step=job.island_step,
+                metadata={"island": island.island, "global_step": int(context.state.step) + 1, "source": "candidate"},
+            )
+            self._write_checkpoint(island_context, step=job.island_step, metadata={"island": island.island, "global_step": int(context.state.step) + 1})
+        if global_best:
+            context.current_graph = outcome.candidate_graph
+            context.best_graph = outcome.candidate_graph.clone()
+            context.best_train_result = candidate_train
+            context.best_validation_result = candidate_validation
+            context.state.archive_version += 1
+            context.state.best_train_auc = float(candidate_train.auc)
+            context.state.best_validation_auc = float(candidate_validation.auc)
+            context.state.best_config = dict(candidate_train.config)
+            context.state.generation += 1
+            self._write_graph_artifacts(context, step=int(context.state.step) + 1, metadata={"island": island.island, "island_step": job.island_step})
+            self._write_archive_entry(
+                context,
+                step=int(context.state.step) + 1,
+                metadata={"island": island.island, "island_step": job.island_step, "source": "global_best"},
+            )
+            self._write_checkpoint(context, step=int(context.state.step) + 1, metadata={"island": island.island, "island_step": job.island_step})
+
+        event = self._async_candidate_event(
+            context,
+            island,
+            job,
+            accepted=accepted,
+            global_best=global_best,
+            mutation=job.document.to_dict(),
+            train_result=candidate_train,
+            validation_result=candidate_validation,
+            maintenance=outcome.application.maintenance.to_dict(),
+            previous_island_train_auc=previous_island_train_auc,
+            previous_island_validation_auc=previous_island_validation_auc,
+            previous_global_train_auc=previous_global_train_auc,
+            previous_global_validation_auc=previous_global_validation_auc,
+        )
+        self._commit_async_event(context, island, event, root_events)
+        self._write_job_event(context.run_dir, island.run_dir, {"job_id": event["job_id"], "status": "completed", "global_step": event["step"]})
+        if global_best:
+            self._migrate_global_best(context, islands, source_island=island.island)
+        elif self._migration_interval(context) > 0 and int(context.state.step) % self._migration_interval(context) == 0:
+            self._migrate_global_best(context, islands, source_island=island.island)
+
+    def _commit_async_event(
+        self,
+        context: ProductionContext,
+        island: ProductionIslandContext,
+        event: dict[str, Any],
+        root_events: Any,
+    ) -> None:
+        context.state.step = int(event["step"])
+        island.state.step = int(event["island_step"])
+        self._record_event(context.state, event)
+        island_event = {
+            **event,
+            "best_train_auc": event.get("island_best_train_auc", event["best_train_auc"]),
+            "best_validation_auc": event.get("island_best_validation_auc", event["best_validation_auc"]),
+        }
+        self._record_event(island.state, island_event)
+        root_events.write(json.dumps(event) + "\n")
+        root_events.flush()
+        with (island.run_dir / "events.jsonl").open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(event) + "\n")
+        self._write_state(context.run_dir, context.state)
+        self._write_state(island.run_dir, island.state)
+        island_loop = self._build_loop(island.current_graph, island.state.rng_state, island=island.island)
+        self._write_memorandum(self._island_context(context, island), loop=island_loop, island=island.island)
+        self._write_memorandum(context)
+
+    def _migrate_global_best(
+        self,
+        context: ProductionContext,
+        islands: list[ProductionIslandContext],
+        *,
+        source_island: int,
+    ) -> None:
+        candidates = [island for island in islands if island.island != source_island]
+        weaker = [island for island in candidates if float(island.best_validation_result.auc) < float(context.best_validation_result.auc)]
+        if not weaker:
+            return
+        target = min(weaker, key=lambda item: (float(item.best_validation_result.auc), item.island))
+        previous_score = float(target.best_validation_result.auc)
+        target.current_graph = context.best_graph.clone()
+        target.best_graph = context.best_graph.clone()
+        target.best_train_result = context.best_train_result
+        target.best_validation_result = context.best_validation_result
+        target.state.archive_version += 1
+        target.state.best_train_auc = float(context.best_train_result.auc)
+        target.state.best_validation_auc = float(context.best_validation_result.auc)
+        target.state.best_config = dict(context.state.best_config)
+        target.generation += 1
+        target.state.generation = int(target.generation)
+        event = {
+            "mode": "production_async_migration",
+            "global_step": int(context.state.step),
+            "source_island": int(source_island),
+            "target_island": int(target.island),
+            "target_generation": int(target.generation),
+            "global_best_version": int(context.state.archive_version),
+            "previous_best_validation_auc": previous_score,
+            "global_best_validation_auc": float(context.best_validation_result.auc),
+            "global_best_train_auc": float(context.best_train_result.auc),
+            "graph_hash": graph_hash(context.best_graph),
+        }
+        with (context.run_dir / "migrations.jsonl").open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(event) + "\n")
+        with (target.run_dir / "migrations.jsonl").open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(event) + "\n")
+        target.state.history.append(
+            f"- MIGRATED: global_step={int(context.state.step)} source_island={source_island} "
+            f"validation={float(context.best_validation_result.auc):.6f}"
+        )
+        del target.state.history[:-40]
+        target_context = self._island_context(context, target)
+        self._write_graph_artifacts(target_context, step=int(target.state.step), metadata={"island": target.island, "global_step": int(context.state.step), "source": "migration", "source_island": source_island})
+        self._write_archive_entry(target_context, step=int(target.state.step), metadata={"island": target.island, "global_step": int(context.state.step), "source": "migration", "source_island": source_island})
+        self._write_checkpoint(target_context, step=int(target.state.step), metadata={"island": target.island, "global_step": int(context.state.step), "source": "migration", "source_island": source_island})
+        self._write_state(target.run_dir, target.state)
+        self._write_memorandum(target_context, loop=self._build_loop(target.current_graph, target.state.rng_state, island=target.island), island=target.island)
+
+    def _island_context(self, context: ProductionContext, island: ProductionIslandContext) -> ProductionContext:
+        return ProductionContext(
+            run_dir=island.run_dir,
+            manifest=context.manifest,
+            split_manifest=context.split_manifest,
+            splits=context.splits,
+            state=island.state,
+            current_graph=island.current_graph,
+            best_graph=island.best_graph,
+            best_train_result=island.best_train_result,
+            best_validation_result=island.best_validation_result,
+        )
+
+    def _build_loop(self, graph: Graph, rng_state: dict[str, Any], *, island: int | None) -> EvolutionLoop:
+        loop = EvolutionLoop(
+            graph,
+            evaluator=RidgeEvaluator(**self._active_evaluator_config()),
+            mutation_engine=MutationEngine(allow_source=self.mutation_engine.allow_source),
+            scientist=self.scientist,
+            engineer=self.engineer,
+            memorandum_agent=self.memorandum_agent,
+            task_context=self.task_context,
+            task_sources=self.task_sources,
+            seed=int(self.config.seed) + (0 if island is None else 1009 * (int(island) + 1)),
+        )
+        loop.rng.bit_generator.state = rng_state
+        return loop
+
+    def _active_evaluator_config(self) -> dict[str, Any]:
+        return {
+            "n_splits": int(self.evaluator.n_splits),
+            "seed": int(self.evaluator.seed),
+            "max_configurations": int(self.evaluator.max_configurations),
+            "irls_steps": int(self.evaluator.irls_steps),
+            "refine_globals": bool(self.evaluator.refine_globals),
+            "refine_steps": int(self.evaluator.refine_steps),
+            "refine_backend": self.evaluator.refine_backend,
+            "group_key": self.evaluator.group_key,
+        }
+
+    def _island_count(self, context: ProductionContext) -> int:
+        islands = dict(context.manifest.get("islands", {}))
+        return max(1, int(islands.get("count", self.config.islands)))
+
+    def _async_worker_count(self, context: ProductionContext) -> int:
+        islands = dict(context.manifest.get("islands", {}))
+        configured = islands.get("workers", self.config.island_workers)
+        if configured is None:
+            return self._island_count(context)
+        return max(1, int(configured))
+
+    def _migration_interval(self, context: ProductionContext) -> int:
+        islands = dict(context.manifest.get("islands", {}))
+        return max(0, int(islands.get("migration_interval", self.config.migration_interval)))
+
+    @staticmethod
+    def _write_job_event(root_dir: pathlib.Path, island_dir: pathlib.Path, row: dict[str, Any]) -> None:
+        payload = {**row, "created_at_utc": datetime.now(timezone.utc).isoformat()}
+        for directory in (root_dir, island_dir):
+            with (directory / "jobs.jsonl").open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(payload) + "\n")
+
+    def _async_candidate_event(
+        self,
+        context: ProductionContext,
+        island: ProductionIslandContext,
+        job: PendingIslandCandidate,
+        *,
+        accepted: bool,
+        global_best: bool,
+        mutation: dict[str, object],
+        train_result: EvaluationResult,
+        validation_result: EvaluationResult,
+        maintenance: dict[str, object],
+        previous_island_train_auc: float,
+        previous_island_validation_auc: float,
+        previous_global_train_auc: float,
+        previous_global_validation_auc: float,
+    ) -> dict[str, Any]:
+        step = int(context.state.step) + 1
+        return {
+            "step": step,
+            "mode": "production_async_island",
+            "job_id": f"g{job.proposed_step:04d}_i{island.island}_s{job.island_step:04d}_v{job.generation:04d}",
+            "island": int(island.island),
+            "island_step": int(job.island_step),
+            "base_generation": int(job.generation),
+            "generation": int(island.generation),
+            "accepted": bool(accepted),
+            "global_best": bool(global_best),
+            "train_auc": float(train_result.auc),
+            "validation_auc": float(validation_result.auc),
+            "best_train_auc": float(context.state.best_train_auc),
+            "best_validation_auc": float(context.state.best_validation_auc),
+            "island_best_train_auc": float(island.state.best_train_auc),
+            "island_best_validation_auc": float(island.state.best_validation_auc),
+            "train_delta": float(train_result.auc) - previous_island_train_auc,
+            "validation_delta": float(validation_result.auc) - previous_island_validation_auc,
+            "global_train_delta": float(train_result.auc) - previous_global_train_auc,
+            "global_validation_delta": float(validation_result.auc) - previous_global_validation_auc,
+            "config": train_result.config,
+            "mutation": mutation,
+            "maintenance": maintenance,
+            "promotion_policy": context.manifest["acceptance"],
+        }
+
+    def _async_failed_event(
+        self,
+        context: ProductionContext,
+        island: ProductionIslandContext,
+        job: PendingIslandCandidate,
+        error: str,
+    ) -> dict[str, Any]:
+        return {
+            "step": int(context.state.step) + 1,
+            "mode": "production_async_island",
+            "job_id": f"g{job.proposed_step:04d}_i{island.island}_s{job.island_step:04d}_v{job.generation:04d}",
+            "island": int(island.island),
+            "island_step": int(job.island_step),
+            "base_generation": int(job.generation),
+            "generation": int(island.generation),
+            "accepted": False,
+            "failed": True,
+            "error": error,
+            "train_auc": None,
+            "validation_auc": None,
+            "best_train_auc": float(context.state.best_train_auc),
+            "best_validation_auc": float(context.state.best_validation_auc),
+            "island_best_train_auc": float(island.state.best_train_auc),
+            "island_best_validation_auc": float(island.state.best_validation_auc),
+            "config": island.state.best_config,
+            "mutation": job.document.to_dict(),
+        }
+
+    def _stale_event(self, context: ProductionContext, island: ProductionIslandContext, job: PendingIslandCandidate) -> dict[str, Any]:
+        return {
+            "step": int(context.state.step) + 1,
+            "mode": "production_async_island",
+            "job_id": f"g{job.proposed_step:04d}_i{island.island}_s{job.island_step:04d}_v{job.generation:04d}",
+            "island": int(island.island),
+            "island_step": int(job.island_step),
+            "base_generation": int(job.generation),
+            "generation": int(island.generation),
+            "accepted": False,
+            "stale": True,
+            "stale_reason": "Island graph generation changed before candidate completion.",
+            "train_auc": None,
+            "validation_auc": None,
+            "best_train_auc": float(context.state.best_train_auc),
+            "best_validation_auc": float(context.state.best_validation_auc),
+            "island_best_train_auc": float(island.state.best_train_auc),
+            "island_best_validation_auc": float(island.state.best_validation_auc),
+            "config": island.state.best_config,
+            "mutation": job.document.to_dict(),
+        }
 
     def _install_task_context(
         self,
@@ -396,6 +975,13 @@ class ProductionEvolutionRunner:
             "split_manifest_path": "splits.json",
             "evaluator": self.config.evaluator_config(),
             "mutation": {"allow_source_mutations": bool(self.config.allow_source_mutations)},
+            "islands": {
+                "mode": "async" if int(self.config.islands) > 1 and self.config.async_islands else "single",
+                "count": max(1, int(self.config.islands)),
+                "workers": self.config.island_workers,
+                "migration_interval": max(0, int(self.config.migration_interval)),
+                "state_dir": "islands",
+            },
             "acceptance": {
                 "policy": (
                     "validation_improvement_with_train_regression_floor"
@@ -412,18 +998,20 @@ class ProductionEvolutionRunner:
             "safe_staged_execution_rules": list(SAFE_STAGED_EXECUTION_RULES),
         }
 
-    def _write_graph_artifacts(self, context: ProductionContext, step: int) -> None:
-        metadata = {"run_id": context.state.run_id, "step": int(step)}
+    def _write_graph_artifacts(self, context: ProductionContext, step: int, metadata: dict[str, Any] | None = None) -> None:
+        metadata = {"run_id": context.state.run_id, "step": int(step), **(metadata or {})}
         write_graph(context.run_dir / context.state.current_graph_path, context.current_graph, metadata={**metadata, "role": "current"})
         write_graph(context.run_dir / context.state.best_graph_path, context.best_graph, metadata={**metadata, "role": "best"})
 
-    def _write_archive_entry(self, context: ProductionContext, step: int) -> None:
+    def _write_archive_entry(self, context: ProductionContext, step: int, metadata: dict[str, Any] | None = None) -> None:
+        metadata = metadata or {}
         archive_dir = context.run_dir / "archive"
         archive_dir.mkdir(parents=True, exist_ok=True)
         filename = f"best_v{context.state.archive_version:04d}_step_{step:04d}.json"
         payload = {
             "version": int(context.state.archive_version),
             "step": int(step),
+            **metadata,
             "graph_hash": graph_hash(context.best_graph),
             "graph": context.best_graph.to_dict(),
             "train_result": context.best_train_result.to_dict(),
@@ -440,14 +1028,16 @@ class ProductionEvolutionRunner:
             "config": context.best_train_result.config,
             "graph_hash": payload["graph_hash"],
             "path": filename,
+            **metadata,
         }
         with (archive_dir / "index.jsonl").open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(row) + "\n")
 
-    def _write_checkpoint(self, context: ProductionContext, step: int) -> None:
+    def _write_checkpoint(self, context: ProductionContext, step: int, metadata: dict[str, Any] | None = None) -> None:
         payload = {
             "run_id": context.state.run_id,
             "step": int(step),
+            **(metadata or {}),
             "archive_version": int(context.state.archive_version),
             "current_graph_path": context.state.current_graph_path,
             "best_graph_path": context.state.best_graph_path,
@@ -458,7 +1048,7 @@ class ProductionEvolutionRunner:
         }
         (context.run_dir / "checkpoint.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
-    def _write_memorandum(self, context: ProductionContext, loop: EvolutionLoop | None = None) -> None:
+    def _write_memorandum(self, context: ProductionContext, loop: EvolutionLoop | None = None, island: int | None = None) -> None:
         if loop is not None and getattr(loop, "memorandum_agent", None) is not None:
             loop._write_memorandum(
                 context.run_dir,
@@ -466,6 +1056,7 @@ class ProductionEvolutionRunner:
                 context.state.history,
                 context.state.errors,
                 step=context.state.step,
+                island=island,
             )
             return
         feedback = feedback_summary(context.best_train_result)
@@ -637,7 +1228,7 @@ def inspect_run(run_dir: str | pathlib.Path) -> dict[str, Any]:
     event_count = 0
     if events_path.exists() and events_path.read_text(encoding="utf-8").strip():
         event_count = len(events_path.read_text(encoding="utf-8").splitlines())
-    return {
+    summary = {
         "run_id": state.run_id,
         "run_dir": str(path),
         "dataset": manifest["dataset"],
@@ -664,6 +1255,46 @@ def inspect_run(run_dir: str | pathlib.Path) -> dict[str, Any]:
         },
         "safe_staged_execution_rules": manifest.get("safe_staged_execution_rules", []),
     }
+    islands = dict(manifest.get("islands", {}))
+    if str(islands.get("mode", "single")) == "async" and int(islands.get("count", 1)) > 1:
+        island_rows = []
+        for island_id in range(int(islands.get("count", 1))):
+            island_dir = path / "islands" / f"island_{island_id}"
+            island_state = RunState.from_dict(json.loads((island_dir / "state.json").read_text(encoding="utf-8")))
+            island_events_path = island_dir / "events.jsonl"
+            island_events = 0
+            if island_events_path.exists() and island_events_path.read_text(encoding="utf-8").strip():
+                island_events = len(island_events_path.read_text(encoding="utf-8").splitlines())
+            island_rows.append(
+                {
+                    "island": island_id,
+                    "step": int(island_state.step),
+                    "generation": int(island_state.generation),
+                    "archive_version": int(island_state.archive_version),
+                    "best_train_auc": float(island_state.best_train_auc),
+                    "best_validation_auc": float(island_state.best_validation_auc),
+                    "event_count": island_events,
+                    "state": str(island_dir / "state.json"),
+                    "best_graph": str(island_dir / island_state.best_graph_path),
+                    "current_graph": str(island_dir / island_state.current_graph_path),
+                    "memorandum": str(island_dir / "memorandum.md"),
+                }
+            )
+        migrations_path = path / "migrations.jsonl"
+        migration_count = 0
+        if migrations_path.exists() and migrations_path.read_text(encoding="utf-8").strip():
+            migration_count = len(migrations_path.read_text(encoding="utf-8").splitlines())
+        summary["islands"] = {
+            "mode": "async",
+            "count": int(islands.get("count", 1)),
+            "workers": islands.get("workers"),
+            "migration_interval": int(islands.get("migration_interval", 0)),
+            "migration_count": migration_count,
+            "items": island_rows,
+        }
+        summary["artifacts"]["migrations"] = str(migrations_path)
+        summary["artifacts"]["jobs"] = str(path / "jobs.jsonl")
+    return summary
 
 
 def export_best_graph(run_dir: str | pathlib.Path, output_path: str | pathlib.Path, *, allow_source: bool = False) -> pathlib.Path:

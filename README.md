@@ -89,6 +89,13 @@ evoforest-arch export-best runs/production-smoke --output runs/production-smoke-
 evoforest-arch recheck runs/production-smoke
 ```
 
+Production async islands persist independent island state and global-best
+migrations:
+
+```bash
+evoforest-arch evolve --steps 16 --islands 4 --async-islands --island-workers 4 --output runs/production-islands
+```
+
 To continue an interrupted run, pass `--resume`; `--steps` then means additional
 steps:
 
@@ -221,12 +228,15 @@ records an explicit skipped-refinement reason when the torch path is unavailable
 or a gradient probe finds no active trainable global influence. The NumPy
 coordinate refiner is retained as an explicit compatibility backend, not as the
 paper-mode fallback.
-The asynchronous island mode uses local thread workers rather than dedicated GPU
-islands. It preserves the paper's fixed four-temperature scientist schedule by
-default, but the scientist/engineer loop can also run deterministically offline or
-call an opt-in OpenAI, Claude, or Gemini provider. It does not include the authors'
-private model, exact prompts, full private code-generation backend, or distributed
-GPU scheduler. The source-backed mutation path recreates the paper's
+The asynchronous island mode uses local worker threads rather than dedicated GPU
+islands. Production `evolve --islands N --async-islands` now persists per-island
+state, graph artifacts, checkpoints, memoranda, job logs, and migration records so
+resume restores the island frontier instead of restarting from a seed graph. It
+preserves the paper's fixed four-temperature scientist schedule by default, but the
+scientist/engineer loop can also run deterministically offline or call an opt-in
+OpenAI, Claude, or Gemini provider. It does not include the authors' private model,
+exact prompts, full private code-generation backend, or distributed GPU scheduler.
+The source-backed mutation path recreates the paper's
 lambda-alternative representation for trusted local experiments, but it is not a
 security sandbox. Alternative-level age and
 quality history is implemented as rolling clean-room summaries over participating
