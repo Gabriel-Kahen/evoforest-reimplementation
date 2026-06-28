@@ -165,9 +165,11 @@ Known approximations:
   schedule persisted in the run manifest. This is a single-process scheduler with
   dedicated device assignment, not the authors' private cluster orchestration
   stack.
-- Production promotion remains stricter than the paper's reported global-best
-  CV-AUC frontier: a production candidate must improve both train CV score and a
-  held-out validation recheck before it can become an island or global best.
+- The default production profile remains stricter than the paper's reported
+  global-best CV-AUC frontier: a production candidate must improve both train CV
+  score and a held-out validation recheck before it can become an island or
+  global best. Use `--profile paper` to switch to the paper-style CV ROC-AUC
+  frontier without the validation gate.
 - Cross-configuration caching assumes alternatives are deterministic over their
   parents, inputs, and fixed globals during one evaluator pass. Trusted source-backed
   alternatives that deliberately perform side effects are outside that assumption.

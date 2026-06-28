@@ -19,7 +19,18 @@ from evoforest_arch.llm import (
     load_env_file,
 )
 from evoforest_arch.mutations import MutationEngine
-from evoforest_arch.production import ProductionConfig, ProductionEvolutionRunner, export_best_graph, inspect_run, recheck_run
+from evoforest_arch.production import (
+    CV_AUC_PROMOTION_POLICY,
+    PAPER_PROFILE,
+    PRODUCTION_PROFILE,
+    ProductionConfig,
+    ProductionEvolutionRunner,
+    VALIDATION_PROMOTION_POLICY,
+    export_best_graph,
+    inspect_run,
+    paper_profile_defaults,
+    recheck_run,
+)
 from evoforest_arch.seed import build_seed_graph
 from evoforest_arch.synthetic import make_structural_break_data
 
@@ -42,6 +53,59 @@ def parse_string_schedule(value: str) -> tuple[str, ...]:
     if not values:
         raise argparse.ArgumentTypeError("schedule must include at least one comma-separated value")
     return values
+
+
+PRODUCTION_CLI_DEFAULTS = {
+    "steps": 4,
+    "folds": 3,
+    "max_configurations": 64,
+    "irls_steps": 2,
+    "refine_globals": True,
+    "refine_steps": 20,
+    "refine_backend": "auto",
+    "promotion_policy": VALIDATION_PROMOTION_POLICY,
+    "min_train_improvement": 1e-6,
+    "min_validation_improvement": 1e-6,
+    "islands": 4,
+    "async_islands": True,
+    "island_workers": None,
+    "island_devices": None,
+    "migration_interval": 10,
+    "llm_scientist_temperature": 0.35,
+    "llm_island_temperatures": DEFAULT_ISLAND_TEMPERATURES,
+    "llm_engineer_temperature": 0.0,
+}
+
+
+def evolve_profile_defaults(profile: str) -> dict[str, object]:
+    if profile == PAPER_PROFILE:
+        paper = paper_profile_defaults()
+        return {
+            **PRODUCTION_CLI_DEFAULTS,
+            "steps": paper["steps"],
+            "max_configurations": paper["max_configurations"],
+            "refine_globals": paper["refine_globals"],
+            "refine_backend": paper["refine_backend"],
+            "promotion_policy": paper["promotion_policy"],
+            "min_train_improvement": paper["min_train_improvement"],
+            "min_validation_improvement": paper["min_validation_improvement"],
+            "islands": paper["islands"],
+            "async_islands": paper["async_islands"],
+            "island_workers": paper["island_workers"],
+            "island_devices": paper["island_devices"],
+            "llm_scientist_temperature": 0.35,
+            "llm_island_temperatures": DEFAULT_ISLAND_TEMPERATURES,
+            "llm_engineer_temperature": 0.0,
+        }
+    return dict(PRODUCTION_CLI_DEFAULTS)
+
+
+def apply_evolve_profile(args: argparse.Namespace) -> argparse.Namespace:
+    defaults = evolve_profile_defaults(args.profile)
+    for key, value in defaults.items():
+        if getattr(args, key) is None:
+            setattr(args, key, value)
+    return args
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -84,7 +148,8 @@ def main(argv: list[str] | None = None) -> int:
     demo.set_defaults(func=run_demo)
 
     evolve = sub.add_parser("evolve", help="Run resume-safe production evolution with fixed split manifests.")
-    evolve.add_argument("--steps", type=int, default=4, help="New steps to run. With --resume, this is additional steps.")
+    evolve.add_argument("--profile", choices=(PRODUCTION_PROFILE, PAPER_PROFILE), default=PRODUCTION_PROFILE)
+    evolve.add_argument("--steps", type=int, default=None, help="New steps to run. With --resume, this is additional steps.")
     evolve.add_argument("--dataset", choices=("synthetic-structural-break",), default="synthetic-structural-break")
     evolve.add_argument("--n-series", type=int, default=240)
     evolve.add_argument("--length", type=int, default=160)
@@ -93,18 +158,19 @@ def main(argv: list[str] | None = None) -> int:
     evolve.add_argument("--split-seed", type=int, default=None)
     evolve.add_argument("--validation-fraction", type=float, default=0.2)
     evolve.add_argument("--test-fraction", type=float, default=0.2)
-    evolve.add_argument("--folds", type=int, default=3)
-    evolve.add_argument("--max-configurations", type=int, default=64)
-    evolve.add_argument("--irls-steps", type=int, default=2)
-    evolve.add_argument("--refine-globals", dest="refine_globals", action="store_true", default=True)
+    evolve.add_argument("--folds", type=int, default=None)
+    evolve.add_argument("--max-configurations", type=int, default=None)
+    evolve.add_argument("--irls-steps", type=int, default=None)
+    evolve.add_argument("--refine-globals", dest="refine_globals", action="store_true", default=None)
     evolve.add_argument("--no-refine-globals", dest="refine_globals", action="store_false")
-    evolve.add_argument("--refine-steps", type=int, default=20)
-    evolve.add_argument("--refine-backend", choices=("auto", "numpy", "torch"), default="auto")
-    evolve.add_argument("--min-train-improvement", type=float, default=1e-6)
-    evolve.add_argument("--min-validation-improvement", type=float, default=1e-6)
+    evolve.add_argument("--refine-steps", type=int, default=None)
+    evolve.add_argument("--refine-backend", choices=("auto", "numpy", "torch"), default=None)
+    evolve.add_argument("--promotion-policy", choices=(VALIDATION_PROMOTION_POLICY, CV_AUC_PROMOTION_POLICY), default=None)
+    evolve.add_argument("--min-train-improvement", type=float, default=None)
+    evolve.add_argument("--min-validation-improvement", type=float, default=None)
     evolve.add_argument("--allow-source-mutations", action="store_true")
-    evolve.add_argument("--islands", type=int, default=4)
-    evolve.add_argument("--async-islands", dest="async_islands", action="store_true", default=True)
+    evolve.add_argument("--islands", type=int, default=None)
+    evolve.add_argument("--async-islands", dest="async_islands", action="store_true", default=None)
     evolve.add_argument("--no-async-islands", dest="async_islands", action="store_false")
     evolve.add_argument("--island-workers", type=int, default=None)
     evolve.add_argument(
@@ -113,20 +179,20 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Comma-separated dedicated device slots for production islands, default cuda:0,cuda:1,cuda:2,cuda:3.",
     )
-    evolve.add_argument("--migration-interval", type=int, default=10)
+    evolve.add_argument("--migration-interval", type=int, default=None)
     evolve.add_argument("--llm-provider", choices=llm_provider_choices, default="none")
     evolve.add_argument("--env-file", type=pathlib.Path, default=pathlib.Path(".env"))
-    evolve.add_argument("--llm-scientist-temperature", type=float, default=0.35)
+    evolve.add_argument("--llm-scientist-temperature", type=float, default=None)
     evolve.add_argument(
         "--llm-island-temperatures",
         type=parse_temperature_schedule,
-        default=DEFAULT_ISLAND_TEMPERATURES,
+        default=None,
         help=(
             "Comma-separated scientist temperatures for island mode, or 'none' to use "
             "--llm-scientist-temperature for every island."
         ),
     )
-    evolve.add_argument("--llm-engineer-temperature", type=float, default=0.0)
+    evolve.add_argument("--llm-engineer-temperature", type=float, default=None)
     evolve.add_argument("--task-context-file", type=pathlib.Path, default=None)
     evolve.add_argument("--task-source-file", action="append", type=pathlib.Path, default=[])
     evolve.add_argument("--resume", action="store_true")
@@ -207,11 +273,13 @@ def run_demo(args: argparse.Namespace) -> int:
 
 
 def run_evolve(args: argparse.Namespace) -> int:
+    args = apply_evolve_profile(args)
     task_context = args.task_context_file.read_text(encoding="utf-8") if args.task_context_file is not None else ""
     task_sources = read_task_sources(args.task_source_file)
     scientist, engineer, memorandum_agent = build_llm_agents(args, task_context=task_context)
     config = ProductionConfig(
         output_dir=args.output,
+        profile=args.profile,
         steps=args.steps,
         seed=args.seed,
         dataset_name=args.dataset,
@@ -227,6 +295,7 @@ def run_evolve(args: argparse.Namespace) -> int:
         refine_globals=args.refine_globals,
         refine_steps=args.refine_steps,
         refine_backend=args.refine_backend,
+        promotion_policy=args.promotion_policy,
         min_train_improvement=args.min_train_improvement,
         min_validation_improvement=args.min_validation_improvement,
         allow_source_mutations=args.allow_source_mutations or scientist is not None or engineer is not None,

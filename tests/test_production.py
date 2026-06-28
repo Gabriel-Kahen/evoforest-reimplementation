@@ -5,10 +5,24 @@ import json
 
 import pytest
 
+from evoforest_arch.cli import main as cli_main
+from evoforest_arch.evaluator import EvaluationResult
 from evoforest_arch.graph_io import graph_from_path
 from evoforest_arch.llm import LLMEngineerAgent, LLMMemorandumAgent, LLMScientistAgent, StaticLLMClient
 from evoforest_arch.mutations import MutationDocument, MutationSpec
-from evoforest_arch.production import ProductionConfig, ProductionEvolutionRunner, export_best_graph, inspect_run, recheck_run
+from evoforest_arch.production import (
+    CV_AUC_PROMOTION_POLICY,
+    PAPER_GPU_DEVICES,
+    PAPER_PROFILE,
+    PAPER_PROFILE_STEPS,
+    ProductionConfig,
+    ProductionContext,
+    ProductionEvolutionRunner,
+    RunState,
+    export_best_graph,
+    inspect_run,
+    recheck_run,
+)
 
 
 def small_config(tmp_path, *, steps: int = 1, seed: int = 41, **kwargs: object) -> ProductionConfig:
@@ -46,6 +60,17 @@ def paper_memorandum(label: str) -> str:
             "[ERROR LOG]",
             "- No runtime errors recorded.",
         ]
+    )
+
+
+def dummy_result(auc: float) -> EvaluationResult:
+    return EvaluationResult(
+        auc=auc,
+        config={},
+        feature_names=[],
+        predictions=[],
+        alphas=[],
+        diagnostics={},
     )
 
 
@@ -268,6 +293,105 @@ def test_production_defaults_to_paper_four_gpu_island_topology(tmp_path) -> None
     assert summary["islands"]["workers"] == 4
     assert summary["islands"]["devices"] == ["cuda:0", "cuda:1", "cuda:2", "cuda:3"]
     assert {item["device"] for item in summary["islands"]["items"]} == {"cuda:0", "cuda:1", "cuda:2", "cuda:3"}
+
+
+def test_paper_profile_constructor_encodes_long_run_contract(tmp_path) -> None:
+    config = ProductionConfig.paper_profile(tmp_path / "paper_profile")
+
+    assert config.profile == PAPER_PROFILE
+    assert config.steps == PAPER_PROFILE_STEPS
+    assert config.islands == 4
+    assert config.async_islands is True
+    assert config.island_workers == 4
+    assert config.island_devices == PAPER_GPU_DEVICES
+    assert config.max_configurations == 64
+    assert config.refine_globals is True
+    assert config.refine_backend == "torch"
+    assert config.promotion_policy == CV_AUC_PROMOTION_POLICY
+    assert config.min_train_improvement == 0.0
+
+
+def test_cli_paper_profile_writes_paper_manifest_without_long_run(tmp_path) -> None:
+    output = tmp_path / "paper_profile_cli"
+    result = cli_main(
+        [
+            "evolve",
+            "--profile",
+            "paper",
+            "--steps",
+            "0",
+            "--n-series",
+            "60",
+            "--length",
+            "70",
+            "--folds",
+            "2",
+            "--no-refine-globals",
+            "--island-devices",
+            "cpu:0,cpu:1,cpu:2,cpu:3",
+            "--output",
+            str(output),
+        ]
+    )
+
+    assert result == 0
+    manifest = json.loads((output / "run_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["profile"] == "paper"
+    assert manifest["profile_spec"]["target_steps"] == 600
+    assert manifest["profile_spec"]["promotion_metric"] == "train_cv_roc_auc"
+    assert manifest["evaluator"]["max_configurations"] == 64
+    assert manifest["evaluator"]["refine_backend"] == "torch"
+    assert manifest["evaluator"]["refine_globals"] is False
+    assert manifest["acceptance"]["policy"] == "paper_cv_auc_improvement"
+    assert manifest["acceptance"]["validation_gate"] is False
+    assert manifest["islands"]["count"] == 4
+    assert manifest["islands"]["workers"] == 4
+    assert manifest["islands"]["devices"] == ["cpu:0", "cpu:1", "cpu:2", "cpu:3"]
+    assert manifest["islands"]["scientist_temperature_schedule"] == [0.35, 0.5, 0.6, 0.75]
+    inspected = inspect_run(output)
+    assert inspected["profile"] == "paper"
+    assert inspected["acceptance"]["policy"] == "paper_cv_auc_improvement"
+
+
+def test_paper_profile_promotion_uses_cv_auc_not_validation_gate(tmp_path) -> None:
+    runner = ProductionEvolutionRunner(
+        ProductionConfig.paper_profile(
+            tmp_path / "unused",
+            steps=0,
+            refine_globals=False,
+            island_devices=("cpu:0", "cpu:1", "cpu:2", "cpu:3"),
+        )
+    )
+    context = ProductionContext(
+        run_dir=tmp_path,
+        manifest={
+            "acceptance": {
+                "policy": "paper_cv_auc_improvement",
+                "metric": "train_cv_roc_auc",
+                "min_train_improvement": 0.0,
+                "min_validation_improvement": 1.0,
+            }
+        },
+        split_manifest=None,  # type: ignore[arg-type]
+        splits={},
+        state=RunState(
+            run_id="dummy",
+            step=0,
+            archive_version=0,
+            best_train_auc=0.5,
+            best_validation_auc=0.9,
+            best_config={},
+            current_graph_path="current_graph.json",
+            best_graph_path="best_graph.json",
+            rng_state={},
+        ),
+        current_graph=None,  # type: ignore[arg-type]
+        best_graph=None,  # type: ignore[arg-type]
+        best_train_result=dummy_result(0.5),
+        best_validation_result=dummy_result(0.9),
+    )
+
+    assert runner._promotes(dummy_result(0.51), dummy_result(0.1), context) is True
 
 
 def test_production_islands_require_async_mode(tmp_path) -> None:
