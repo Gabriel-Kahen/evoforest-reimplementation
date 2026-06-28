@@ -47,7 +47,7 @@ The implementation focuses on the reusable system design:
   alternatives.
 - A mutation/evolution loop with persistent JSON artifacts, sectioned
   hypothesis-free memoranda, a versioned global-best archive, sequential island
-  mode, and asynchronous thread-backed island mode.
+  mode, demo thread-backed islands, and production process-backed island actors.
 
 ## Install
 
@@ -91,9 +91,10 @@ evoforest-arch export-best runs/production-smoke --output runs/production-smoke-
 evoforest-arch recheck runs/production-smoke
 ```
 
-Each island owns proposal, repair, evaluation, prompt records, state, and
-memorandum updates. The root run directory is the global-best ledger. To run a
-local smoke test without CUDA, pass explicit CPU-like device slots:
+Each production island runs as its own OS process actor and owns proposal,
+repair, evaluation, prompt records, state, and memorandum updates. The root run
+directory is the global-best ledger. To run a local smoke test without CUDA, pass
+explicit CPU-like device slots:
 
 ```bash
 evoforest-arch evolve --steps 4 --island-devices cpu:0,cpu:1,cpu:2,cpu:3 --no-refine-globals --output runs/production-cpu-smoke
@@ -241,8 +242,8 @@ records an explicit skipped-refinement reason when the torch path is unavailable
 or a gradient probe finds no active trainable global influence. The NumPy
 coordinate refiner is retained as an explicit compatibility backend, not as the
 paper-mode fallback.
-Production `evolve` is island-native by default: four persistent island workers
-own their graph state and are assigned one dedicated device each
+Production `evolve` is island-native by default: four persistent island process
+actors own their graph state and are assigned one dedicated device each
 (`cuda:0,cuda:1,cuda:2,cuda:3` unless `--island-devices` overrides them). It
 persists per-island state, graph artifacts, checkpoints, memoranda, job logs, and
 migration records so resume restores the island frontier instead of restarting

@@ -236,9 +236,11 @@ def test_production_async_islands_write_durable_artifacts_and_resume(tmp_path) -
     assert summary["islands"]["topology"] == "paper_dedicated_gpu"
     assert summary["islands"]["count"] == 4
     assert summary["islands"]["workers"] == 4
+    assert summary["islands"]["worker_execution"] == "process_actor"
     assert summary["islands"]["devices"] == ["cpu:0", "cpu:1", "cpu:2", "cpu:3"]
     assert summary["islands"]["scientist_temperature_schedule"] == [0.35, 0.5, 0.6, 0.75]
     assert summary["islands"]["migration_count"] >= 1
+    assert {item["worker_execution"] for item in summary["islands"]["items"]} == {"process_actor"}
     assert (run_dir / "migrations.jsonl").exists()
     assert (run_dir / "jobs.jsonl").exists()
     events = read_jsonl(run_dir / "events.jsonl")
@@ -250,6 +252,9 @@ def test_production_async_islands_write_durable_artifacts_and_resume(tmp_path) -
     terminal = {str(row["job_id"]): row for row in jobs if row["status"] in {"completed", "failed", "stale", "abandoned_on_resume"}}
     assert set(submitted) == set(terminal)
     assert {str(row["device"]) for row in submitted.values()} == {"cpu:0", "cpu:1", "cpu:2", "cpu:3"}
+    assert {str(row["worker_execution"]) for row in submitted.values()} == {"process_actor"}
+    assert len({int(row["actor_pid"]) for row in submitted.values()}) == 4
+    assert all(int(row["actor_pid"]) > 0 for row in terminal.values())
     for island_id in range(4):
         island_dir = run_dir / "islands" / f"island_{island_id}"
         assert (island_dir / "state.json").exists()
@@ -262,12 +267,15 @@ def test_production_async_islands_write_durable_artifacts_and_resume(tmp_path) -
         island_jobs = read_jsonl(island_dir / "jobs.jsonl")
         assert all(row["island"] == island_id for row in island_jobs)
         assert all(row["device"] == f"cpu:{island_id}" for row in island_jobs)
+        assert {str(row["worker_execution"]) for row in island_jobs} == {"process_actor"}
+        assert len({int(row["actor_pid"]) for row in island_jobs}) == 1
 
     resumed = ProductionEvolutionRunner(ProductionConfig(output_dir=run_dir, steps=1)).run(resume=True)
     assert resumed["step"] == 5
     assert resumed["event_count"] == 5
     assert resumed["islands"]["mode"] == "async"
     assert resumed["islands"]["count"] == 4
+    assert resumed["islands"]["worker_execution"] == "process_actor"
     assert resumed["islands"]["devices"] == ["cpu:0", "cpu:1", "cpu:2", "cpu:3"]
     assert len((run_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()) == 5
     assert len((run_dir / "migrations.jsonl").read_text(encoding="utf-8").splitlines()) >= summary["islands"]["migration_count"]
@@ -291,6 +299,7 @@ def test_production_defaults_to_paper_four_gpu_island_topology(tmp_path) -> None
     assert summary["islands"]["topology"] == "paper_dedicated_gpu"
     assert summary["islands"]["count"] == 4
     assert summary["islands"]["workers"] == 4
+    assert summary["islands"]["worker_execution"] == "process_actor"
     assert summary["islands"]["devices"] == ["cuda:0", "cuda:1", "cuda:2", "cuda:3"]
     assert {item["device"] for item in summary["islands"]["items"]} == {"cuda:0", "cuda:1", "cuda:2", "cuda:3"}
 
@@ -346,6 +355,7 @@ def test_cli_paper_profile_writes_paper_manifest_without_long_run(tmp_path) -> N
     assert manifest["acceptance"]["validation_gate"] is False
     assert manifest["islands"]["count"] == 4
     assert manifest["islands"]["workers"] == 4
+    assert manifest["islands"]["worker_execution"] == "process_actor"
     assert manifest["islands"]["devices"] == ["cpu:0", "cpu:1", "cpu:2", "cpu:3"]
     assert manifest["islands"]["scientist_temperature_schedule"] == [0.35, 0.5, 0.6, 0.75]
     inspected = inspect_run(output)
