@@ -38,18 +38,26 @@ class RefinementResult:
 class GlobalRefiner:
     """Global refinement phase with optional PyTorch L-BFGS and NumPy fallback."""
 
-    def __init__(self, steps: int = 20, seed: int = 0, initial_step_size: float = 0.1, backend: str = "auto") -> None:
+    def __init__(
+        self,
+        steps: int = 20,
+        seed: int = 0,
+        initial_step_size: float = 0.1,
+        backend: str = "auto",
+        device: str | None = None,
+    ) -> None:
         self.steps = max(0, int(steps))
         self.seed = int(seed)
         self.initial_step_size = float(initial_step_size)
         if backend not in {"auto", "torch", "numpy"}:
             raise ValueError("Refinement backend must be one of: auto, torch, numpy.")
         self.backend = backend
+        self.device = device
 
     def refine(self, graph: Graph, inputs: dict[str, object], y: np.ndarray, config: dict[str, str]) -> RefinementResult:
         if self.backend in {"auto", "torch"}:
             try:
-                return TorchLBFGSRefiner(self.steps, self.backend).refine(graph, inputs, y, config)
+                return TorchLBFGSRefiner(self.steps, self.backend, self.device).refine(graph, inputs, y, config)
             except UnsupportedTorchRefinement as exc:
                 if self.backend == "torch":
                     raise
@@ -121,15 +129,16 @@ class UnsupportedTorchRefinement(RuntimeError):
 
 
 class TorchGlobalProxy:
-    def __init__(self, graph: Graph, parameters: Any, torch_module: Any) -> None:
+    def __init__(self, graph: Graph, parameters: Any, torch_module: Any, device: Any = None) -> None:
         self.graph = graph
         self.parameters = parameters
         self.torch = torch_module
+        self.device = device
 
     def get(self, name: str) -> Any:
         if name in self.parameters:
             return self.parameters[name]
-        return self.torch.as_tensor(self.graph.globals.get(name), dtype=self.torch.float64)
+        return self.torch.as_tensor(self.graph.globals.get(name), dtype=self.torch.float64, device=self.device)
 
 
 class TorchEvalContext:
@@ -144,15 +153,24 @@ class TorchEvalContext:
 
 
 class TorchFixedPathEvaluator:
-    def __init__(self, graph: Graph, inputs: dict[str, object], config: dict[str, str], parameters: Any, torch_module: Any) -> None:
+    def __init__(
+        self,
+        graph: Graph,
+        inputs: dict[str, object],
+        config: dict[str, str],
+        parameters: Any,
+        torch_module: Any,
+        device: Any = None,
+    ) -> None:
         self.graph = graph
         self.config = graph.selected_config(config)
         self.torch = torch_module
+        self.device = device
         self.inputs = {
-            name: self.torch.as_tensor(value, dtype=self.torch.float64) if isinstance(value, np.ndarray) else value
+            name: self.torch.as_tensor(value, dtype=self.torch.float64, device=self.device) if isinstance(value, np.ndarray) else value
             for name, value in inputs.items()
         }
-        self.ctx = TorchEvalContext(self.inputs, TorchGlobalProxy(graph, parameters, self.torch))
+        self.ctx = TorchEvalContext(self.inputs, TorchGlobalProxy(graph, parameters, self.torch, self.device))
         self.cache: dict[tuple[str, str], Any] = {}
 
     def evaluate_features(self) -> Any:
@@ -199,15 +217,17 @@ class TorchFixedPathEvaluator:
 
 
 class TorchLBFGSRefiner:
-    def __init__(self, steps: int, requested_backend: str) -> None:
+    def __init__(self, steps: int, requested_backend: str, device: str | None = None) -> None:
         self.steps = max(0, int(steps))
         self.requested_backend = requested_backend
+        self.device = device
 
     def refine(self, graph: Graph, inputs: dict[str, object], y: np.ndarray, config: dict[str, str]) -> RefinementResult:
         try:
             import torch
         except ImportError as exc:
             raise UnsupportedTorchRefinement("PyTorch is not installed; install the torch extra to enable L-BFGS refinement.") from exc
+        device = torch.device(self.device) if self.device else None
 
         trainable = graph.globals.trainable_names()
         if not trainable or self.steps == 0:
@@ -221,14 +241,19 @@ class TorchLBFGSRefiner:
 
         torch.manual_seed(0)
         parameters = torch.nn.ParameterDict(
-            {name: torch.nn.Parameter(torch.as_tensor(graph.globals.get(name), dtype=torch.float64).clone()) for name in active}
+            {
+                name: torch.nn.Parameter(
+                    torch.as_tensor(graph.globals.get(name), dtype=torch.float64, device=device).clone()
+                )
+                for name in active
+            }
         )
-        target = torch.as_tensor(np.asarray(y, dtype=np.float64), dtype=torch.float64)
-        probe = TorchFixedPathEvaluator(graph, inputs, config, parameters, torch)
+        target = torch.as_tensor(np.asarray(y, dtype=np.float64), dtype=torch.float64, device=device)
+        probe = TorchFixedPathEvaluator(graph, inputs, config, parameters, torch, device)
         with torch.no_grad():
             initial_features = probe.evaluate_features()
             n_features = int(initial_features.shape[1])
-        readout = torch.nn.Linear(n_features, 1, bias=True, dtype=torch.float64)
+        readout = torch.nn.Linear(n_features, 1, bias=True, dtype=torch.float64, device=device)
         readout.bias.data.fill_(float(torch.mean(target)))
         optimizer = torch.optim.LBFGS(
             list(parameters.parameters()) + list(readout.parameters()),
@@ -238,7 +263,7 @@ class TorchLBFGSRefiner:
         )
 
         def loss_value() -> Any:
-            evaluator = TorchFixedPathEvaluator(graph, inputs, config, parameters, torch)
+            evaluator = TorchFixedPathEvaluator(graph, inputs, config, parameters, torch, device)
             features = evaluator.evaluate_features()
             mean = torch.mean(features, dim=0, keepdim=True)
             scale = torch.clamp(torch.std(features, dim=0, unbiased=False, keepdim=True), min=1e-8)

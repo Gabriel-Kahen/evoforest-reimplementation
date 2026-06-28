@@ -80,7 +80,9 @@ evoforest-arch demo --steps 12 --islands 2 --async-islands --refine-backend auto
 The production workflow is the safer path for serious graph search. It writes a
 run manifest, dataset fingerprint, fixed train/validation/test split manifest,
 resume state, reloadable graph artifacts, and a stricter archive that only promotes
-graphs after both train improvement and validation recheck improvement.
+graphs after both train improvement and validation recheck improvement. By
+default, production `evolve` uses the paper-native four-island asynchronous
+topology with dedicated devices `cuda:0,cuda:1,cuda:2,cuda:3`.
 
 ```bash
 evoforest-arch evolve --steps 4 --seed 17 --n-series 240 --length 160 --output runs/production-smoke
@@ -89,11 +91,12 @@ evoforest-arch export-best runs/production-smoke --output runs/production-smoke-
 evoforest-arch recheck runs/production-smoke
 ```
 
-Production async islands persist independent island state and global-best
-migrations:
+Each island owns proposal, repair, evaluation, prompt records, state, and
+memorandum updates. The root run directory is the global-best ledger. To run a
+local smoke test without CUDA, pass explicit CPU-like device slots:
 
 ```bash
-evoforest-arch evolve --steps 16 --islands 4 --async-islands --island-workers 4 --output runs/production-islands
+evoforest-arch evolve --steps 4 --island-devices cpu:0,cpu:1,cpu:2,cpu:3 --no-refine-globals --output runs/production-cpu-smoke
 ```
 
 To continue an interrupted run, pass `--resume`; `--steps` then means additional
@@ -228,14 +231,16 @@ records an explicit skipped-refinement reason when the torch path is unavailable
 or a gradient probe finds no active trainable global influence. The NumPy
 coordinate refiner is retained as an explicit compatibility backend, not as the
 paper-mode fallback.
-The asynchronous island mode uses local worker threads rather than dedicated GPU
-islands. Production `evolve --islands N --async-islands` now persists per-island
-state, graph artifacts, checkpoints, memoranda, job logs, and migration records so
-resume restores the island frontier instead of restarting from a seed graph. It
-preserves the paper's fixed four-temperature scientist schedule by default, but the
-scientist/engineer loop can also run deterministically offline or call an opt-in
-OpenAI, Claude, or Gemini provider. It does not include the authors' private model,
-exact prompts, full private code-generation backend, or distributed GPU scheduler.
+Production `evolve` is island-native by default: four persistent island workers
+own their graph state and are assigned one dedicated device each
+(`cuda:0,cuda:1,cuda:2,cuda:3` unless `--island-devices` overrides them). It
+persists per-island state, graph artifacts, checkpoints, memoranda, job logs, and
+migration records so resume restores the island frontier instead of restarting
+from a seed graph. It preserves the paper's fixed four-temperature scientist
+schedule by default, but the scientist/engineer loop can also run
+deterministically offline or call an opt-in OpenAI, Claude, or Gemini provider.
+It does not include the authors' private model, exact prompts, full private
+code-generation backend, or cluster scheduler.
 The source-backed mutation path recreates the paper's
 lambda-alternative representation for trusted local experiments, but it is not a
 security sandbox. Alternative-level age and

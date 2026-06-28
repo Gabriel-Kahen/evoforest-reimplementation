@@ -82,6 +82,7 @@ class RidgeEvaluator:
         irls_steps: int = 2,
         group_key: str | None = None,
         diagnostics_mode: str = "full",
+        torch_device: str | None = None,
     ) -> None:
         self.n_splits = int(n_splits)
         self.seed = int(seed)
@@ -90,6 +91,7 @@ class RidgeEvaluator:
         self.refine_globals = bool(refine_globals)
         self.refine_steps = int(refine_steps)
         self.refine_backend = refine_backend
+        self.torch_device = torch_device
         self.irls_steps = max(0, int(irls_steps))
         self.group_key = group_key
         if diagnostics_mode not in {"full", "basic"}:
@@ -116,7 +118,12 @@ class RidgeEvaluator:
             base_config = working_graph.default_config()
             if config:
                 base_config.update(config)
-            refinement = GlobalRefiner(steps=self.refine_steps, seed=self.seed, backend=self.refine_backend).refine(working_graph, inputs, y, base_config)
+            refinement = GlobalRefiner(
+                steps=self.refine_steps,
+                seed=self.seed,
+                backend=self.refine_backend,
+                device=self.torch_device,
+            ).refine(working_graph, inputs, y, base_config)
             refinement_diagnostics = refinement.to_dict()
 
         if config is not None:
