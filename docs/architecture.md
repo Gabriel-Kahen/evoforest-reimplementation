@@ -130,13 +130,14 @@ the following modules.
   LLM-backed agents are enabled it also writes prompt/response records. Island
   mode keeps per-island artifacts and migrates the current global best to weaker
   islands. Demo async islands evaluate one candidate per island concurrently in
-  local worker threads and process successes or failures as they arrive. Production
-  evolve is island-native by default: four persistent island workers own proposal,
-  repair, evaluation, prompt records, memoranda, graph state, job lifecycle logs,
-  and stale-completion detection, with one dedicated device per island and
-  immediate persistence of migration targets so resume keeps the same island
-  frontier. LLM-backed island runs preserve the fixed scientist-temperature
-  schedule independently of candidate evaluation completion order.
+  local worker threads and process successes or failures as they arrive.
+  Production evolve is island-native by default: four persistent OS process
+  actors own proposal, repair, evaluation, prompt records, memoranda, graph
+  state, job lifecycle logs, and stale-completion detection, with one dedicated
+  device per island and immediate persistence of migration targets so resume
+  keeps the same island frontier. LLM-backed island runs preserve the fixed
+  scientist-temperature schedule independently of candidate evaluation completion
+  order.
 - Memoranda are sectioned into `[OUTCOME HISTORY]`, `[STATE]`, `[WHAT WORKS]`,
   `[WHAT FAILED]`, and `[ERROR LOG]`. In LLM mode a separate memorandum agent
   writes this paper-style hypothesis-free memory and must return all required
@@ -160,11 +161,11 @@ Known approximations:
   torch reason. The deterministic NumPy coordinate refiner is explicit
   compatibility behavior.
 - The paper's long run used four asynchronous GPU islands; production `evolve`
-  now defaults to four durable island-native workers mapped to
+  now defaults to four durable island-native process actors mapped to
   `cuda:0,cuda:1,cuda:2,cuda:3`, with the paper-style scientist temperature
-  schedule persisted in the run manifest. This is a single-process scheduler with
-  dedicated device assignment, not the authors' private cluster orchestration
-  stack.
+  schedule persisted in the run manifest. The root coordinator still runs in one
+  process and is not the authors' private cluster orchestration stack, but island
+  candidate work and island memoranda are process-isolated per dedicated device.
 - The default production profile remains stricter than the paper's reported
   global-best CV-AUC frontier: a production candidate must improve both train CV
   score and a held-out validation recheck before it can become an island or

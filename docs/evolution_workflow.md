@@ -24,15 +24,16 @@ Each new run writes:
 - `events.jsonl`: candidate outcomes.
 - `validation_rechecks.jsonl`: explicit recheck records.
 
-Production runs are island-native by default. Four persistent island workers are
-assigned dedicated devices `cuda:0,cuda:1,cuda:2,cuda:3`; each worker owns its
-proposal, repair, evaluation, prompt records, memorandum, graph state, and job
-artifacts. The root run directory records the global-best frontier and migrations.
+Production runs are island-native by default. Four persistent island process
+actors are assigned dedicated devices `cuda:0,cuda:1,cuda:2,cuda:3`; each actor
+owns its proposal, repair, evaluation, prompt records, memorandum, graph state,
+and job artifacts. The root run directory records the global-best frontier and
+migrations.
 Production island runs additionally write:
 
 - `jobs.jsonl`: submitted/completed/failed/stale/abandoned job lifecycle records,
-  including island id, worker id, dedicated device, base graph hash, and mutation
-  path.
+  including island id, worker id, worker execution model, actor PID, dedicated
+  device, base graph hash, and mutation path.
 - `migrations.jsonl`: global-best transfers to weaker islands.
 - `islands/island_N/state.json`: island-local step, generation, RNG state, best
   scores, history, and errors.
