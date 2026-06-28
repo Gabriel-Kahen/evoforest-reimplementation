@@ -246,7 +246,13 @@ def test_production_async_islands_write_durable_artifacts_and_resume(tmp_path) -
     events = read_jsonl(run_dir / "events.jsonl")
     assert [event["step"] for event in events] == [1, 2, 3, 4]
     assert len({event["job_id"] for event in events}) == 4
+    assert {str(event["worker_execution"]) for event in events} == {"process_actor"}
+    assert all(int(event["actor_pid"]) > 0 for event in events)
     assert any(event.get("stale") for event in events)
+    migrations = read_jsonl(run_dir / "migrations.jsonl")
+    assert migrations
+    assert {str(row["worker_execution"]) for row in migrations} == {"process_actor"}
+    assert all(int(row["target_actor_pid"]) > 0 for row in migrations)
     jobs = read_jsonl(run_dir / "jobs.jsonl")
     submitted = {str(row["job_id"]): row for row in jobs if row["status"] == "submitted"}
     terminal = {str(row["job_id"]): row for row in jobs if row["status"] in {"completed", "failed", "stale", "abandoned_on_resume"}}
@@ -269,6 +275,12 @@ def test_production_async_islands_write_durable_artifacts_and_resume(tmp_path) -
         assert all(row["device"] == f"cpu:{island_id}" for row in island_jobs)
         assert {str(row["worker_execution"]) for row in island_jobs} == {"process_actor"}
         assert len({int(row["actor_pid"]) for row in island_jobs}) == 1
+        island_migrations_path = island_dir / "migrations.jsonl"
+        if island_migrations_path.exists():
+            island_migrations = read_jsonl(island_migrations_path)
+            assert all(row["target_island"] == island_id for row in island_migrations)
+            assert {str(row["worker_execution"]) for row in island_migrations} == {"process_actor"}
+            assert all(int(row["target_actor_pid"]) > 0 for row in island_migrations)
 
     resumed = ProductionEvolutionRunner(ProductionConfig(output_dir=run_dir, steps=1)).run(resume=True)
     assert resumed["step"] == 5
