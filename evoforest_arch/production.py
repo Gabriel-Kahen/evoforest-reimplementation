@@ -205,6 +205,34 @@ class ProductionIslandContext:
 
 
 @dataclass
+class IslandActorSnapshot:
+    island: int
+    device: str
+    worker_id: str
+    actor_pid: int
+    state: RunState
+    current_graph_payload: dict[str, Any]
+    best_graph_payload: dict[str, Any]
+    best_train_result: EvaluationResult
+    best_validation_result: EvaluationResult
+
+
+@dataclass
+class IslandPreparedCandidate:
+    island: int
+    device: str
+    worker_id: str
+    actor_pid: int
+    job_id: str
+    proposed_step: int
+    island_step: int
+    generation: int
+    base_graph_hash: str
+    mutation_path: str
+    snapshot: IslandActorSnapshot
+
+
+@dataclass
 class PendingIslandCandidate:
     island: ProductionIslandContext
     future: concurrent.futures.Future
@@ -214,6 +242,7 @@ class PendingIslandCandidate:
     generation: int
     base_graph_hash: str
     actor_pid: int | None = None
+    prepared: IslandPreparedCandidate | None = None
 
 
 @dataclass
@@ -231,6 +260,33 @@ class IslandCandidateResult:
 class IslandActorCandidateResult:
     actor_pid: int
     candidate: IslandCandidateResult
+
+
+@dataclass
+class IslandCommitDecision:
+    global_step: int
+    accepted: bool
+    global_best: bool
+    root_best_train_auc: float
+    root_best_validation_auc: float
+    previous_global_train_auc: float
+    previous_global_validation_auc: float
+
+
+@dataclass
+class IslandActorCommitResult:
+    actor_pid: int
+    snapshot: IslandActorSnapshot
+    event: dict[str, Any]
+    terminal_status: str
+    terminal_error: str = ""
+
+
+@dataclass
+class IslandActorMigrationResult:
+    actor_pid: int
+    snapshot: IslandActorSnapshot
+    event: dict[str, Any]
 
 
 class ProductionIslandWorker:
@@ -253,6 +309,14 @@ class ProductionIslandWorker:
         train_y: np.ndarray | None = None,
         validation_inputs: dict[str, object] | None = None,
         validation_y: np.ndarray | None = None,
+        run_dir: pathlib.Path | None = None,
+        manifest: dict[str, Any] | None = None,
+        split_manifest: SplitManifest | None = None,
+        state: RunState | None = None,
+        current_graph: Graph | None = None,
+        best_graph: Graph | None = None,
+        best_train_result: EvaluationResult | None = None,
+        best_validation_result: EvaluationResult | None = None,
     ) -> None:
         self.island = int(island)
         self.device = str(device)
@@ -269,6 +333,15 @@ class ProductionIslandWorker:
         self.train_y = train_y
         self.validation_inputs = validation_inputs
         self.validation_y = validation_y
+        self.run_dir = run_dir
+        self.manifest = manifest or {}
+        self.split_manifest = split_manifest
+        self.state = state
+        self.current_graph = current_graph
+        self.best_graph = best_graph
+        self.best_train_result = best_train_result
+        self.best_validation_result = best_validation_result
+        self._prepared_jobs: dict[str, dict[str, Any]] = {}
 
     def run_candidate(
         self,
@@ -353,6 +426,229 @@ class ProductionIslandWorker:
         loop._install_task_context(self.task_context)
         ProductionEvolutionRunner._write_memorandum_static(context, loop=loop, island=self.island)
 
+    def snapshot(self) -> IslandActorSnapshot:
+        state, current_graph, best_graph, best_train_result, best_validation_result = self._require_island_state()
+        return IslandActorSnapshot(
+            island=self.island,
+            device=self.device,
+            worker_id=self.worker_id,
+            actor_pid=os.getpid(),
+            state=RunState.from_dict(state.to_dict()),
+            current_graph_payload=current_graph.to_dict(),
+            best_graph_payload=best_graph.to_dict(),
+            best_train_result=best_train_result,
+            best_validation_result=best_validation_result,
+        )
+
+    def prepare_candidate(self, proposed_step: int) -> IslandPreparedCandidate:
+        state, current_graph, _best_graph, best_train_result, _best_validation_result = self._require_island_state()
+        if self.run_dir is None:
+            raise RuntimeError("Production island worker has no run directory.")
+        island_step = int(state.step) + 1
+        generation = int(state.generation)
+        base_graph = current_graph.clone()
+        base_graph_hash = graph_hash(base_graph)
+        job_id = f"g{int(proposed_step):04d}_i{self.island}_s{island_step:04d}_v{generation:04d}"
+        mutation_path = f"islands/island_{self.island}/mutations/island_{self.island}_step_{island_step:04d}.yaml"
+        self._prepared_jobs[job_id] = {
+            "base_graph": base_graph,
+            "best_result": best_train_result,
+            "rng_state": copy.deepcopy(state.rng_state),
+            "errors": list(state.errors),
+            "island_step": island_step,
+            "generation": generation,
+            "base_graph_hash": base_graph_hash,
+        }
+        self._write_island_job_event(
+            {
+                "job_id": job_id,
+                "status": "submitted",
+                "global_step_hint": int(proposed_step),
+                "island": self.island,
+                "island_step": island_step,
+                "base_generation": generation,
+                "base_graph_hash": base_graph_hash,
+                "mutation_path": mutation_path,
+                "worker_id": self.worker_id,
+                "worker_execution": "process_actor",
+                "actor_pid": os.getpid(),
+                "device": self.device,
+            }
+        )
+        return IslandPreparedCandidate(
+            island=self.island,
+            device=self.device,
+            worker_id=self.worker_id,
+            actor_pid=os.getpid(),
+            job_id=job_id,
+            proposed_step=int(proposed_step),
+            island_step=island_step,
+            generation=generation,
+            base_graph_hash=base_graph_hash,
+            mutation_path=mutation_path,
+            snapshot=self.snapshot(),
+        )
+
+    def run_prepared_candidate(self, job_id: str) -> IslandActorCandidateResult:
+        if self.run_dir is None:
+            raise RuntimeError("Production island worker has no run directory.")
+        prepared = self._prepared_jobs.get(job_id)
+        if prepared is None:
+            raise RuntimeError(f"Unknown island job {job_id!r}.")
+        return IslandActorCandidateResult(
+            actor_pid=os.getpid(),
+            candidate=self.run_candidate(
+                base_graph=prepared["base_graph"],
+                best_result=prepared["best_result"],
+                rng_state=prepared["rng_state"],
+                island_step=int(prepared["island_step"]),
+                output_dir=self.run_dir,
+                errors=list(prepared["errors"]),
+            ),
+        )
+
+    def commit_candidate(
+        self,
+        prepared: IslandPreparedCandidate,
+        result: IslandCandidateResult,
+        decision: IslandCommitDecision,
+    ) -> IslandActorCommitResult:
+        state, _current_graph, _best_graph, _best_train_result, _best_validation_result = self._require_island_state()
+        self._prepared_jobs.pop(prepared.job_id, None)
+        outcome = result.outcome
+        candidate_graph = (
+            graph_from_dict(result.candidate_graph_payload, allow_source=self.allow_source_mutations)
+            if result.candidate_graph_payload is not None
+            else None
+        )
+        state.rng_state = result.rng_state
+        state.errors = list(result.errors[-40:])
+        if int(state.generation) != int(prepared.generation):
+            event = self._stale_event(prepared, decision, result.document)
+            return self._finish_commit(prepared, event, terminal_status="stale")
+        if outcome.failed:
+            event = self._failed_event(prepared, decision, result.document, outcome.error or "Unknown candidate failure.")
+            return self._finish_commit(prepared, event, terminal_status="failed", terminal_error=str(event.get("error", "")))
+        if (
+            candidate_graph is None
+            or outcome.result is None
+            or result.validation_result is None
+            or result.maintenance is None
+        ):
+            event = self._failed_event(prepared, decision, result.document, "Candidate evaluation returned an incomplete success outcome.")
+            return self._finish_commit(prepared, event, terminal_status="failed", terminal_error=str(event.get("error", "")))
+
+        candidate_train = outcome.result
+        candidate_validation = result.validation_result
+        previous_island_train_auc = float(self.best_train_result.auc) if self.best_train_result is not None else float(state.best_train_auc)
+        previous_island_validation_auc = float(self.best_validation_result.auc) if self.best_validation_result is not None else float(state.best_validation_auc)
+        if decision.accepted:
+            self.current_graph = candidate_graph
+            self.best_graph = candidate_graph.clone()
+            self.best_train_result = candidate_train
+            self.best_validation_result = candidate_validation
+            state.archive_version += 1
+            state.best_train_auc = float(candidate_train.auc)
+            state.best_validation_auc = float(candidate_validation.auc)
+            state.best_config = dict(candidate_train.config)
+            state.generation += 1
+            metadata = {
+                "island": self.island,
+                "device": self.device,
+                "worker_id": self.worker_id,
+                "worker_execution": "process_actor",
+                "actor_pid": os.getpid(),
+                "global_step": int(decision.global_step),
+            }
+            context = self._context()
+            self._write_graph_artifacts(context, step=prepared.island_step, metadata=metadata)
+            self._write_archive_entry(context, step=prepared.island_step, metadata={**metadata, "source": "candidate"})
+            self._write_checkpoint(context, step=prepared.island_step, metadata=metadata)
+
+        event = self._candidate_event(
+            prepared,
+            decision,
+            mutation=result.document.to_dict(),
+            train_result=candidate_train,
+            validation_result=candidate_validation,
+            maintenance=result.maintenance,
+            previous_island_train_auc=previous_island_train_auc,
+            previous_island_validation_auc=previous_island_validation_auc,
+        )
+        return self._finish_commit(prepared, event, terminal_status="completed")
+
+    def apply_migration(
+        self,
+        *,
+        source_island: int,
+        global_step: int,
+        global_archive_version: int,
+        graph_payload: dict[str, Any],
+        train_result: EvaluationResult,
+        validation_result: EvaluationResult,
+        best_config: dict[str, str],
+        selection_metric: str,
+        global_best_score: float,
+    ) -> IslandActorMigrationResult:
+        state, _current_graph, _best_graph, best_train_result, best_validation_result = self._require_island_state()
+        previous_score = self._frontier_score(best_train_result, best_validation_result)
+        previous_best_train_auc = float(best_train_result.auc)
+        previous_best_validation_auc = float(best_validation_result.auc)
+        migrated_graph = graph_from_dict(graph_payload, allow_source=self.allow_source_mutations)
+        self.current_graph = migrated_graph
+        self.best_graph = migrated_graph.clone()
+        self.best_train_result = train_result
+        self.best_validation_result = validation_result
+        state.archive_version += 1
+        state.best_train_auc = float(train_result.auc)
+        state.best_validation_auc = float(validation_result.auc)
+        state.best_config = dict(best_config)
+        state.generation += 1
+        event = {
+            "mode": "production_async_migration",
+            "global_step": int(global_step),
+            "source_island": int(source_island),
+            "target_island": self.island,
+            "target_device": self.device,
+            "target_worker_id": self.worker_id,
+            "worker_execution": "process_actor",
+            "target_actor_pid": os.getpid(),
+            "target_generation": int(state.generation),
+            "global_best_version": int(global_archive_version),
+            "selection_metric": selection_metric,
+            "previous_best_score": previous_score,
+            "global_best_score": float(global_best_score),
+            "previous_best_train_auc": previous_best_train_auc,
+            "previous_best_validation_auc": previous_best_validation_auc,
+            "global_best_validation_auc": float(validation_result.auc),
+            "global_best_train_auc": float(train_result.auc),
+            "graph_hash": graph_hash(migrated_graph),
+        }
+        self._write_island_migration_event(event)
+        state.history.append(
+            f"- MIGRATED: global_step={int(global_step)} source_island={source_island} "
+            f"{selection_metric}={float(global_best_score):.6f}"
+        )
+        del state.history[:-40]
+        context = self._context()
+        metadata = {
+            "island": self.island,
+            "device": self.device,
+            "worker_id": self.worker_id,
+            "worker_execution": "process_actor",
+            "actor_pid": os.getpid(),
+            "global_step": int(global_step),
+            "source": "migration",
+            "source_island": int(source_island),
+            "selection_metric": selection_metric,
+        }
+        self._write_graph_artifacts(context, step=int(state.step), metadata=metadata)
+        self._write_archive_entry(context, step=int(state.step), metadata=metadata)
+        self._write_checkpoint(context, step=int(state.step), metadata=metadata)
+        self._write_state()
+        self.write_memorandum(context)
+        return IslandActorMigrationResult(actor_pid=os.getpid(), snapshot=self.snapshot(), event=event)
+
     def _build_loop(self, graph: Graph, rng_state: dict[str, Any]) -> EvolutionLoop:
         loop = EvolutionLoop(
             graph,
@@ -367,6 +663,286 @@ class ProductionIslandWorker:
         )
         loop.rng.bit_generator.state = rng_state
         return loop
+
+    def _require_island_state(self) -> tuple[RunState, Graph, Graph, EvaluationResult, EvaluationResult]:
+        if (
+            self.state is None
+            or self.current_graph is None
+            or self.best_graph is None
+            or self.best_train_result is None
+            or self.best_validation_result is None
+        ):
+            raise RuntimeError("Production island worker has no actor-owned island state.")
+        return self.state, self.current_graph, self.best_graph, self.best_train_result, self.best_validation_result
+
+    def _context(self) -> ProductionContext:
+        state, current_graph, best_graph, best_train_result, best_validation_result = self._require_island_state()
+        if self.run_dir is None or self.split_manifest is None:
+            raise RuntimeError("Production island worker has no run metadata.")
+        return ProductionContext(
+            run_dir=self.run_dir,
+            manifest=self.manifest,
+            split_manifest=self.split_manifest,
+            splits={},
+            state=state,
+            current_graph=current_graph,
+            best_graph=best_graph,
+            best_train_result=best_train_result,
+            best_validation_result=best_validation_result,
+        )
+
+    def _frontier_score(self, train_result: EvaluationResult, validation_result: EvaluationResult) -> float:
+        acceptance = dict(self.manifest.get("acceptance", {}))
+        if str(acceptance.get("policy", "")) == "paper_cv_auc_improvement":
+            return float(train_result.auc)
+        return float(validation_result.auc)
+
+    def _candidate_event(
+        self,
+        prepared: IslandPreparedCandidate,
+        decision: IslandCommitDecision,
+        *,
+        mutation: dict[str, object],
+        train_result: EvaluationResult,
+        validation_result: EvaluationResult,
+        maintenance: dict[str, object],
+        previous_island_train_auc: float,
+        previous_island_validation_auc: float,
+    ) -> dict[str, Any]:
+        state, _current_graph, _best_graph, _best_train_result, _best_validation_result = self._require_island_state()
+        return {
+            "step": int(decision.global_step),
+            "mode": "production_async_island",
+            "job_id": prepared.job_id,
+            "island": self.island,
+            "island_step": int(prepared.island_step),
+            "device": self.device,
+            "worker_id": self.worker_id,
+            "worker_execution": "process_actor",
+            "actor_pid": os.getpid(),
+            "base_graph_hash": prepared.base_graph_hash,
+            "base_generation": int(prepared.generation),
+            "generation": int(state.generation),
+            "accepted": bool(decision.accepted),
+            "global_best": bool(decision.global_best),
+            "train_auc": float(train_result.auc),
+            "validation_auc": float(validation_result.auc),
+            "best_train_auc": float(decision.root_best_train_auc),
+            "best_validation_auc": float(decision.root_best_validation_auc),
+            "island_best_train_auc": float(state.best_train_auc),
+            "island_best_validation_auc": float(state.best_validation_auc),
+            "train_delta": float(train_result.auc) - previous_island_train_auc,
+            "validation_delta": float(validation_result.auc) - previous_island_validation_auc,
+            "global_train_delta": float(train_result.auc) - float(decision.previous_global_train_auc),
+            "global_validation_delta": float(validation_result.auc) - float(decision.previous_global_validation_auc),
+            "config": train_result.config,
+            "mutation": mutation,
+            "maintenance": maintenance,
+            "promotion_policy": self.manifest["acceptance"],
+        }
+
+    def _failed_event(
+        self,
+        prepared: IslandPreparedCandidate,
+        decision: IslandCommitDecision,
+        document: MutationDocument,
+        error: str,
+    ) -> dict[str, Any]:
+        state, _current_graph, _best_graph, _best_train_result, _best_validation_result = self._require_island_state()
+        return {
+            "step": int(decision.global_step),
+            "mode": "production_async_island",
+            "job_id": prepared.job_id,
+            "island": self.island,
+            "island_step": int(prepared.island_step),
+            "device": self.device,
+            "worker_id": self.worker_id,
+            "worker_execution": "process_actor",
+            "actor_pid": os.getpid(),
+            "base_graph_hash": prepared.base_graph_hash,
+            "base_generation": int(prepared.generation),
+            "generation": int(state.generation),
+            "accepted": False,
+            "failed": True,
+            "error": error,
+            "train_auc": None,
+            "validation_auc": None,
+            "best_train_auc": float(decision.root_best_train_auc),
+            "best_validation_auc": float(decision.root_best_validation_auc),
+            "island_best_train_auc": float(state.best_train_auc),
+            "island_best_validation_auc": float(state.best_validation_auc),
+            "config": state.best_config,
+            "mutation": document.to_dict(),
+        }
+
+    def _stale_event(
+        self,
+        prepared: IslandPreparedCandidate,
+        decision: IslandCommitDecision,
+        document: MutationDocument,
+    ) -> dict[str, Any]:
+        state, _current_graph, _best_graph, _best_train_result, _best_validation_result = self._require_island_state()
+        return {
+            "step": int(decision.global_step),
+            "mode": "production_async_island",
+            "job_id": prepared.job_id,
+            "island": self.island,
+            "island_step": int(prepared.island_step),
+            "device": self.device,
+            "worker_id": self.worker_id,
+            "worker_execution": "process_actor",
+            "actor_pid": os.getpid(),
+            "base_graph_hash": prepared.base_graph_hash,
+            "base_generation": int(prepared.generation),
+            "generation": int(state.generation),
+            "accepted": False,
+            "stale": True,
+            "stale_reason": "Island graph generation changed before candidate completion.",
+            "train_auc": None,
+            "validation_auc": None,
+            "best_train_auc": float(decision.root_best_train_auc),
+            "best_validation_auc": float(decision.root_best_validation_auc),
+            "island_best_train_auc": float(state.best_train_auc),
+            "island_best_validation_auc": float(state.best_validation_auc),
+            "config": state.best_config,
+            "mutation": document.to_dict(),
+        }
+
+    def _finish_commit(
+        self,
+        prepared: IslandPreparedCandidate,
+        event: dict[str, Any],
+        *,
+        terminal_status: str,
+        terminal_error: str = "",
+    ) -> IslandActorCommitResult:
+        state, _current_graph, _best_graph, _best_train_result, _best_validation_result = self._require_island_state()
+        state.step = int(event["island_step"])
+        ProductionEvolutionRunner._record_event(state, event)
+        self._write_island_event(event)
+        self._write_state()
+        self.write_memorandum(self._context())
+        self._write_island_job_event(
+            self._job_terminal_payload(
+                prepared,
+                terminal_status,
+                global_step=int(event["step"]),
+                error=terminal_error,
+            )
+        )
+        return IslandActorCommitResult(
+            actor_pid=os.getpid(),
+            snapshot=self.snapshot(),
+            event=event,
+            terminal_status=terminal_status,
+            terminal_error=terminal_error,
+        )
+
+    def _write_graph_artifacts(self, context: ProductionContext, step: int, metadata: dict[str, Any] | None = None) -> None:
+        metadata = {"run_id": context.state.run_id, "step": int(step), **(metadata or {})}
+        write_graph(context.run_dir / context.state.current_graph_path, context.current_graph, metadata={**metadata, "role": "current"})
+        write_graph(context.run_dir / context.state.best_graph_path, context.best_graph, metadata={**metadata, "role": "best"})
+
+    def _write_archive_entry(self, context: ProductionContext, step: int, metadata: dict[str, Any] | None = None) -> None:
+        metadata = metadata or {}
+        archive_dir = context.run_dir / "archive"
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        filename = f"best_v{context.state.archive_version:04d}_step_{step:04d}.json"
+        payload = {
+            "version": int(context.state.archive_version),
+            "step": int(step),
+            **metadata,
+            "graph_hash": graph_hash(context.best_graph),
+            "graph": context.best_graph.to_dict(),
+            "train_result": context.best_train_result.to_dict(),
+            "validation_result": context.best_validation_result.to_dict(),
+            "feedback": feedback_summary(context.best_train_result),
+            "diagnostics_toon": toon_report(context.best_train_result),
+        }
+        (archive_dir / filename).write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        row = {
+            "version": int(context.state.archive_version),
+            "step": int(step),
+            "train_auc": float(context.best_train_result.auc),
+            "validation_auc": float(context.best_validation_result.auc),
+            "config": context.best_train_result.config,
+            "graph_hash": payload["graph_hash"],
+            "path": filename,
+            **metadata,
+        }
+        with (archive_dir / "index.jsonl").open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(row) + "\n")
+
+    def _write_checkpoint(self, context: ProductionContext, step: int, metadata: dict[str, Any] | None = None) -> None:
+        payload = {
+            "run_id": context.state.run_id,
+            "step": int(step),
+            **(metadata or {}),
+            "archive_version": int(context.state.archive_version),
+            "current_graph_path": context.state.current_graph_path,
+            "best_graph_path": context.state.best_graph_path,
+            "best_train_result": context.best_train_result.to_dict(),
+            "best_validation_result": context.best_validation_result.to_dict(),
+            "feedback": feedback_summary(context.best_train_result),
+            "diagnostics_toon": toon_report(context.best_train_result),
+        }
+        (context.run_dir / "checkpoint.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    def _write_state(self) -> None:
+        if self.run_dir is None or self.state is None:
+            raise RuntimeError("Production island worker has no state path.")
+        (self.run_dir / "state.json").write_text(json.dumps(self.state.to_dict(), indent=2), encoding="utf-8")
+
+    def _write_island_event(self, event: dict[str, Any]) -> None:
+        if self.run_dir is None:
+            raise RuntimeError("Production island worker has no run directory.")
+        island_event = {
+            **event,
+            "best_train_auc": event.get("island_best_train_auc", event["best_train_auc"]),
+            "best_validation_auc": event.get("island_best_validation_auc", event["best_validation_auc"]),
+        }
+        with (self.run_dir / "events.jsonl").open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(island_event) + "\n")
+
+    def _write_island_job_event(self, row: dict[str, Any]) -> None:
+        if self.run_dir is None:
+            raise RuntimeError("Production island worker has no run directory.")
+        payload = {**row, "created_at_utc": datetime.now(timezone.utc).isoformat()}
+        with (self.run_dir / "jobs.jsonl").open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload) + "\n")
+
+    def _write_island_migration_event(self, event: dict[str, Any]) -> None:
+        if self.run_dir is None:
+            raise RuntimeError("Production island worker has no run directory.")
+        with (self.run_dir / "migrations.jsonl").open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(event) + "\n")
+
+    def _job_terminal_payload(
+        self,
+        prepared: IslandPreparedCandidate,
+        status: str,
+        *,
+        global_step: int | None = None,
+        error: str = "",
+    ) -> dict[str, Any]:
+        row: dict[str, Any] = {
+            "job_id": prepared.job_id,
+            "status": status,
+            "global_step": int(global_step) if global_step is not None else None,
+            "global_step_hint": int(prepared.proposed_step),
+            "island": self.island,
+            "island_step": int(prepared.island_step),
+            "base_generation": int(prepared.generation),
+            "base_graph_hash": prepared.base_graph_hash,
+            "mutation_path": prepared.mutation_path,
+            "worker_id": self.worker_id,
+            "worker_execution": "process_actor",
+            "actor_pid": os.getpid(),
+            "device": self.device,
+        }
+        if error:
+            row["error"] = error
+        return row
 
 
 _PROCESS_ISLAND_WORKER: ProductionIslandWorker | None = None
@@ -387,6 +963,14 @@ def _initialize_process_island_worker(
     train_y: np.ndarray,
     validation_inputs: dict[str, object],
     validation_y: np.ndarray,
+    run_dir: pathlib.Path,
+    manifest: dict[str, Any],
+    split_manifest: SplitManifest,
+    state: RunState,
+    current_graph_payload: dict[str, Any],
+    best_graph_payload: dict[str, Any],
+    best_train_result: EvaluationResult,
+    best_validation_result: EvaluationResult,
 ) -> None:
     global _PROCESS_ISLAND_WORKER
     _PROCESS_ISLAND_WORKER = ProductionIslandWorker(
@@ -404,6 +988,14 @@ def _initialize_process_island_worker(
         train_y=train_y,
         validation_inputs=validation_inputs,
         validation_y=validation_y,
+        run_dir=run_dir,
+        manifest=manifest,
+        split_manifest=split_manifest,
+        state=state,
+        current_graph=graph_from_dict(current_graph_payload, allow_source=allow_source_mutations),
+        best_graph=graph_from_dict(best_graph_payload, allow_source=allow_source_mutations),
+        best_train_result=best_train_result,
+        best_validation_result=best_validation_result,
     )
 
 
@@ -418,26 +1010,47 @@ def _process_island_pid() -> int:
     return os.getpid()
 
 
-def _process_island_run_candidate(
-    base_graph_payload: dict[str, Any],
-    best_result: EvaluationResult,
-    rng_state: dict[str, Any],
-    island_step: int,
-    output_dir: pathlib.Path,
-    errors: list[str],
-) -> IslandActorCandidateResult:
-    worker = _process_island_worker()
-    base_graph = graph_from_dict(base_graph_payload, allow_source=worker.allow_source_mutations)
-    return IslandActorCandidateResult(
-        actor_pid=os.getpid(),
-        candidate=worker.run_candidate(
-            base_graph=base_graph,
-            best_result=best_result,
-            rng_state=rng_state,
-            island_step=island_step,
-            output_dir=output_dir,
-            errors=errors,
-        ),
+def _process_island_snapshot() -> IslandActorSnapshot:
+    return _process_island_worker().snapshot()
+
+
+def _process_island_prepare_candidate(proposed_step: int) -> IslandPreparedCandidate:
+    return _process_island_worker().prepare_candidate(proposed_step)
+
+
+def _process_island_run_prepared_candidate(job_id: str) -> IslandActorCandidateResult:
+    return _process_island_worker().run_prepared_candidate(job_id)
+
+
+def _process_island_commit_candidate(
+    prepared: IslandPreparedCandidate,
+    result: IslandCandidateResult,
+    decision: IslandCommitDecision,
+) -> IslandActorCommitResult:
+    return _process_island_worker().commit_candidate(prepared, result, decision)
+
+
+def _process_island_apply_migration(
+    source_island: int,
+    global_step: int,
+    global_archive_version: int,
+    graph_payload: dict[str, Any],
+    train_result: EvaluationResult,
+    validation_result: EvaluationResult,
+    best_config: dict[str, str],
+    selection_metric: str,
+    global_best_score: float,
+) -> IslandActorMigrationResult:
+    return _process_island_worker().apply_migration(
+        source_island=source_island,
+        global_step=global_step,
+        global_archive_version=global_archive_version,
+        graph_payload=graph_payload,
+        train_result=train_result,
+        validation_result=validation_result,
+        best_config=best_config,
+        selection_metric=selection_metric,
+        global_best_score=global_best_score,
     )
 
 
@@ -491,6 +1104,14 @@ class ProductionIslandProcessActor:
         train_y: np.ndarray,
         validation_inputs: dict[str, object],
         validation_y: np.ndarray,
+        run_dir: pathlib.Path,
+        manifest: dict[str, Any],
+        split_manifest: SplitManifest,
+        state: RunState,
+        current_graph: Graph,
+        best_graph: Graph,
+        best_train_result: EvaluationResult,
+        best_validation_result: EvaluationResult,
     ) -> None:
         self.island = int(island)
         self.device = str(device)
@@ -514,33 +1135,73 @@ class ProductionIslandProcessActor:
                 train_y,
                 validation_inputs,
                 validation_y,
+                run_dir,
+                manifest,
+                split_manifest,
+                state,
+                current_graph.to_dict(),
+                best_graph.to_dict(),
+                best_train_result,
+                best_validation_result,
             ),
         )
         try:
             self.actor_pid = int(self._executor.submit(_process_island_pid).result())
+            self._last_snapshot = self.snapshot()
         except Exception:
             self._executor.shutdown(wait=True, cancel_futures=True)
             raise
 
-    def submit_candidate(
+    def snapshot(self) -> IslandActorSnapshot:
+        snapshot = self._executor.submit(_process_island_snapshot).result()
+        self._last_snapshot = snapshot
+        return snapshot
+
+    def prepare_candidate(self, proposed_step: int) -> IslandPreparedCandidate:
+        prepared = self._executor.submit(_process_island_prepare_candidate, int(proposed_step)).result()
+        self._last_snapshot = prepared.snapshot
+        return prepared
+
+    def submit_candidate(self, prepared: IslandPreparedCandidate) -> concurrent.futures.Future:
+        return self._executor.submit(_process_island_run_prepared_candidate, prepared.job_id)
+
+    def commit_candidate(
+        self,
+        prepared: IslandPreparedCandidate,
+        result: IslandCandidateResult,
+        decision: IslandCommitDecision,
+    ) -> IslandActorCommitResult:
+        commit = self._executor.submit(_process_island_commit_candidate, prepared, result, decision).result()
+        self._last_snapshot = commit.snapshot
+        return commit
+
+    def apply_migration(
         self,
         *,
-        base_graph: Graph,
-        best_result: EvaluationResult,
-        rng_state: dict[str, Any],
-        island_step: int,
-        output_dir: pathlib.Path,
-        errors: list[str],
-    ) -> concurrent.futures.Future:
-        return self._executor.submit(
-            _process_island_run_candidate,
-            base_graph.to_dict(),
-            best_result,
-            rng_state,
-            int(island_step),
-            output_dir,
-            errors,
-        )
+        source_island: int,
+        global_step: int,
+        global_archive_version: int,
+        graph: Graph,
+        train_result: EvaluationResult,
+        validation_result: EvaluationResult,
+        best_config: dict[str, str],
+        selection_metric: str,
+        global_best_score: float,
+    ) -> IslandActorMigrationResult:
+        migration = self._executor.submit(
+            _process_island_apply_migration,
+            int(source_island),
+            int(global_step),
+            int(global_archive_version),
+            graph.to_dict(),
+            train_result,
+            validation_result,
+            dict(best_config),
+            selection_metric,
+            float(global_best_score),
+        ).result()
+        self._last_snapshot = migration.snapshot
+        return migration
 
     def write_memorandum(self, context: ProductionContext) -> int:
         return int(self._executor.submit(_process_island_write_memorandum, _memorandum_payload_for_actor(context)).result())
@@ -733,7 +1394,7 @@ class ProductionEvolutionRunner:
             with (context.run_dir / "events.jsonl").open(mode, encoding="utf-8") as root_events:
                 while int(context.state.step) < target_step or pending:
                     while int(context.state.step) + len(pending) < target_step:
-                        available = [island for island in islands if all(job.island is not island for job in pending.values())]
+                        available = [island for island in islands if all(int(job.island.island) != int(island.island) for job in pending.values())]
                         if not available:
                             break
                         island = min(available, key=lambda item: (int(item.state.step), item.island))
@@ -911,47 +1572,36 @@ class ProductionEvolutionRunner:
         island: ProductionIslandContext,
         actor: ProductionIslandProcessActor,
     ) -> PendingIslandCandidate:
-        island_step = int(island.state.step) + 1
         proposed_step = int(context.state.step) + 1
-        base_graph = island.current_graph.clone()
-        base_graph_hash = graph_hash(base_graph)
-        job_id = f"g{proposed_step:04d}_i{island.island}_s{island_step:04d}_v{island.generation:04d}"
-        mutation_path = f"islands/island_{island.island}/mutations/island_{island.island}_step_{island_step:04d}.yaml"
-        self._write_job_event(
+        prepared = actor.prepare_candidate(proposed_step)
+        self._write_root_job_event(
             context.run_dir,
-            island.run_dir,
             {
-                "job_id": job_id,
+                "job_id": prepared.job_id,
                 "status": "submitted",
                 "global_step_hint": proposed_step,
-                "island": island.island,
-                "island_step": island_step,
-                "base_generation": int(island.generation),
-                "base_graph_hash": base_graph_hash,
-                "mutation_path": mutation_path,
-                "worker_id": actor.worker_id,
+                "island": prepared.island,
+                "island_step": prepared.island_step,
+                "base_generation": int(prepared.generation),
+                "base_graph_hash": prepared.base_graph_hash,
+                "mutation_path": prepared.mutation_path,
+                "worker_id": prepared.worker_id,
                 "worker_execution": "process_actor",
-                "actor_pid": int(actor.actor_pid),
-                "device": actor.device,
+                "actor_pid": int(prepared.actor_pid),
+                "device": prepared.device,
             },
         )
-        future = actor.submit_candidate(
-            base_graph=base_graph,
-            best_result=island.best_train_result,
-            rng_state=island.state.rng_state,
-            island_step=island_step,
-            output_dir=island.run_dir,
-            errors=list(island.state.errors),
-        )
+        future = actor.submit_candidate(prepared)
         return PendingIslandCandidate(
             island=island,
             future=future,
-            job_id=job_id,
+            job_id=prepared.job_id,
             proposed_step=proposed_step,
-            island_step=island_step,
-            generation=int(island.generation),
-            base_graph_hash=base_graph_hash,
-            actor_pid=int(actor.actor_pid),
+            island_step=prepared.island_step,
+            generation=int(prepared.generation),
+            base_graph_hash=prepared.base_graph_hash,
+            actor_pid=int(prepared.actor_pid),
+            prepared=prepared,
         )
 
     def _commit_island_candidate(
@@ -963,80 +1613,39 @@ class ProductionEvolutionRunner:
         actor_result: IslandActorCandidateResult,
         root_events: Any,
     ) -> None:
-        island = job.island
+        if job.prepared is None:
+            raise RuntimeError(f"Island job {job.job_id} was not prepared by an actor.")
+        island = self._island_by_id(islands, job.island.island)
         job.actor_pid = int(actor_result.actor_pid)
         result = actor_result.candidate
         outcome = result.outcome
-        if outcome.candidate_graph is None and result.candidate_graph_payload is not None:
-            allow_source = bool(dict(context.manifest.get("mutation", {})).get("allow_source_mutations", False)) or self.config.allow_source_mutations
-            outcome.candidate_graph = graph_from_dict(result.candidate_graph_payload, allow_source=allow_source)
-        island.state.rng_state = result.rng_state
-        island.state.errors = list(result.errors[-40:])
-        if int(island.generation) != int(job.generation):
-            event = self._stale_event(context, island, job, result.document)
-            self._commit_async_event(context, island, event, root_events, actor=actors[island.island])
-            self._write_job_event(context.run_dir, island.run_dir, self._job_terminal_payload(job, "stale", global_step=int(event["step"])))
-            return
-        if outcome.failed:
-            event = self._async_failed_event(context, island, job, result.document, outcome.error or "Unknown candidate failure.")
-            self._commit_async_event(context, island, event, root_events, actor=actors[island.island])
-            self._write_job_event(context.run_dir, island.run_dir, self._job_terminal_payload(job, "failed", global_step=int(event["step"]), error=str(event.get("error", ""))))
-            return
-        if (
-            outcome.candidate_graph is None
-            or outcome.result is None
-            or result.validation_result is None
-            or result.maintenance is None
-        ):
-            event = self._async_failed_event(context, island, job, result.document, "Candidate evaluation returned an incomplete success outcome.")
-            self._commit_async_event(context, island, event, root_events, actor=actors[island.island])
-            self._write_job_event(context.run_dir, island.run_dir, self._job_terminal_payload(job, "failed", global_step=int(event["step"]), error=str(event.get("error", ""))))
-            return
-
-        candidate_train = outcome.result
-        candidate_validation = result.validation_result
-        previous_island_train_auc = float(island.best_train_result.auc)
-        previous_island_validation_auc = float(island.best_validation_result.auc)
         previous_global_train_auc = float(context.best_train_result.auc)
         previous_global_validation_auc = float(context.best_validation_result.auc)
-        accepted = self._promotes(candidate_train, candidate_validation, self._island_context(context, island))
-        global_best = accepted and self._promotes(candidate_train, candidate_validation, context)
-        if accepted:
-            island.current_graph = outcome.candidate_graph
-            island.best_graph = outcome.candidate_graph.clone()
-            island.best_train_result = candidate_train
-            island.best_validation_result = candidate_validation
-            island.state.archive_version += 1
-            island.state.best_train_auc = float(candidate_train.auc)
-            island.state.best_validation_auc = float(candidate_validation.auc)
-            island.state.best_config = dict(candidate_train.config)
-            island.generation += 1
-            island.state.generation = int(island.generation)
-            island_context = self._island_context(context, island)
-            island_metadata = {
-                "island": island.island,
-                "device": island.device,
-                "worker_id": f"island_{island.island}",
-                "worker_execution": "process_actor",
-                "actor_pid": int(job.actor_pid or 0),
-                "global_step": int(context.state.step) + 1,
-            }
-            self._write_graph_artifacts(island_context, step=job.island_step, metadata=island_metadata)
-            self._write_archive_entry(
-                island_context,
-                step=job.island_step,
-                metadata={**island_metadata, "source": "candidate"},
-            )
-            self._write_checkpoint(island_context, step=job.island_step, metadata=island_metadata)
+        accepted = False
+        global_best = False
+        candidate_graph: Graph | None = None
+        if (
+            not outcome.failed
+            and outcome.result is not None
+            and result.validation_result is not None
+            and result.candidate_graph_payload is not None
+            and result.maintenance is not None
+        ):
+            allow_source = bool(dict(context.manifest.get("mutation", {})).get("allow_source_mutations", False)) or self.config.allow_source_mutations
+            candidate_graph = graph_from_dict(result.candidate_graph_payload, allow_source=allow_source)
+            accepted = self._promotes(outcome.result, result.validation_result, self._island_context(context, island))
+            global_best = accepted and self._promotes(outcome.result, result.validation_result, context)
         if global_best:
-            context.current_graph = outcome.candidate_graph
-            context.best_graph = outcome.candidate_graph.clone()
-            context.best_train_result = candidate_train
-            context.best_validation_result = candidate_validation
+            if candidate_graph is None or outcome.result is None or result.validation_result is None:
+                raise RuntimeError("Global best decision requires a complete candidate graph and evaluation result.")
+            context.current_graph = candidate_graph
+            context.best_graph = candidate_graph.clone()
+            context.best_train_result = outcome.result
+            context.best_validation_result = result.validation_result
             context.state.archive_version += 1
-            context.state.best_train_auc = float(candidate_train.auc)
-            context.state.best_validation_auc = float(candidate_validation.auc)
-            context.state.best_config = dict(candidate_train.config)
+            context.state.best_train_auc = float(outcome.result.auc)
+            context.state.best_validation_auc = float(result.validation_result.auc)
+            context.state.best_config = dict(outcome.result.config)
             context.state.generation += 1
             global_metadata = {
                 "island": island.island,
@@ -1054,58 +1663,32 @@ class ProductionEvolutionRunner:
             )
             self._write_checkpoint(context, step=int(context.state.step) + 1, metadata=global_metadata)
 
-        event = self._async_candidate_event(
-            context,
-            island,
-            job,
+        decision = IslandCommitDecision(
+            global_step=int(context.state.step) + 1,
             accepted=accepted,
             global_best=global_best,
-            mutation=result.document.to_dict(),
-            train_result=candidate_train,
-            validation_result=candidate_validation,
-            maintenance=result.maintenance or {},
-            previous_island_train_auc=previous_island_train_auc,
-            previous_island_validation_auc=previous_island_validation_auc,
+            root_best_train_auc=float(context.state.best_train_auc),
+            root_best_validation_auc=float(context.state.best_validation_auc),
             previous_global_train_auc=previous_global_train_auc,
             previous_global_validation_auc=previous_global_validation_auc,
         )
-        self._commit_async_event(context, island, event, root_events, actor=actors[island.island])
-        self._write_job_event(context.run_dir, island.run_dir, self._job_terminal_payload(job, "completed", global_step=int(event["step"])))
+        commit = actors[island.island].commit_candidate(job.prepared, result, decision)
+        island = self._replace_island_snapshot(context, islands, commit.snapshot)
+        event = commit.event
+        context.state.step = int(event["step"])
+        self._record_event(context.state, event)
+        root_events.write(json.dumps(event) + "\n")
+        root_events.flush()
+        self._write_state(context.run_dir, context.state)
+        self._write_memorandum(context)
+        self._write_root_job_event(
+            context.run_dir,
+            self._job_terminal_payload(job, commit.terminal_status, global_step=int(event["step"]), error=commit.terminal_error),
+        )
         if global_best:
             self._migrate_global_best(context, islands, actors=actors, source_island=island.island)
         elif self._migration_interval(context) > 0 and int(context.state.step) % self._migration_interval(context) == 0:
             self._migrate_global_best(context, islands, actors=actors, source_island=island.island)
-
-    def _commit_async_event(
-        self,
-        context: ProductionContext,
-        island: ProductionIslandContext,
-        event: dict[str, Any],
-        root_events: Any,
-        *,
-        actor: ProductionIslandProcessActor | None = None,
-    ) -> None:
-        context.state.step = int(event["step"])
-        island.state.step = int(event["island_step"])
-        self._record_event(context.state, event)
-        island_event = {
-            **event,
-            "best_train_auc": event.get("island_best_train_auc", event["best_train_auc"]),
-            "best_validation_auc": event.get("island_best_validation_auc", event["best_validation_auc"]),
-        }
-        self._record_event(island.state, island_event)
-        root_events.write(json.dumps(event) + "\n")
-        root_events.flush()
-        with (island.run_dir / "events.jsonl").open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(event) + "\n")
-        self._write_state(context.run_dir, context.state)
-        self._write_state(island.run_dir, island.state)
-        if actor is not None:
-            actor.write_memorandum(self._island_context(context, island))
-        else:
-            island_loop = self._build_loop(island.current_graph, island.state.rng_state, island=island.island, device=island.device)
-            self._write_memorandum(self._island_context(context, island), loop=island_loop, island=island.island)
-        self._write_memorandum(context)
 
     def _migrate_global_best(
         self,
@@ -1131,69 +1714,56 @@ class ProductionEvolutionRunner:
                 item.island,
             ),
         )
-        target_actor = actors.get(target.island) if actors is not None else None
-        previous_score = self._frontier_score(context, target.best_train_result, target.best_validation_result)
-        previous_best_train_auc = float(target.best_train_result.auc)
-        previous_best_validation_auc = float(target.best_validation_result.auc)
-        target.current_graph = context.best_graph.clone()
-        target.best_graph = context.best_graph.clone()
-        target.best_train_result = context.best_train_result
-        target.best_validation_result = context.best_validation_result
-        target.state.archive_version += 1
-        target.state.best_train_auc = float(context.best_train_result.auc)
-        target.state.best_validation_auc = float(context.best_validation_result.auc)
-        target.state.best_config = dict(context.state.best_config)
-        target.generation += 1
-        target.state.generation = int(target.generation)
-        event = {
-            "mode": "production_async_migration",
-            "global_step": int(context.state.step),
-            "source_island": int(source_island),
-            "target_island": int(target.island),
-            "target_device": target.device,
-            "target_worker_id": f"island_{target.island}",
-            "worker_execution": "process_actor" if target_actor is not None else "coordinator",
-            "target_actor_pid": int(target_actor.actor_pid) if target_actor is not None else None,
-            "target_generation": int(target.generation),
-            "global_best_version": int(context.state.archive_version),
-            "selection_metric": self._frontier_metric(context),
-            "previous_best_score": previous_score,
-            "global_best_score": global_score,
-            "previous_best_train_auc": previous_best_train_auc,
-            "previous_best_validation_auc": previous_best_validation_auc,
-            "global_best_validation_auc": float(context.best_validation_result.auc),
-            "global_best_train_auc": float(context.best_train_result.auc),
-            "graph_hash": graph_hash(context.best_graph),
-        }
+        if actors is None or target.island not in actors:
+            raise RuntimeError("Production island migrations require a live target island actor.")
+        migration = actors[target.island].apply_migration(
+            source_island=source_island,
+            global_step=int(context.state.step),
+            global_archive_version=int(context.state.archive_version),
+            graph=context.best_graph,
+            train_result=context.best_train_result,
+            validation_result=context.best_validation_result,
+            best_config=context.state.best_config,
+            selection_metric=self._frontier_metric(context),
+            global_best_score=global_score,
+        )
+        self._replace_island_snapshot(context, islands, migration.snapshot)
+        event = migration.event
         with (context.run_dir / "migrations.jsonl").open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(event) + "\n")
-        with (target.run_dir / "migrations.jsonl").open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(event) + "\n")
-        target.state.history.append(
-            f"- MIGRATED: global_step={int(context.state.step)} source_island={source_island} "
-            f"{self._frontier_metric(context)}={global_score:.6f}"
+
+    def _island_by_id(self, islands: list[ProductionIslandContext], island_id: int) -> ProductionIslandContext:
+        for island in islands:
+            if int(island.island) == int(island_id):
+                return island
+        raise KeyError(f"Unknown production island {island_id}.")
+
+    def _replace_island_snapshot(
+        self,
+        context: ProductionContext,
+        islands: list[ProductionIslandContext],
+        snapshot: IslandActorSnapshot,
+    ) -> ProductionIslandContext:
+        updated = self._island_from_snapshot(context, snapshot)
+        for index, island in enumerate(islands):
+            if int(island.island) == int(snapshot.island):
+                islands[index] = updated
+                return updated
+        raise KeyError(f"Unknown production island {snapshot.island}.")
+
+    def _island_from_snapshot(self, context: ProductionContext, snapshot: IslandActorSnapshot) -> ProductionIslandContext:
+        allow_source = bool(dict(context.manifest.get("mutation", {})).get("allow_source_mutations", False)) or self.config.allow_source_mutations
+        return ProductionIslandContext(
+            island=int(snapshot.island),
+            run_dir=context.run_dir / "islands" / f"island_{int(snapshot.island)}",
+            state=RunState.from_dict(snapshot.state.to_dict()),
+            current_graph=graph_from_dict(snapshot.current_graph_payload, allow_source=allow_source),
+            best_graph=graph_from_dict(snapshot.best_graph_payload, allow_source=allow_source),
+            best_train_result=snapshot.best_train_result,
+            best_validation_result=snapshot.best_validation_result,
+            device=snapshot.device,
+            generation=int(snapshot.state.generation),
         )
-        del target.state.history[:-40]
-        target_context = self._island_context(context, target)
-        metadata = {
-            "island": target.island,
-            "device": target.device,
-            "worker_id": f"island_{target.island}",
-            "worker_execution": "process_actor" if target_actor is not None else "coordinator",
-            "actor_pid": int(target_actor.actor_pid) if target_actor is not None else None,
-            "global_step": int(context.state.step),
-            "source": "migration",
-            "source_island": source_island,
-            "selection_metric": self._frontier_metric(context),
-        }
-        self._write_graph_artifacts(target_context, step=int(target.state.step), metadata=metadata)
-        self._write_archive_entry(target_context, step=int(target.state.step), metadata=metadata)
-        self._write_checkpoint(target_context, step=int(target.state.step), metadata=metadata)
-        self._write_state(target.run_dir, target.state)
-        if target_actor is not None:
-            target_actor.write_memorandum(target_context)
-        else:
-            self._write_memorandum(target_context, loop=self._build_loop(target.current_graph, target.state.rng_state, island=target.island, device=target.device), island=target.island)
 
     def _island_context(self, context: ProductionContext, island: ProductionIslandContext) -> ProductionContext:
         return ProductionContext(
@@ -1251,6 +1821,14 @@ class ProductionEvolutionRunner:
             train_y=train_y,
             validation_inputs=validation_inputs,
             validation_y=validation_y,
+            run_dir=island.run_dir,
+            manifest=context.manifest,
+            split_manifest=context.split_manifest,
+            state=island.state,
+            current_graph=island.current_graph,
+            best_graph=island.best_graph,
+            best_train_result=island.best_train_result,
+            best_validation_result=island.best_validation_result,
         )
 
     def _active_evaluator_config(self) -> dict[str, Any]:
@@ -1359,6 +1937,12 @@ class ProductionEvolutionRunner:
             with (directory / "jobs.jsonl").open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(payload) + "\n")
 
+    @staticmethod
+    def _write_root_job_event(root_dir: pathlib.Path, row: dict[str, Any]) -> None:
+        payload = {**row, "created_at_utc": datetime.now(timezone.utc).isoformat()}
+        with (root_dir / "jobs.jsonl").open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload) + "\n")
+
     def _job_terminal_payload(
         self,
         job: PendingIslandCandidate,
@@ -1425,122 +2009,6 @@ class ProductionEvolutionRunner:
                     "abandoned_reason": "Run resumed before the submitted island job reached a terminal commit.",
                 },
             )
-
-    def _async_candidate_event(
-        self,
-        context: ProductionContext,
-        island: ProductionIslandContext,
-        job: PendingIslandCandidate,
-        *,
-        accepted: bool,
-        global_best: bool,
-        mutation: dict[str, object],
-        train_result: EvaluationResult,
-        validation_result: EvaluationResult,
-        maintenance: dict[str, object],
-        previous_island_train_auc: float,
-        previous_island_validation_auc: float,
-        previous_global_train_auc: float,
-        previous_global_validation_auc: float,
-    ) -> dict[str, Any]:
-        step = int(context.state.step) + 1
-        return {
-            "step": step,
-            "mode": "production_async_island",
-            "job_id": job.job_id,
-            "island": int(island.island),
-            "island_step": int(job.island_step),
-            "device": island.device,
-            "worker_id": f"island_{island.island}",
-            "worker_execution": "process_actor",
-            "actor_pid": int(job.actor_pid) if job.actor_pid is not None else None,
-            "base_graph_hash": job.base_graph_hash,
-            "base_generation": int(job.generation),
-            "generation": int(island.generation),
-            "accepted": bool(accepted),
-            "global_best": bool(global_best),
-            "train_auc": float(train_result.auc),
-            "validation_auc": float(validation_result.auc),
-            "best_train_auc": float(context.state.best_train_auc),
-            "best_validation_auc": float(context.state.best_validation_auc),
-            "island_best_train_auc": float(island.state.best_train_auc),
-            "island_best_validation_auc": float(island.state.best_validation_auc),
-            "train_delta": float(train_result.auc) - previous_island_train_auc,
-            "validation_delta": float(validation_result.auc) - previous_island_validation_auc,
-            "global_train_delta": float(train_result.auc) - previous_global_train_auc,
-            "global_validation_delta": float(validation_result.auc) - previous_global_validation_auc,
-            "config": train_result.config,
-            "mutation": mutation,
-            "maintenance": maintenance,
-            "promotion_policy": context.manifest["acceptance"],
-        }
-
-    def _async_failed_event(
-        self,
-        context: ProductionContext,
-        island: ProductionIslandContext,
-        job: PendingIslandCandidate,
-        document: MutationDocument,
-        error: str,
-    ) -> dict[str, Any]:
-        return {
-            "step": int(context.state.step) + 1,
-            "mode": "production_async_island",
-            "job_id": job.job_id,
-            "island": int(island.island),
-            "island_step": int(job.island_step),
-            "device": island.device,
-            "worker_id": f"island_{island.island}",
-            "worker_execution": "process_actor",
-            "actor_pid": int(job.actor_pid) if job.actor_pid is not None else None,
-            "base_graph_hash": job.base_graph_hash,
-            "base_generation": int(job.generation),
-            "generation": int(island.generation),
-            "accepted": False,
-            "failed": True,
-            "error": error,
-            "train_auc": None,
-            "validation_auc": None,
-            "best_train_auc": float(context.state.best_train_auc),
-            "best_validation_auc": float(context.state.best_validation_auc),
-            "island_best_train_auc": float(island.state.best_train_auc),
-            "island_best_validation_auc": float(island.state.best_validation_auc),
-            "config": island.state.best_config,
-            "mutation": document.to_dict(),
-        }
-
-    def _stale_event(
-        self,
-        context: ProductionContext,
-        island: ProductionIslandContext,
-        job: PendingIslandCandidate,
-        document: MutationDocument,
-    ) -> dict[str, Any]:
-        return {
-            "step": int(context.state.step) + 1,
-            "mode": "production_async_island",
-            "job_id": job.job_id,
-            "island": int(island.island),
-            "island_step": int(job.island_step),
-            "device": island.device,
-            "worker_id": f"island_{island.island}",
-            "worker_execution": "process_actor",
-            "actor_pid": int(job.actor_pid) if job.actor_pid is not None else None,
-            "base_graph_hash": job.base_graph_hash,
-            "base_generation": int(job.generation),
-            "generation": int(island.generation),
-            "accepted": False,
-            "stale": True,
-            "stale_reason": "Island graph generation changed before candidate completion.",
-            "train_auc": None,
-            "validation_auc": None,
-            "best_train_auc": float(context.state.best_train_auc),
-            "best_validation_auc": float(context.state.best_validation_auc),
-            "island_best_train_auc": float(island.state.best_train_auc),
-            "island_best_validation_auc": float(island.state.best_validation_auc),
-            "config": island.state.best_config,
-            "mutation": document.to_dict(),
-        }
 
     def _install_task_context(
         self,

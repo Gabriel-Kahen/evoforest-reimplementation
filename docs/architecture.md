@@ -133,11 +133,13 @@ the following modules.
   local worker threads and process successes or failures as they arrive.
   Production evolve is island-native by default: four persistent OS process
   actors own proposal, repair, evaluation, prompt records, memoranda, graph
-  state, job lifecycle logs, and stale-completion detection, with one dedicated
-  device per island and immediate persistence of migration targets so resume
-  keeps the same island frontier. LLM-backed island runs preserve the fixed
-  scientist-temperature schedule independently of candidate evaluation completion
-  order.
+  state, job lifecycle logs, candidate commits, migration target application,
+  and stale-completion detection, with one dedicated device per island and
+  immediate persistence of migration targets so resume keeps the same island
+  frontier. The coordinator keeps only a scheduling/global-best view and replaces
+  that view from actor snapshots returned by commit and migration messages.
+  LLM-backed island runs preserve the fixed scientist-temperature schedule
+  independently of candidate evaluation completion order.
 - Memoranda are sectioned into `[OUTCOME HISTORY]`, `[STATE]`, `[WHAT WORKS]`,
   `[WHAT FAILED]`, and `[ERROR LOG]`. In LLM mode a separate memorandum agent
   writes this paper-style hypothesis-free memory and must return all required
@@ -164,8 +166,10 @@ Known approximations:
   now defaults to four durable island-native process actors mapped to
   `cuda:0,cuda:1,cuda:2,cuda:3`, with the paper-style scientist temperature
   schedule persisted in the run manifest. The root coordinator still runs in one
-  process and is not the authors' private cluster orchestration stack, but island
-  candidate work and island memoranda are process-isolated per dedicated device.
+  process, decides global-best promotion, and selects migration targets; it is not
+  the authors' private cluster orchestration stack. Island candidate work, island
+  commits, island memoranda, and migration target state changes are
+  process-isolated per dedicated device.
 - The default production profile remains stricter than the paper's reported
   global-best CV-AUC frontier: a production candidate must improve both train CV
   score and a held-out validation recheck before it can become an island or

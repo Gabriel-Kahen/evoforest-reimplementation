@@ -92,9 +92,11 @@ evoforest-arch recheck runs/production-smoke
 ```
 
 Each production island runs as its own OS process actor and owns proposal,
-repair, evaluation, prompt records, state, and memorandum updates. The root run
-directory is the global-best ledger. To run a local smoke test without CUDA, pass
-explicit CPU-like device slots:
+repair, evaluation, prompt records, state, and memorandum updates. Candidate
+commits and global-best migrations are sent to the target island as actor
+messages, and the coordinator replaces its scheduling view from the actor's
+returned snapshot. The root run directory is the global-best ledger. To run a
+local smoke test without CUDA, pass explicit CPU-like device slots:
 
 ```bash
 evoforest-arch evolve --steps 4 --island-devices cpu:0,cpu:1,cpu:2,cpu:3 --no-refine-globals --output runs/production-cpu-smoke
@@ -246,9 +248,9 @@ Production `evolve` is island-native by default: four persistent island process
 actors own their graph state and are assigned one dedicated device each
 (`cuda:0,cuda:1,cuda:2,cuda:3` unless `--island-devices` overrides them). It
 persists per-island state, graph artifacts, checkpoints, memoranda, job logs, and
-migration records so resume restores the island frontier instead of restarting
-from a seed graph. It preserves the paper's fixed four-temperature scientist
-schedule by default. The `--profile paper` preset switches promotion from the
+migration records from inside the island actor, so resume restores the island
+frontier instead of restarting from a seed graph. It preserves the paper's fixed
+four-temperature scientist schedule by default. The `--profile paper` preset switches promotion from the
 default held-out validation gate to the paper's CV ROC-AUC frontier and records
 that contract in the manifest. The scientist/engineer loop can run
 deterministically offline or call an opt-in OpenAI, Claude, or Gemini provider.
