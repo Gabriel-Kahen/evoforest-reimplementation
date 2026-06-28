@@ -24,12 +24,24 @@ Each new run writes:
 - `events.jsonl`: candidate outcomes.
 - `validation_rechecks.jsonl`: explicit recheck records.
 
-Island demo runs keep candidate outcomes in `events.jsonl` and write global-best
-migration records separately to `migrations.jsonl`.
+Production async island runs additionally write:
+
+- `jobs.jsonl`: submitted/completed/stale job lifecycle records.
+- `migrations.jsonl`: global-best transfers to weaker islands.
+- `islands/island_N/state.json`: island-local step, generation, RNG state, best
+  scores, history, and errors.
+- `islands/island_N/current_graph.json` and `best_graph.json`: island graph state.
+- `islands/island_N/checkpoint.json`, `memorandum.md`, `events.jsonl`,
+  `jobs.jsonl`, `migrations.jsonl`, `archive/index.jsonl`, `mutations/`, and
+  `prompts/`.
 
 Archive promotion is stricter than the demo loop. A candidate must improve on the
 train split and improve on the validation split. The candidate's graph configuration
 is selected on train, then validation is rechecked with that config fixed.
+
+Production async islands use the same validation-gated promotion policy. The
+paper reports a CV-AUC global-best frontier; this production path deliberately
+keeps validation as a safety gate.
 
 ## Dataset Requirement
 
@@ -60,6 +72,19 @@ evoforest-arch evolve --steps 4 --llm-provider env --env-file .env --output runs
 When LLM mode is enabled, provider configuration and LLM outputs are fail-fast.
 The runner does not fall back to deterministic mutation agents if the provider is
 missing, the HTTP request fails, or the returned mutation document is invalid.
+
+Production async islands are opt-in:
+
+```bash
+evoforest-arch evolve --steps 16 --islands 4 --async-islands --island-workers 4 --migration-interval 10 --output runs/production-islands
+```
+
+Resume restores the manifest's island settings and appends root and per-island
+JSONL logs, so the resume command does not need to repeat the island flags:
+
+```bash
+evoforest-arch evolve --resume --steps 16 --output runs/production-islands
+```
 
 For a real claim, add a loader that returns:
 

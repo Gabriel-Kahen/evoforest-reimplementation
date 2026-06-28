@@ -96,6 +96,10 @@ def main(argv: list[str] | None = None) -> int:
     evolve.add_argument("--min-train-improvement", type=float, default=1e-6)
     evolve.add_argument("--min-validation-improvement", type=float, default=1e-6)
     evolve.add_argument("--allow-source-mutations", action="store_true")
+    evolve.add_argument("--islands", type=int, default=1)
+    evolve.add_argument("--async-islands", action="store_true")
+    evolve.add_argument("--island-workers", type=int, default=None)
+    evolve.add_argument("--migration-interval", type=int, default=10)
     evolve.add_argument("--llm-provider", choices=llm_provider_choices, default="none")
     evolve.add_argument("--env-file", type=pathlib.Path, default=pathlib.Path(".env"))
     evolve.add_argument("--llm-scientist-temperature", type=float, default=0.35)
@@ -212,6 +216,10 @@ def run_evolve(args: argparse.Namespace) -> int:
         min_train_improvement=args.min_train_improvement,
         min_validation_improvement=args.min_validation_improvement,
         allow_source_mutations=args.allow_source_mutations or scientist is not None or engineer is not None,
+        islands=args.islands,
+        async_islands=args.async_islands,
+        island_workers=args.island_workers,
+        migration_interval=args.migration_interval,
     )
     summary = ProductionEvolutionRunner(
         config,
