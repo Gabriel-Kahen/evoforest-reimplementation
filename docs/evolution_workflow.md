@@ -24,9 +24,15 @@ Each new run writes:
 - `events.jsonl`: candidate outcomes.
 - `validation_rechecks.jsonl`: explicit recheck records.
 
-Production async island runs additionally write:
+Production runs are island-native by default. Four persistent island workers are
+assigned dedicated devices `cuda:0,cuda:1,cuda:2,cuda:3`; each worker owns its
+proposal, repair, evaluation, prompt records, memorandum, graph state, and job
+artifacts. The root run directory records the global-best frontier and migrations.
+Production island runs additionally write:
 
-- `jobs.jsonl`: submitted/completed/stale job lifecycle records.
+- `jobs.jsonl`: submitted/completed/failed/stale/abandoned job lifecycle records,
+  including island id, worker id, dedicated device, base graph hash, and mutation
+  path.
 - `migrations.jsonl`: global-best transfers to weaker islands.
 - `islands/island_N/state.json`: island-local step, generation, RNG state, best
   scores, history, and errors.
@@ -73,10 +79,16 @@ When LLM mode is enabled, provider configuration and LLM outputs are fail-fast.
 The runner does not fall back to deterministic mutation agents if the provider is
 missing, the HTTP request fails, or the returned mutation document is invalid.
 
-Production async islands are opt-in:
+Production four-island mode is the default:
 
 ```bash
-evoforest-arch evolve --steps 16 --islands 4 --async-islands --island-workers 4 --migration-interval 10 --output runs/production-islands
+evoforest-arch evolve --steps 16 --migration-interval 10 --output runs/production-islands
+```
+
+On a machine without CUDA, use explicit CPU-like slots for smoke tests:
+
+```bash
+evoforest-arch evolve --steps 4 --island-devices cpu:0,cpu:1,cpu:2,cpu:3 --no-refine-globals --output runs/production-cpu-smoke
 ```
 
 Resume restores the manifest's island settings and appends root and per-island

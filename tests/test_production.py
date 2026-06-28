@@ -12,6 +12,7 @@ from evoforest_arch.production import ProductionConfig, ProductionEvolutionRunne
 
 
 def small_config(tmp_path, *, steps: int = 1, seed: int = 41, **kwargs: object) -> ProductionConfig:
+    production_kwargs = {"islands": 1, "async_islands": False, **kwargs}
     return ProductionConfig(
         output_dir=tmp_path / "production_run",
         steps=steps,
@@ -21,8 +22,14 @@ def small_config(tmp_path, *, steps: int = 1, seed: int = 41, **kwargs: object) 
         folds=2,
         max_configurations=4,
         irls_steps=1,
-        **kwargs,
+        **production_kwargs,
     )
+
+
+def read_jsonl(path) -> list[dict[str, object]]:
+    if not path.exists() or not path.read_text(encoding="utf-8").strip():
+        return []
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
 
 
 def paper_memorandum(label: str) -> str:
@@ -185,10 +192,12 @@ def test_production_async_islands_write_durable_artifacts_and_resume(tmp_path) -
         tmp_path,
         steps=4,
         seed=4,
-        islands=2,
+        islands=4,
         async_islands=True,
-        island_workers=2,
+        island_workers=4,
+        island_devices=("cpu:0", "cpu:1", "cpu:2", "cpu:3"),
         migration_interval=1,
+        refine_globals=False,
         min_train_improvement=-1.0,
         min_validation_improvement=-1.0,
     )
@@ -199,13 +208,24 @@ def test_production_async_islands_write_durable_artifacts_and_resume(tmp_path) -
     assert summary["event_count"] == 4
     assert summary["test_recheck_count"] == 0
     assert summary["islands"]["mode"] == "async"
-    assert summary["islands"]["count"] == 2
+    assert summary["islands"]["topology"] == "paper_dedicated_gpu"
+    assert summary["islands"]["count"] == 4
+    assert summary["islands"]["workers"] == 4
+    assert summary["islands"]["devices"] == ["cpu:0", "cpu:1", "cpu:2", "cpu:3"]
+    assert summary["islands"]["scientist_temperature_schedule"] == [0.35, 0.5, 0.6, 0.75]
     assert summary["islands"]["migration_count"] >= 1
     assert (run_dir / "migrations.jsonl").exists()
     assert (run_dir / "jobs.jsonl").exists()
-    events = [json.loads(line) for line in (run_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()]
+    events = read_jsonl(run_dir / "events.jsonl")
+    assert [event["step"] for event in events] == [1, 2, 3, 4]
+    assert len({event["job_id"] for event in events}) == 4
     assert any(event.get("stale") for event in events)
-    for island_id in (0, 1):
+    jobs = read_jsonl(run_dir / "jobs.jsonl")
+    submitted = {str(row["job_id"]): row for row in jobs if row["status"] == "submitted"}
+    terminal = {str(row["job_id"]): row for row in jobs if row["status"] in {"completed", "failed", "stale", "abandoned_on_resume"}}
+    assert set(submitted) == set(terminal)
+    assert {str(row["device"]) for row in submitted.values()} == {"cpu:0", "cpu:1", "cpu:2", "cpu:3"}
+    for island_id in range(4):
         island_dir = run_dir / "islands" / f"island_{island_id}"
         assert (island_dir / "state.json").exists()
         assert (island_dir / "current_graph.json").exists()
@@ -214,14 +234,40 @@ def test_production_async_islands_write_durable_artifacts_and_resume(tmp_path) -
         assert (island_dir / "memorandum.md").exists()
         assert (island_dir / "events.jsonl").exists()
         assert (island_dir / "archive" / "index.jsonl").exists()
+        island_jobs = read_jsonl(island_dir / "jobs.jsonl")
+        assert all(row["island"] == island_id for row in island_jobs)
+        assert all(row["device"] == f"cpu:{island_id}" for row in island_jobs)
 
     resumed = ProductionEvolutionRunner(ProductionConfig(output_dir=run_dir, steps=1)).run(resume=True)
     assert resumed["step"] == 5
     assert resumed["event_count"] == 5
     assert resumed["islands"]["mode"] == "async"
-    assert resumed["islands"]["count"] == 2
+    assert resumed["islands"]["count"] == 4
+    assert resumed["islands"]["devices"] == ["cpu:0", "cpu:1", "cpu:2", "cpu:3"]
     assert len((run_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()) == 5
     assert len((run_dir / "migrations.jsonl").read_text(encoding="utf-8").splitlines()) >= summary["islands"]["migration_count"]
+
+
+def test_production_defaults_to_paper_four_gpu_island_topology(tmp_path) -> None:
+    config = ProductionConfig(
+        output_dir=tmp_path / "paper_default_run",
+        steps=0,
+        seed=5,
+        n_series=60,
+        length=70,
+        folds=2,
+        max_configurations=4,
+        irls_steps=1,
+        refine_globals=False,
+    )
+    summary = ProductionEvolutionRunner(config).run()
+
+    assert summary["islands"]["mode"] == "async"
+    assert summary["islands"]["topology"] == "paper_dedicated_gpu"
+    assert summary["islands"]["count"] == 4
+    assert summary["islands"]["workers"] == 4
+    assert summary["islands"]["devices"] == ["cuda:0", "cuda:1", "cuda:2", "cuda:3"]
+    assert {item["device"] for item in summary["islands"]["items"]} == {"cuda:0", "cuda:1", "cuda:2", "cuda:3"}
 
 
 def test_production_islands_require_async_mode(tmp_path) -> None:
@@ -229,3 +275,20 @@ def test_production_islands_require_async_mode(tmp_path) -> None:
 
     with pytest.raises(ValueError, match="async_islands=True"):
         ProductionEvolutionRunner(config).run()
+
+
+def test_production_island_native_topology_requires_four_dedicated_devices(tmp_path) -> None:
+    with pytest.raises(ValueError, match="exactly 4 islands"):
+        ProductionEvolutionRunner(small_config(tmp_path, steps=1, islands=2, async_islands=True)).run()
+
+    with pytest.raises(ValueError, match="unique dedicated devices"):
+        ProductionEvolutionRunner(
+            small_config(
+                tmp_path,
+                steps=1,
+                islands=4,
+                async_islands=True,
+                island_workers=4,
+                island_devices=("cpu:0", "cpu:0", "cpu:2", "cpu:3"),
+            )
+        ).run()

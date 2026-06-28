@@ -131,11 +131,12 @@ the following modules.
   mode keeps per-island artifacts and migrates the current global best to weaker
   islands. Demo async islands evaluate one candidate per island concurrently in
   local worker threads and process successes or failures as they arrive. Production
-  async islands add durable `islands/island_N/` state, per-island graph artifacts,
-  memoranda, job lifecycle logs, stale-completion detection, and immediate
-  persistence of migration targets so resume keeps the same island frontier.
-  LLM-backed island runs preserve the fixed scientist-temperature schedule
-  independently of candidate evaluation completion order.
+  evolve is island-native by default: four persistent island workers own proposal,
+  repair, evaluation, prompt records, memoranda, graph state, job lifecycle logs,
+  and stale-completion detection, with one dedicated device per island and
+  immediate persistence of migration targets so resume keeps the same island
+  frontier. LLM-backed island runs preserve the fixed scientist-temperature
+  schedule independently of candidate evaluation completion order.
 - Memoranda are sectioned into `[OUTCOME HISTORY]`, `[STATE]`, `[WHAT WORKS]`,
   `[WHAT FAILED]`, and `[ERROR LOG]`. In LLM mode a separate memorandum agent
   writes this paper-style hypothesis-free memory and must return all required
@@ -158,9 +159,12 @@ Known approximations:
   `torch_fn` to participate in that path; otherwise refinement records a skipped
   torch reason. The deterministic NumPy coordinate refiner is explicit
   compatibility behavior.
-- The paper's long run used asynchronous GPU islands; this repo includes durable
-  asynchronous local worker islands with the paper-style scientist temperature
-  schedule, but not a multi-GPU distributed scheduler.
+- The paper's long run used four asynchronous GPU islands; production `evolve`
+  now defaults to four durable island-native workers mapped to
+  `cuda:0,cuda:1,cuda:2,cuda:3`, with the paper-style scientist temperature
+  schedule persisted in the run manifest. This is a single-process scheduler with
+  dedicated device assignment, not the authors' private cluster orchestration
+  stack.
 - Production promotion remains stricter than the paper's reported global-best
   CV-AUC frontier: a production candidate must improve both train CV score and a
   held-out validation recheck before it can become an island or global best.

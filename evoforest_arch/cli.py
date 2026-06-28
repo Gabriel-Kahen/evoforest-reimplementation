@@ -37,6 +37,13 @@ def parse_temperature_schedule(value: str) -> tuple[float, ...]:
     return values
 
 
+def parse_string_schedule(value: str) -> tuple[str, ...]:
+    values = tuple(part.strip() for part in value.split(",") if part.strip())
+    if not values:
+        raise argparse.ArgumentTypeError("schedule must include at least one comma-separated value")
+    return values
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="evoforest-arch")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -96,9 +103,16 @@ def main(argv: list[str] | None = None) -> int:
     evolve.add_argument("--min-train-improvement", type=float, default=1e-6)
     evolve.add_argument("--min-validation-improvement", type=float, default=1e-6)
     evolve.add_argument("--allow-source-mutations", action="store_true")
-    evolve.add_argument("--islands", type=int, default=1)
-    evolve.add_argument("--async-islands", action="store_true")
+    evolve.add_argument("--islands", type=int, default=4)
+    evolve.add_argument("--async-islands", dest="async_islands", action="store_true", default=True)
+    evolve.add_argument("--no-async-islands", dest="async_islands", action="store_false")
     evolve.add_argument("--island-workers", type=int, default=None)
+    evolve.add_argument(
+        "--island-devices",
+        type=parse_string_schedule,
+        default=None,
+        help="Comma-separated dedicated device slots for production islands, default cuda:0,cuda:1,cuda:2,cuda:3.",
+    )
     evolve.add_argument("--migration-interval", type=int, default=10)
     evolve.add_argument("--llm-provider", choices=llm_provider_choices, default="none")
     evolve.add_argument("--env-file", type=pathlib.Path, default=pathlib.Path(".env"))
@@ -219,6 +233,7 @@ def run_evolve(args: argparse.Namespace) -> int:
         islands=args.islands,
         async_islands=args.async_islands,
         island_workers=args.island_workers,
+        island_devices=args.island_devices,
         migration_interval=args.migration_interval,
     )
     summary = ProductionEvolutionRunner(
