@@ -8,6 +8,7 @@ import numpy as np
 from evoforest_arch.graph import EvalContext, Graph, ResidualWeightRule
 from evoforest_arch.metrics import DEFAULT_SCORER, FoldStrategy, ScoreFunction, TaskScorer, coerce_fold_strategy, coerce_scorer, safe_corr, target_alignment
 from evoforest_arch.readout import DEFAULT_ALPHAS, RidgeModel, Standardizer, combine_sample_weights, fit_ridge, normalize_sample_weight, select_alpha
+from evoforest_arch.task import TaskSchema
 
 
 @dataclass
@@ -90,6 +91,7 @@ class RidgeEvaluator:
         diagnostics_mode: str = "full",
         torch_device: str | None = None,
         scorer: TaskScorer | ScoreFunction | str | None = None,
+        task_schema: TaskSchema | dict[str, object] | None = None,
     ) -> None:
         self.n_splits = int(n_splits)
         self.seed = int(seed)
@@ -100,8 +102,18 @@ class RidgeEvaluator:
         self.refine_backend = refine_backend
         self.torch_device = torch_device
         self.irls_steps = max(0, int(irls_steps))
-        self.group_key = group_key
-        self.fold_strategy = coerce_fold_strategy(fold_strategy, group_key=group_key, time_key=time_key, stratify_bins=stratify_bins)
+        self.task_schema = _coerce_task_schema(task_schema)
+        inferred_group_key = group_key or _schema_role_key(self.task_schema, "group", "unit", "engine", "entity")
+        inferred_time_key = time_key or _schema_role_key(self.task_schema, "time", "cycle", "sequence_index")
+        inferred_fold_strategy = fold_strategy
+        if inferred_fold_strategy is None:
+            if inferred_group_key:
+                inferred_fold_strategy = "group_random"
+            elif inferred_time_key:
+                inferred_fold_strategy = "time_blocked"
+        self.group_key = inferred_group_key
+        self.time_key = inferred_time_key
+        self.fold_strategy = coerce_fold_strategy(inferred_fold_strategy, group_key=inferred_group_key, time_key=inferred_time_key, stratify_bins=stratify_bins)
         self.scorer = coerce_scorer(scorer)
         if diagnostics_mode not in {"full", "basic"}:
             raise ValueError("diagnostics_mode must be 'full' or 'basic'.")
@@ -634,6 +646,9 @@ class RidgeEvaluator:
             "residual_abs_mean": float(np.mean(np.abs(residual))) if residual.size else 0.0,
             "target_bins": self._target_bin_diagnostics(y, preds, residual),
         }
+        schema_roles = self._schema_role_map()
+        if schema_roles:
+            rows["schema_roles"] = schema_roles
         group_key = self.fold_strategy.group_key or self.group_key
         if group_key and group_key in inputs:
             group_values = np.asarray(inputs[group_key])
@@ -641,7 +656,26 @@ class RidgeEvaluator:
                 rows["group_key"] = group_key
                 rows["groups"] = self._group_objective_diagnostics(y, preds, residual, group_values)
                 rows["split_leakage_check"] = "fold diagnostics report group overlap when grouped folds are active"
+        time_key = self.fold_strategy.time_key or self.time_key
+        if time_key and time_key in inputs:
+            time_values = np.asarray(inputs[time_key])
+            if time_values.ndim == 1 and time_values.shape[0] == y.shape[0]:
+                rows["time_key"] = time_key
+                rows["time_bins"] = self._time_objective_diagnostics(y, preds, residual, time_values)
+        role_groups: dict[str, object] = {}
+        for role in ("regime", "fault_mode", "event", "censoring"):
+            key = _schema_role_key(self.task_schema, role)
+            if not key or key == group_key or key not in inputs:
+                continue
+            values = np.asarray(inputs[key])
+            if values.ndim == 1 and values.shape[0] == y.shape[0]:
+                role_groups[role] = {"key": key, "groups": self._group_objective_diagnostics(y, preds, residual, values)}
+        if role_groups:
+            rows["role_groups"] = role_groups
         return rows
+
+    def _schema_role_map(self) -> dict[str, list[str]]:
+        return self.task_schema.role_map() if self.task_schema is not None else {}
 
     def _target_bin_diagnostics(self, y: np.ndarray, preds: np.ndarray, residual: np.ndarray, bins: int = 5) -> list[dict[str, object]]:
         y_array = np.asarray(y, dtype=np.float64)
@@ -698,6 +732,43 @@ class RidgeEvaluator:
                 }
             )
         rows.sort(key=lambda row: float(row["raw_score"]), reverse=bool(self.scorer.higher_is_better))
+        return rows
+
+    def _time_objective_diagnostics(self, y: np.ndarray, preds: np.ndarray, residual: np.ndarray, time_values: np.ndarray, bins: int = 5) -> list[dict[str, object]]:
+        y_array = np.asarray(y, dtype=np.float64)
+        time_array = np.asarray(time_values)
+        if time_array.size == 0:
+            return []
+        if np.issubdtype(time_array.dtype, np.number):
+            order_values = np.asarray(time_array, dtype=np.float64)
+        else:
+            order_values = np.arange(time_array.shape[0], dtype=np.float64)
+        edges = np.unique(np.quantile(order_values, np.linspace(0.0, 1.0, bins + 1)))
+        if edges.size <= 2:
+            labels = np.zeros(order_values.shape[0], dtype=np.int64)
+            n_bins = 1
+        else:
+            labels = np.searchsorted(edges[1:-1], order_values, side="right")
+            n_bins = int(edges.size - 1)
+        rows: list[dict[str, object]] = []
+        pred_array = np.asarray(preds)
+        for label in range(n_bins):
+            mask = labels == label
+            if not np.any(mask):
+                continue
+            rows.append(
+                {
+                    "bin": int(label),
+                    "n": int(np.sum(mask)),
+                    "time_min": _jsonable_scalar(np.min(time_array[mask])),
+                    "time_max": _jsonable_scalar(np.max(time_array[mask])),
+                    "score": float(self.scorer.score(y_array[mask], pred_array[mask])),
+                    "raw_score": float(self.scorer.raw_score(y_array[mask], pred_array[mask])),
+                    "prediction_mean": float(np.mean(pred_array[mask])),
+                    "residual_mean": float(np.mean(residual[mask])),
+                    "residual_abs_mean": float(np.mean(np.abs(residual[mask]))),
+                }
+            )
         return rows
 
 
@@ -857,6 +928,20 @@ def split_alternative_name(name: str) -> tuple[str, str]:
     if "." not in name:
         return name, ""
     return name.split(".", maxsplit=1)
+
+
+def _coerce_task_schema(task_schema: TaskSchema | dict[str, object] | None) -> TaskSchema | None:
+    if task_schema is None:
+        return None
+    if isinstance(task_schema, TaskSchema):
+        return task_schema
+    return TaskSchema.from_dict(dict(task_schema))
+
+
+def _schema_role_key(task_schema: TaskSchema | None, *roles: str) -> str | None:
+    if task_schema is None:
+        return None
+    return task_schema.input_name_with_role(*roles)
 
 
 def _jsonable_scalar(value: object) -> object:

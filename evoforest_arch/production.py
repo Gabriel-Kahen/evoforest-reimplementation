@@ -1292,7 +1292,8 @@ class ProductionEvolutionRunner:
         if self.config.promotion_policy not in SUPPORTED_PROMOTION_POLICIES:
             raise ValueError(f"Unsupported promotion policy {self.config.promotion_policy!r}; expected one of {', '.join(SUPPORTED_PROMOTION_POLICIES)}.")
         self.graph = graph or build_seed_graph(self.task_schema)
-        self.evaluator = RidgeEvaluator(**config.evaluator_config())
+        self.evaluator = RidgeEvaluator(**self._evaluator_config_for_task())
+        self.evaluator.task_schema = self.task_schema
         self.mutation_engine = MutationEngine(
             registry=PrimitiveRegistry.for_task(self.task_schema),
             allow_source=config.allow_source_mutations,
@@ -1317,6 +1318,22 @@ class ProductionEvolutionRunner:
         if isinstance(task_schema_payload, dict) and task_schema_payload:
             return TaskSchema.from_dict(task_schema_payload)
         return None
+
+    def _evaluator_config_for_task(self) -> dict[str, Any]:
+        config = self.config.evaluator_config()
+        group_key = config.get("group_key") or self.task_schema.input_name_with_role("group", "unit", "engine", "entity")
+        time_key = config.get("time_key") or self.task_schema.input_name_with_role("time", "cycle", "sequence_index")
+        config["group_key"] = group_key
+        config["time_key"] = time_key
+        if str(config.get("fold_strategy", "random")) == "random":
+            if group_key:
+                config["fold_strategy"] = "group_random"
+            elif time_key:
+                config["fold_strategy"] = "time_blocked"
+        return config
+
+    def _split_group_key(self) -> str | None:
+        return self.config.split_group_key or self.config.group_key or self.task_schema.input_name_with_role("group", "unit", "engine", "entity")
 
     def run(self, *, resume: bool = False) -> dict[str, Any]:
         if self._should_run_async_islands(resume=resume):
@@ -1931,6 +1948,7 @@ class ProductionEvolutionRunner:
             "time_key": self.evaluator.fold_strategy.time_key,
             "stratify_bins": int(self.evaluator.fold_strategy.stratify_bins),
             "scorer": self.evaluator.scorer.name,
+            "task_schema": self.task_schema.to_dict(),
             "torch_device": self.evaluator.torch_device,
         }
 
@@ -2133,7 +2151,7 @@ class ProductionEvolutionRunner:
             seed=self.config.split_seed if self.config.split_seed is not None else self.config.seed,
             validation_fraction=self.config.validation_fraction,
             test_fraction=self.config.test_fraction,
-            group_key=self.config.split_group_key or self.config.group_key,
+            group_key=self._split_group_key(),
         )
         write_split_manifest(run_dir / "splits.json", split_manifest)
         splits = split_dataset(inputs, y, split_manifest)
@@ -2186,6 +2204,7 @@ class ProductionEvolutionRunner:
             else task_schema_for_dataset(str(dict(manifest.get("dataset", {})).get("name", self.config.dataset_name)))
         )
         registry = PrimitiveRegistry.for_task(self.task_schema)
+        self.evaluator.task_schema = self.task_schema
         self.mutation_engine = MutationEngine(registry=registry, allow_source=allow_source)
         split_manifest = read_split_manifest(run_dir / "splits.json")
         inputs, y = load_dataset(dict(manifest["dataset"]))
@@ -2288,7 +2307,7 @@ class ProductionEvolutionRunner:
             "dataset_metadata": dataset_metadata or {},
             "dataset_fingerprint": split_manifest.dataset_fingerprint,
             "split_manifest_path": "splits.json",
-            "evaluator": self.config.evaluator_config(),
+            "evaluator": self._active_evaluator_config(),
             "scorer": self.evaluator.scorer.to_dict(),
             "mutation": {"allow_source_mutations": bool(self.config.allow_source_mutations)},
             "islands": {

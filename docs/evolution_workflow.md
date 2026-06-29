@@ -132,6 +132,8 @@ For a real claim, use a loader that returns:
 - `y`: a 1-D target array aligned with the sample axis of the tensors.
 - a `TaskSchema` or dataset-name mapping that selects the seed graph and
   primitive registry for those inputs.
+- optional input roles such as `feature`, `group`, `unit`, `time`, `sequence`,
+  `regime`, `fault_mode`, `event`, and `censoring`.
 - a stable dataset fingerprint derived from the exact input arrays and targets.
 
 Then create one split manifest and reuse it for every run. Do not tune on test.
@@ -147,25 +149,39 @@ The production CLI includes three external loader adapters:
   module adapter.
 - `python-module`: imports `--dataset-module` and calls `--dataset-function`
   (`load_dataset` by default). The function should return a `LoadedDataset`, a
-  dict with `inputs` and `y`, or `(inputs, y[, metadata[, task_schema]])`.
+  dict with `inputs` and `y`, or `(inputs, y[, metadata[, task_schema]])`. When
+  used through an external manifest, the manifest directory is temporarily added
+  to `sys.path` during import and loader execution.
 
-For unit- or engine-level tasks, pass the same metadata key into both the split
-manifest and cross-validation fold strategy:
+For unit- or engine-level tasks, prefer declaring the metadata key in the schema:
+
+```json
+{
+  "inputs": [
+    {"name": "features", "kind": "numeric_matrix", "roles": ["feature"]},
+    {"name": "engine_id", "kind": "group_id", "roles": ["group", "unit"]},
+    {"name": "cycle", "kind": "time_index", "roles": ["time", "sequence"]}
+  ],
+  "default_input": "features"
+}
+```
+
+Production will infer grouped train/validation/test splitting and grouped CV from
+the `group` role when no explicit key is supplied:
 
 ```bash
 evoforest-arch evolve \
   --dataset external-manifest \
   --dataset-manifest data/dataset_manifest.json \
-  --split-group-key engine_id \
-  --fold-strategy group_random \
-  --group-key engine_id \
   --scorer rmse \
   --output runs/real-task
 ```
 
-For ordered degradation or forecasting-style data, use `--fold-strategy
-time_blocked --time-key cycle`. For target-distribution control on generic
-regression tasks, use `--fold-strategy stratified --stratify-bins 5`.
+Explicit CLI keys still override schema inference. For ordered degradation or
+forecasting-style data without a group role, a schema `time` role selects
+time-blocked CV; otherwise use `--fold-strategy time_blocked --time-key cycle`.
+For target-distribution control on generic regression tasks, use
+`--fold-strategy stratified --stratify-bins 5`.
 
 Keep private adapters, targets, and contest submission code outside the public
 repo, but commit the public manifest/schema and the resulting split manifest when

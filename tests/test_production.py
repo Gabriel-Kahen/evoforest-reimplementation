@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 
 from evoforest_arch.cli import main as cli_main, task_schema_for_evolve_run
+from evoforest_arch.datasets import load_dataset_bundle
 from evoforest_arch.evaluator import EvaluationResult
 from evoforest_arch.graph_io import graph_from_path
 from evoforest_arch.llm import LLMEngineerAgent, LLMMemorandumAgent, LLMScientistAgent, StaticLLMClient
@@ -114,12 +115,14 @@ def test_production_loads_external_manifest_with_grouped_task_splits(tmp_path) -
                             "kind": "numeric_matrix",
                             "description": "Row-aligned external feature matrix.",
                             "shape": ["n_samples", "n_features"],
+                            "roles": ["feature"],
                         },
                         {
                             "name": "engine_id",
                             "kind": "group_id",
                             "description": "Unit identifier used for leakage-safe grouped splitting.",
                             "shape": ["n_samples"],
+                            "roles": ["group", "unit"],
                         },
                     ],
                     "target": {
@@ -140,9 +143,6 @@ def test_production_loads_external_manifest_with_grouped_task_splits(tmp_path) -
         seed=54,
         dataset_name="external-manifest",
         dataset_manifest_path=manifest_path,
-        split_group_key="engine_id",
-        fold_strategy="group_random",
-        group_key="engine_id",
     )
 
     summary = ProductionEvolutionRunner(config).run()
@@ -155,6 +155,7 @@ def test_production_loads_external_manifest_with_grouped_task_splits(tmp_path) -
     assert run_manifest["dataset_metadata"]["target_key"] == "rul"
     assert run_manifest["dataset_metadata"]["input_keys"] == ["features", "engine_id"]
     assert run_manifest["evaluator"]["fold_strategy"] == "group_random"
+    assert run_manifest["evaluator"]["group_key"] == "engine_id"
     assert splits["method"] == "group_random"
     assert splits["group_key"] == "engine_id"
     assert not (set(splits["train_groups"]) & set(splits["validation_groups"]))
@@ -169,6 +170,102 @@ def test_production_loads_external_manifest_with_grouped_task_splits(tmp_path) -
     resumed = ProductionEvolutionRunner(resume_config).run(resume=True)
     assert resumed["dataset"]["name"] == "external-manifest"
     assert resumed["step"] == summary["step"]
+
+
+def test_external_manifest_python_module_loads_relative_to_manifest(tmp_path) -> None:
+    module_path = tmp_path / "local_loader.py"
+    module_path.write_text(
+        "\n".join(
+            [
+                "import numpy as np",
+                "",
+                "def load_dataset(n=12):",
+                "    x = np.arange(n * 2, dtype=float).reshape(n, 2)",
+                "    y = x[:, 0] * 0.5",
+                "    unit = np.asarray([f'unit_{index // 3}' for index in range(n)])",
+                "    return {",
+                "        'inputs': {'features': x, 'unit_id': unit},",
+                "        'y': y,",
+                "        'metadata': {'source': 'manifest-relative-python-module'},",
+                "        'task_schema': {",
+                "            'name': 'relative-module-task',",
+                "            'kind': 'tabular',",
+                "            'inputs': [",
+                "                {'name': 'features', 'kind': 'numeric_matrix', 'roles': ['feature']},",
+                "                {'name': 'unit_id', 'kind': 'group_id', 'roles': ['group', 'unit']},",
+                "            ],",
+                "            'default_input': 'features',",
+                "        },",
+                "    }",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    manifest_path = tmp_path / "python_dataset.json"
+    manifest_path.write_text(
+        json.dumps({"adapter": "python-module", "module": "local_loader", "function": "load_dataset", "kwargs": {"n": 15}}),
+        encoding="utf-8",
+    )
+
+    loaded = load_dataset_bundle({"name": "external-manifest", "manifest_path": str(manifest_path)})
+
+    assert loaded.y.shape == (15,)
+    assert loaded.inputs["features"].shape == (15, 2)
+    assert loaded.metadata["source"] == "manifest-relative-python-module"
+    assert loaded.task_schema.default_input == "features"
+    assert loaded.task_schema.input_name_with_role("group") == "unit_id"
+
+
+def test_manifest_relative_python_package_loaders_do_not_reuse_child_modules(tmp_path) -> None:
+    def write_package_loader(base, label: str) -> None:
+        package = base / "local_pkg"
+        package.mkdir(parents=True)
+        (package / "__init__.py").write_text("", encoding="utf-8")
+        (package / "helper.py").write_text(f"VALUE = {label!r}\n", encoding="utf-8")
+        (package / "loader.py").write_text(
+            "\n".join(
+                [
+                    "import numpy as np",
+                    "from .helper import VALUE",
+                    "",
+                    "def load_dataset():",
+                    "    x = np.ones((9, 2), dtype=float)",
+                    "    y = np.arange(9, dtype=float)",
+                    "    return {'inputs': {'features': x}, 'y': y, 'metadata': {'source': VALUE}}",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        (base / "manifest.json").write_text(
+            json.dumps({"adapter": "python-module", "module": "local_pkg.loader", "function": "load_dataset"}),
+            encoding="utf-8",
+        )
+
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    write_package_loader(first, "first")
+    write_package_loader(second, "second")
+
+    first_loaded = load_dataset_bundle({"name": "external-manifest", "manifest_path": str(first / "manifest.json")})
+    second_loaded = load_dataset_bundle({"name": "external-manifest", "manifest_path": str(second / "manifest.json")})
+
+    assert first_loaded.metadata["source"] == "first"
+    assert second_loaded.metadata["source"] == "second"
+
+
+def test_inferred_regime_and_fault_ids_are_not_split_group_keys(tmp_path) -> None:
+    data_path = tmp_path / "diagnostic_roles.npz"
+    x = np.arange(60, dtype=float).reshape(20, 3)
+    y = x[:, 0]
+    regime_id = np.asarray(["early" if index < 10 else "late" for index in range(20)])
+    fault_id = np.asarray(["fault_a" if index % 2 == 0 else "fault_b" for index in range(20)])
+    np.savez(data_path, features=x, target=y, regime_id=regime_id, fault_id=fault_id)
+
+    loaded = load_dataset_bundle({"name": "external-npz", "path": str(data_path), "target_key": "target"})
+
+    assert loaded.task_schema.input_name_with_role("regime") == "regime_id"
+    assert loaded.task_schema.input_name_with_role("fault_mode") == "fault_id"
+    assert loaded.task_schema.input_name_with_role("group") is None
 
 
 def test_production_evolve_writes_fixed_splits_and_resumes(tmp_path) -> None:

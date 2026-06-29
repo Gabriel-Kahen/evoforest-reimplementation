@@ -155,9 +155,6 @@ evoforest-arch evolve \
   --input-key features \
   --input-key engine_id \
   --task-schema-file data/task_schema.json \
-  --fold-strategy group_random \
-  --group-key engine_id \
-  --split-group-key engine_id \
   --output runs/external-task
 ```
 
@@ -172,7 +169,10 @@ Manifest files can keep paths relative to the manifest:
   "task_schema": {
     "name": "external-tabular",
     "kind": "tabular",
-    "inputs": [{"name": "features", "kind": "numeric_matrix"}],
+    "inputs": [
+      {"name": "features", "kind": "numeric_matrix", "roles": ["feature"]},
+      {"name": "engine_id", "kind": "group_id", "roles": ["group", "unit"]}
+    ],
     "default_input": "features"
   }
 }
@@ -185,9 +185,12 @@ evoforest-arch evolve --dataset external-manifest --dataset-manifest data/datase
 ```
 
 Python hooks are also supported with `--dataset python-module --dataset-module
-package.module --dataset-function load_dataset`. A real strength claim still
-needs a fixed dataset version, fixed split manifest, and no tuning on the held-out
-test split; see [docs/evolution_workflow.md](docs/evolution_workflow.md).
+package.module --dataset-function load_dataset`. When a manifest uses
+`"adapter": "python-module"`, the manifest directory is temporarily added to
+`sys.path` while importing and calling the loader, so local loader modules can
+live next to the manifest. A real strength claim still needs a fixed dataset
+version, fixed split manifest, and no tuning on the held-out test split; see
+[docs/evolution_workflow.md](docs/evolution_workflow.md).
 
 ## Run Benchmarks
 

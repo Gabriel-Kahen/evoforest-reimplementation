@@ -14,7 +14,9 @@ the following modules.
   - Persistent global parameters that alternatives can read and refine.
 - `evoforest_arch.task`
   - Task schemas for row-aligned inputs, targets, default input names, and
-    dataset-to-task selection.
+    dataset-to-task selection. Input specs can carry roles such as `feature`,
+    `group`, `unit`, `time`, `sequence`, `regime`, `fault_mode`, `event`, and
+    `censoring`.
 - `evoforest_arch.datasets`
   - Dataset loader registry for synthetic smoke tasks, external `.npz` files,
     manifest-driven adapters, and Python module hooks. Loaders return inputs,
@@ -78,7 +80,9 @@ the following modules.
 - `input` nodes read data supplied by the task.
 - A `TaskSchema` defines the task's inputs and default input. The seed builder and
   primitive registry are selected from that schema, so structural-break inputs are
-  no longer assumed by the architecture.
+  no longer assumed by the architecture. Non-feature inputs can be declared as
+  role-bearing metadata for splits, folds, diagnostics, and prompts without
+  becoming graph inputs.
 - `intermediate` nodes contain competing tensor-producing alternatives.
 - `callable` nodes contain competing alternatives that return reusable functions.
 - `output` alternatives are not selected by configuration. Every output alternative
@@ -102,8 +106,9 @@ the following modules.
   natural direction.
 - Fold selection is task-aware. The evaluator can use random folds, grouped folds
   for unit/engine leakage control, stratified target folds, and time-blocked folds;
-  the production split manifest can also keep train/validation/test unit groups
-  disjoint.
+  schema `group`/`unit` roles infer grouped folds, schema `time` roles infer
+  time-blocked folds when no group role is present, and the production split
+  manifest can also keep train/validation/test unit groups disjoint.
 - `ridge_g` residual rules are applied through an explicit IRLS loop: after the
   initial Ridge fit, residuals are converted to weights and Ridge is refit for the
   configured number of `irls_steps`, with per-fold iteration diagnostics recorded.
@@ -227,10 +232,11 @@ Known approximations:
 - The diagnostic table is TOON-like and includes feature dependencies, subnode
   aggregates, importance, standalone score, max correlation, high-correlation counts,
   residual correlations, target-bin objective rows, group/unit objective rows when
-  a group key is configured, exact additive Ridge contribution summaries,
-  diagnostic global Ridge score, valid-feature-pool Ridge score, fold-weight
-  stability, fold score dispersion, effective rank, and evaluated configuration
-  score range. It is not the full private
+  a group role/key is configured, time-bin rows when a time role/key is configured,
+  role-group rows for regime/fault/event/censoring metadata, exact additive Ridge
+  contribution summaries, diagnostic global Ridge score, valid-feature-pool Ridge
+  score, fold-weight stability, fold score dispersion, effective rank, and
+  evaluated configuration score range. It is not the full private
   diagnostic schema. Alternative-level history is a clean-room rolling aggregate over
   the best stateful evaluation path rather than the authors' private statistic table,
   the SHAP-style fields are exact for this repo's standardized linear Ridge basis

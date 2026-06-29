@@ -18,6 +18,7 @@ from evoforest_arch.rank_readout import fit_rank_feature_expansion, select_rank_
 from evoforest_arch.seed import build_seed_graph, build_structural_break_seed_graph
 from evoforest_arch.source import SourceExecutionError
 from evoforest_arch.synthetic import make_structural_break_data, make_tabular_data
+from evoforest_arch.task import InputSpec, TaskSchema
 
 
 def test_default_seed_graph_is_task_independent_tabular() -> None:
@@ -251,6 +252,35 @@ def test_task_aware_fold_strategies_report_group_and_time_diagnostics() -> None:
     assert leave_diagnostics["validation_group_counts"] == [1] * len(leave_folds)
     for train_idx, val_idx in leave_folds:
         assert len(set(inputs["engine_id"][train_idx].tolist()) & set(inputs["engine_id"][val_idx].tolist())) == 0
+
+
+def test_task_schema_roles_drive_evaluator_folds_and_objective_diagnostics() -> None:
+    dataset = make_tabular_data(n_samples=64, n_features=5, seed=40)
+    schema = TaskSchema(
+        name="role-aware-tabular",
+        kind="tabular",
+        inputs=(
+            InputSpec("features", "numeric_matrix", "Feature matrix.", ("n_samples", "n_features"), ("feature",)),
+            InputSpec("cycle", "time_index", "Cycle index.", ("n_samples",), ("time", "sequence")),
+            InputSpec("regime", "regime_id", "Regime label.", ("n_samples",), ("regime",)),
+        ),
+        default_input="features",
+    )
+    inputs = {
+        "features": dataset.inputs()["x"],
+        "cycle": np.arange(dataset.y.shape[0]),
+        "regime": np.asarray(["early" if index < 32 else "late" for index in range(dataset.y.shape[0])]),
+    }
+    graph = build_seed_graph(schema)
+    result = RidgeEvaluator(n_splits=4, seed=40, max_configurations=4, task_schema=schema).evaluate(graph, inputs, dataset.y)
+
+    assert result.diagnostics["folds"]["method"] == "time_blocked"
+    objective = result.diagnostics["objective"]
+    assert objective["time_key"] == "cycle"
+    assert objective["time_bins"]
+    assert objective["schema_roles"]["time"] == ["cycle"]
+    assert "group" not in objective["schema_roles"]
+    assert objective["role_groups"]["regime"]["key"] == "regime"
 
 
 def test_ridge_evaluator_basic_diagnostics_skips_feature_rows() -> None:
