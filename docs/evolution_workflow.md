@@ -126,7 +126,7 @@ JSONL logs, so the resume command does not need to repeat the island flags:
 evoforest-arch evolve --resume --steps 16 --output runs/production-islands
 ```
 
-For a real claim, add a loader that returns:
+For a real claim, use a loader that returns:
 
 - `inputs`: a dictionary of graph input tensors and scalar metadata.
 - `y`: a 1-D target array aligned with the sample axis of the tensors.
@@ -138,11 +138,38 @@ Then create one split manifest and reuse it for every run. Do not tune on test.
 
 ## External Dataset Loaders
 
-External dataset loaders are deliberately not bundled with this public
-reimplementation. Keep domain-specific data adapters, private targets, and contest
-submission code in a separate workspace. If you add a loader for a public dataset,
-make it return the same three values described above and commit the split manifest
-used for every comparable run.
+The production CLI includes three external loader adapters:
+
+- `external-npz`: loads a row-aligned `.npz` file with `--dataset-path`,
+  `--target-key`, repeated `--input-key`, and optional `--task-schema-file`.
+- `external-manifest`: loads a JSON manifest whose relative paths resolve from
+  the manifest directory. The manifest can point at an `.npz` adapter or a Python
+  module adapter.
+- `python-module`: imports `--dataset-module` and calls `--dataset-function`
+  (`load_dataset` by default). The function should return a `LoadedDataset`, a
+  dict with `inputs` and `y`, or `(inputs, y[, metadata[, task_schema]])`.
+
+For unit- or engine-level tasks, pass the same metadata key into both the split
+manifest and cross-validation fold strategy:
+
+```bash
+evoforest-arch evolve \
+  --dataset external-manifest \
+  --dataset-manifest data/dataset_manifest.json \
+  --split-group-key engine_id \
+  --fold-strategy group_random \
+  --group-key engine_id \
+  --scorer rmse \
+  --output runs/real-task
+```
+
+For ordered degradation or forecasting-style data, use `--fold-strategy
+time_blocked --time-key cycle`. For target-distribution control on generic
+regression tasks, use `--fold-strategy stratified --stratify-bins 5`.
+
+Keep private adapters, targets, and contest submission code outside the public
+repo, but commit the public manifest/schema and the resulting split manifest when
+you need comparable runs.
 
 ## Staged Execution Rules
 

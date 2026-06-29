@@ -21,9 +21,9 @@ class SplitManifest:
     validation_indices: tuple[int, ...]
     test_indices: tuple[int, ...]
     group_key: str | None = None
-    train_groups: tuple[int, ...] = ()
-    validation_groups: tuple[int, ...] = ()
-    test_groups: tuple[int, ...] = ()
+    train_groups: tuple[object, ...] = ()
+    validation_groups: tuple[object, ...] = ()
+    test_groups: tuple[object, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         payload = {
@@ -41,9 +41,9 @@ class SplitManifest:
             payload.update(
                 {
                     "group_key": self.group_key,
-                    "train_groups": list(self.train_groups),
-                    "validation_groups": list(self.validation_groups),
-                    "test_groups": list(self.test_groups),
+                    "train_groups": [_jsonable_group(group) for group in self.train_groups],
+                    "validation_groups": [_jsonable_group(group) for group in self.validation_groups],
+                    "test_groups": [_jsonable_group(group) for group in self.test_groups],
                 }
             )
         return payload
@@ -61,9 +61,9 @@ class SplitManifest:
             validation_indices=tuple(int(index) for index in payload["validation_indices"]),
             test_indices=tuple(int(index) for index in payload["test_indices"]),
             group_key=str(payload["group_key"]) if payload.get("group_key") is not None else None,
-            train_groups=tuple(int(group) for group in payload.get("train_groups", [])),
-            validation_groups=tuple(int(group) for group in payload.get("validation_groups", [])),
-            test_groups=tuple(int(group) for group in payload.get("test_groups", [])),
+            train_groups=tuple(payload.get("train_groups", [])),
+            validation_groups=tuple(payload.get("validation_groups", [])),
+            test_groups=tuple(payload.get("test_groups", [])),
         )
 
 
@@ -182,9 +182,9 @@ def make_grouped_split_manifest(
         validation_indices=tuple(int(index) for index in sorted(validation.tolist())),
         test_indices=tuple(int(index) for index in sorted(test.tolist())),
         group_key=group_key,
-        train_groups=tuple(int(group) for group in sorted(train_groups.tolist())),
-        validation_groups=tuple(int(group) for group in sorted(validation_groups.tolist())),
-        test_groups=tuple(int(group) for group in sorted(test_groups.tolist())),
+        train_groups=tuple(_jsonable_group(group) for group in sorted(train_groups.tolist())),
+        validation_groups=tuple(_jsonable_group(group) for group in sorted(validation_groups.tolist())),
+        test_groups=tuple(_jsonable_group(group) for group in sorted(test_groups.tolist())),
     )
     validate_split_manifest(manifest)
     validate_grouped_split_manifest(manifest)
@@ -299,3 +299,11 @@ def _hash_value(hasher: "hashlib._Hash", key: str, value: object) -> None:
     except TypeError:
         encoded = repr(value).encode("utf-8")
     hasher.update(encoded)
+
+
+def _jsonable_group(value: object) -> object:
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    return value

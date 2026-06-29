@@ -12,6 +12,7 @@ from evoforest_arch.feedback import toon_report
 from evoforest_arch.graph import CallableFamily, EvalContext, FeatureBlock, Graph, ResidualWeightRule
 from evoforest_arch.llm import ClaudeLLMClient, GeminiLLMClient, LLMEngineerAgent, LLMMemorandumAgent, LLMScientistAgent, OpenAILLMClient, PromptBuilder, StaticLLMClient, llm_client_from_env, llm_provider_from_env
 from evoforest_arch.maintenance import GraphMaintenance
+from evoforest_arch.metrics import FoldStrategy, RMSE_SCORER
 from evoforest_arch.mutations import GlobalSpec, MutationDocument, MutationEngine, MutationSpec, NodeSpec, RemoveSpec
 from evoforest_arch.rank_readout import fit_rank_feature_expansion, select_rank_ensemble
 from evoforest_arch.seed import build_seed_graph, build_structural_break_seed_graph
@@ -187,6 +188,69 @@ def test_ridge_evaluator_scores_synthetic_breaks() -> None:
     assert "features[name,depth,imp,align,sign,max_corr" in toon
     assert "shap" in toon
     assert "alternatives[name,age,evals,sel,n,imp,shap" in toon
+
+
+def test_lower_is_better_scorer_preserves_raw_metric_direction() -> None:
+    y = np.array([0.0, 1.0, 2.0])
+    pred = np.array([0.0, 2.0, 4.0])
+    raw = RMSE_SCORER.raw_score(y, pred)
+
+    assert raw > 0.0
+    assert RMSE_SCORER.score(y, pred) == -raw
+    scorer_dict = RMSE_SCORER.to_dict()
+    assert scorer_dict["raw_metric"] == "rmse"
+    assert scorer_dict["raw_higher_is_better"] is False
+    assert scorer_dict["higher_is_better"] is True
+    assert scorer_dict["optimization_score"] == "negative_raw"
+
+    dataset = make_tabular_data(n_samples=60, n_features=5, seed=36)
+    result = RidgeEvaluator(n_splits=3, seed=36, max_configurations=4, scorer="rmse").evaluate(
+        build_seed_graph(),
+        dataset.inputs(),
+        dataset.y,
+    )
+
+    assert result.score <= 0.0
+    assert result.diagnostics["folds"]["raw_metric"] == "rmse"
+    assert result.diagnostics["folds"]["raw_higher_is_better"] is False
+    assert result.diagnostics["folds"]["raw_score_mean"] >= 0.0
+    assert result.diagnostics["scoring_context"]["scorer"]["optimization_score"] == "negative_raw"
+
+
+def test_task_aware_fold_strategies_report_group_and_time_diagnostics() -> None:
+    dataset = make_tabular_data(n_samples=72, n_features=6, seed=37)
+    inputs = dataset.inputs()
+    inputs["engine_id"] = np.asarray([f"engine_{index // 4}" for index in range(dataset.y.shape[0])])
+    inputs["cycle"] = np.arange(dataset.y.shape[0])
+
+    result = RidgeEvaluator(
+        n_splits=3,
+        seed=37,
+        max_configurations=4,
+        fold_strategy="group_random",
+        group_key="engine_id",
+    ).evaluate(build_seed_graph(), inputs, dataset.y)
+
+    folds = result.diagnostics["folds"]
+    assert folds["method"] == "group_random"
+    assert folds["grouped"] is True
+    assert folds["fold_group_overlap_count"] == 0
+    objective = result.diagnostics["objective"]
+    assert objective["group_key"] == "engine_id"
+    assert objective["groups"]
+    assert objective["target_bins"]
+
+    time_folds, time_diagnostics = FoldStrategy(name="time_blocked", time_key="cycle").split(inputs, dataset.y, 4, seed=37)
+    assert len(time_folds) == 4
+    assert time_diagnostics["method"] == "time_blocked"
+    assert time_diagnostics["blocked"] is True
+
+    leave_folds, leave_diagnostics = FoldStrategy(name="leave_group_out", group_key="engine_id").split(inputs, dataset.y, 3, seed=37)
+    assert len(leave_folds) == len(np.unique(inputs["engine_id"]))
+    assert leave_diagnostics["method"] == "leave_group_out"
+    assert leave_diagnostics["validation_group_counts"] == [1] * len(leave_folds)
+    for train_idx, val_idx in leave_folds:
+        assert len(set(inputs["engine_id"][train_idx].tolist()) & set(inputs["engine_id"][val_idx].tolist())) == 0
 
 
 def test_ridge_evaluator_basic_diagnostics_skips_feature_rows() -> None:
@@ -649,6 +713,91 @@ def test_source_torch_path_participates_in_refinement_when_available() -> None:
 
     assert result.diagnostics["refinement"]["backend"] == "torch_l_bfgs"
     assert "gate_scale" in result.diagnostics["refinement"]["trainable_globals"]
+
+
+def test_sandboxed_source_can_evolve_callable_nodes() -> None:
+    dataset = make_structural_break_data(n_series=28, length=70, seed=38)
+    graph = build_structural_break_seed_graph()
+    document = MutationDocument(
+        add=(
+            MutationSpec(
+                kind="add_alternative",
+                target_node="activation",
+                primitive="source",
+                alternative_id="source_sigmoid_callable",
+                parents=(),
+                source="lambda ctx, values: {'kind': 'callable', 'name': 'source_sigmoid', 'op': 'sigmoid', 'scale': 1.5}",
+                output_contract={"type": "callable"},
+            ),
+        )
+    )
+
+    graph = MutationEngine(allow_source=True).apply_document(graph, document).graph
+    config = graph.default_config()
+    config["activation"] = "source_sigmoid_callable"
+    ctx = EvalContext(dataset.inputs(), graph.globals.clone())
+    callable_family = graph.evaluate_node("activation", config, ctx)
+
+    assert isinstance(callable_family, CallableFamily)
+    transformed = callable_family.apply(np.array([-1.0, 0.0, 1.0]))
+    assert transformed.shape == (3,)
+    assert transformed[0] < transformed[1] < transformed[2]
+
+
+def test_sandboxed_source_can_evolve_fitting_nodes() -> None:
+    dataset = make_structural_break_data(n_series=60, length=70, seed=39)
+    graph = build_structural_break_seed_graph()
+    document = MutationDocument(
+        add=(
+            MutationSpec(
+                kind="add_alternative",
+                target_node="ridge_g",
+                primitive="source",
+                alternative_id="source_huber_rule",
+                parents=(),
+                source="lambda ctx, values: {'kind': 'residual_weight_rule', 'name': 'source_huber', 'op': 'huber', 'scale': 1.0}",
+                output_contract={"type": "residual_weight_rule"},
+            ),
+        )
+    )
+
+    graph = MutationEngine(allow_source=True).apply_document(graph, document).graph
+    result = RidgeEvaluator(n_splits=3, seed=39, max_configurations=4, irls_steps=1).evaluate(
+        graph,
+        dataset.inputs(),
+        dataset.y,
+        config={"ridge_g": "source_huber_rule"},
+    )
+
+    assert result.diagnostics["fitting"]["ridge_g"]["alternative"] == "source_huber_rule"
+    assert result.diagnostics["fitting"]["ridge_g"]["rule"] == "source_huber"
+    assert result.diagnostics["global_ridge"]["residual_reweighted"] is True
+
+
+def test_numpy_source_lambda_gets_auto_torch_path_when_expression_is_differentiable() -> None:
+    graph = build_seed_graph()
+    document = MutationDocument(
+        add=(
+            MutationSpec(
+                kind="add_alternative",
+                target_node="output",
+                primitive="source",
+                alternative_id="auto_torch_source_feature",
+                parents=("base_features",),
+                source="lambda ctx, values: FeatureBlock(np.column_stack([values['base_features'].values[:, 0] * ctx.globals.get('gate_scale')[0]]), ['scaled_first'])",
+                global_refs=("gate_scale",),
+                output_contract={"type": "feature_block", "n_columns": 1},
+            ),
+        )
+    )
+
+    graph = MutationEngine(allow_source=True).apply_document(graph, document).graph
+    source_alt = next(alternative for alternative in graph.nodes["output"].alternatives if alternative.id == "auto_torch_source_feature")
+
+    assert source_alt.torch_fn is not None
+    assert source_alt.torch_source
+    assert "torch.column_stack" in source_alt.torch_source
+    assert source_alt.output_contract["differentiability_source"] == "auto"
 
 
 def test_evolution_loop_writes_events_checkpoint_and_memorandum(tmp_path) -> None:

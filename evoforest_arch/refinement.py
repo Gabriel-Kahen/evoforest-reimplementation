@@ -166,12 +166,16 @@ class TorchFixedPathEvaluator:
         self.config = graph.selected_config(config)
         self.torch = torch_module
         self.device = device
-        self.inputs = {
-            name: self.torch.as_tensor(value, dtype=self.torch.float64, device=self.device) if isinstance(value, np.ndarray) else value
-            for name, value in inputs.items()
-        }
+        self.inputs = {name: self._torch_input(value) for name, value in inputs.items()}
         self.ctx = TorchEvalContext(self.inputs, TorchGlobalProxy(graph, parameters, self.torch, self.device))
         self.cache: dict[tuple[str, str], Any] = {}
+
+    def _torch_input(self, value: object) -> object:
+        if not isinstance(value, np.ndarray):
+            return value
+        if not (np.issubdtype(value.dtype, np.number) or np.issubdtype(value.dtype, np.bool_)):
+            return value
+        return self.torch.as_tensor(value, dtype=self.torch.float64, device=self.device)
 
     def evaluate_features(self) -> Any:
         blocks = []

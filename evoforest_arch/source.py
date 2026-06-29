@@ -71,6 +71,9 @@ def build_source_alternative(
     source = source.strip()
     torch_source = torch_source.strip()
     _validate_lambda_ast(source)
+    explicit_torch_source = bool(torch_source)
+    if not torch_source and node_kind in {"", "intermediate", "output"}:
+        torch_source = _derive_torch_source(source)
     if torch_source:
         _validate_lambda_ast(torch_source, backend="torch")
     policy = sandbox_policy or SourceSandboxPolicy()
@@ -79,10 +82,9 @@ def build_source_alternative(
         raise ValueError("Source alternatives with output_contract.differentiable=true require torch_source.")
     if torch_source:
         contract.setdefault("differentiable", True)
+        contract.setdefault("differentiability_source", "provided" if explicit_torch_source else "auto")
     else:
         contract.setdefault("differentiable", False)
-    if policy.enabled and node_kind in {"callable", "fitting"}:
-        raise ValueError("Sandboxed source alternatives currently support feature-producing intermediate/output nodes.")
     tags = tuple(dict.fromkeys((*tags, "sandboxed" if policy.enabled else "unsandboxed")))
     local_callable: object | None = None
     torch_callable: object | None = None
@@ -94,7 +96,7 @@ def build_source_alternative(
         else:
             if local_callable is None:
                 local_callable = compile_lambda_source(source)
-            result = local_callable(ctx, values)  # type: ignore[misc]
+            result = _materialize_source_result(local_callable(ctx, values), node_kind=node_kind, output_contract=contract)  # type: ignore[misc]
             _validate_source_result(result, node_kind=node_kind, output_contract=contract, sample_count=_infer_sample_count(ctx.inputs))
         return result
 
@@ -148,6 +150,45 @@ def compile_torch_lambda_source(source: str) -> object:
     return compiled
 
 
+def _derive_torch_source(source: str) -> str:
+    try:
+        tree = ast.parse(source.strip(), mode="eval")
+    except SyntaxError:
+        return ""
+    if not isinstance(tree.body, ast.Lambda):
+        return ""
+    transformed = _TorchSourceTransformer().visit(tree)
+    ast.fix_missing_locations(transformed)
+    try:
+        candidate = ast.unparse(transformed)
+        _validate_lambda_ast(candidate, backend="torch")
+    except Exception:
+        return ""
+    return candidate
+
+
+class _TorchSourceTransformer(ast.NodeTransformer):
+    def visit_Name(self, node: ast.Name) -> ast.AST:
+        if node.id == "np":
+            return ast.copy_location(ast.Name(id="torch", ctx=node.ctx), node)
+        return node
+
+    def visit_Attribute(self, node: ast.Attribute) -> ast.AST:
+        node = self.generic_visit(node)  # type: ignore[assignment]
+        if isinstance(node, ast.Attribute) and node.attr == "values":
+            return node.value
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == "torch" and node.attr == "asarray":
+            node.attr = "as_tensor"
+        return node
+
+    def visit_Call(self, node: ast.Call) -> ast.AST:
+        node = self.generic_visit(node)  # type: ignore[assignment]
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "FeatureBlock":
+            if node.args:
+                return node.args[0]
+        return node
+
+
 def _source_namespace() -> dict[str, object]:
     return {
         "__builtins__": SAFE_BUILTINS,
@@ -169,10 +210,18 @@ def _run_sandboxed_trials(
 ) -> Any:
     sample_count = _infer_sample_count(ctx.inputs)
     trials = max(1, int(policy.deterministic_trials))
-    first = _execute_source_in_subprocess(source, ctx.inputs, ctx.globals.clone(), values, policy)
+    first = _materialize_source_result(
+        _execute_source_in_subprocess(source, ctx.inputs, ctx.globals.clone(), values, policy),
+        node_kind=node_kind,
+        output_contract=output_contract,
+    )
     _validate_source_result(first, node_kind=node_kind, output_contract=output_contract, sample_count=sample_count)
     for _index in range(1, trials):
-        candidate = _execute_source_in_subprocess(source, ctx.inputs, ctx.globals.clone(), values, policy)
+        candidate = _materialize_source_result(
+            _execute_source_in_subprocess(source, ctx.inputs, ctx.globals.clone(), values, policy),
+            node_kind=node_kind,
+            output_contract=output_contract,
+        )
         _validate_source_result(candidate, node_kind=node_kind, output_contract=output_contract, sample_count=sample_count)
         if not _equivalent_result(first, candidate):
             raise SourceExecutionError("Source alternative produced non-deterministic outputs for identical inputs.")
@@ -252,6 +301,61 @@ def _sandbox_start_method() -> str:
     if "fork" in mp.get_all_start_methods():
         return "fork"
     return "spawn"
+
+
+def _materialize_source_result(result: Any, *, node_kind: str, output_contract: dict[str, object]) -> Any:
+    if isinstance(result, dict):
+        expected_type = str(output_contract.get("type", ""))
+        kind = str(result.get("kind", expected_type))
+        if node_kind == "callable" or kind == "callable":
+            return _callable_family_from_spec(result)
+        if expected_type == "residual_weight_rule" or kind in {"residual_weight_rule", "residual_weight"}:
+            return _residual_weight_rule_from_spec(result)
+    return result
+
+
+def _callable_family_from_spec(spec: dict[str, Any]) -> CallableFamily:
+    op = str(spec.get("op", "identity"))
+    name = str(spec.get("name", op))
+    scale = float(spec.get("scale", 1.0))
+    low = float(spec.get("low", -1.0))
+    high = float(spec.get("high", 1.0))
+
+    def apply(x: np.ndarray) -> np.ndarray:
+        array = np.asarray(x, dtype=np.float64)
+        if op == "identity":
+            return array
+        if op == "sigmoid":
+            return 1.0 / (1.0 + np.exp(-scale * array))
+        if op == "tanh":
+            return np.tanh(scale * array)
+        if op == "clipped_linear":
+            return np.clip(scale * array, low, high)
+        raise SourceExecutionError(f"Unsupported callable source op {op!r}.")
+
+    if op not in {"identity", "sigmoid", "tanh", "clipped_linear"}:
+        raise SourceExecutionError(f"Unsupported callable source op {op!r}.")
+    return CallableFamily(name=name, apply=apply, description=str(spec.get("description", f"Source callable {op}.")))
+
+
+def _residual_weight_rule_from_spec(spec: dict[str, Any]) -> ResidualWeightRule:
+    op = str(spec.get("op", "identity"))
+    name = str(spec.get("name", op))
+    scale = max(float(spec.get("scale", 1.0)), 1e-8)
+
+    def apply(residual: np.ndarray) -> np.ndarray:
+        r = np.asarray(residual, dtype=np.float64)
+        if op == "identity":
+            return np.ones_like(r)
+        if op == "huber":
+            return np.minimum(1.0, scale / np.maximum(np.abs(r), 1e-8))
+        if op == "soft_l1":
+            return 1.0 / np.sqrt(1.0 + (r / scale) ** 2)
+        raise SourceExecutionError(f"Unsupported residual-weight source op {op!r}.")
+
+    if op not in {"identity", "huber", "soft_l1"}:
+        raise SourceExecutionError(f"Unsupported residual-weight source op {op!r}.")
+    return ResidualWeightRule(name=name, apply=apply, description=str(spec.get("description", f"Source residual-weight rule {op}.")))
 
 
 def _validate_source_result(
@@ -409,14 +513,18 @@ ALLOWED_TORCH_CALLS = {
     "cat",
     "clamp",
     "column_stack",
+    "diff",
     "log",
+    "max",
     "maximum",
     "mean",
+    "min",
     "minimum",
     "reshape",
     "square",
     "stack",
     "std",
+    "sum",
     "zeros_like",
     "ones_like",
 }
@@ -437,6 +545,8 @@ def _validate_attribute_node(node: ast.Attribute, *, backend: str) -> None:
         if node.value.id == "math" and node.attr in ALLOWED_MATH_CALLS:
             return
         if backend == "torch" and node.value.id == "torch" and node.attr in ALLOWED_TORCH_CALLS:
+            return
+        if backend == "torch" and node.value.id == "torch" and node.attr in {"float32", "float64"}:
             return
     if isinstance(node.value, ast.Name) and node.value.id == "ctx" and node.attr in {"globals", "read_input"}:
         return

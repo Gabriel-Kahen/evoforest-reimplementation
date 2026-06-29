@@ -6,7 +6,7 @@ from itertools import product
 import numpy as np
 
 from evoforest_arch.graph import EvalContext, Graph, ResidualWeightRule
-from evoforest_arch.metrics import DEFAULT_SCORER, ScoreFunction, TaskScorer, coerce_scorer, group_folds, random_folds, safe_corr, target_alignment
+from evoforest_arch.metrics import DEFAULT_SCORER, FoldStrategy, ScoreFunction, TaskScorer, coerce_fold_strategy, coerce_scorer, safe_corr, target_alignment
 from evoforest_arch.readout import DEFAULT_ALPHAS, RidgeModel, Standardizer, combine_sample_weights, fit_ridge, normalize_sample_weight, select_alpha
 
 
@@ -43,9 +43,12 @@ class LinearDiagnosticFit:
 
     def to_dict(self, y: np.ndarray, scorer: TaskScorer = DEFAULT_SCORER) -> dict[str, object]:
         reconstructed = self.intercept + np.sum(self.contributions, axis=1)
+        raw_score = scorer.raw_score(y, self.predictions)
         return {
             "alpha": float(self.alpha),
             "score": float(scorer.score(y, self.predictions)),
+            "raw_score": float(raw_score),
+            "raw_metric": scorer.raw_name or scorer.name,
             "intercept": float(self.intercept),
             "prediction_std": float(np.std(self.predictions)),
             "residual_std": float(np.std(y - self.predictions)),
@@ -81,9 +84,12 @@ class RidgeEvaluator:
         refine_backend: str = "auto",
         irls_steps: int = 2,
         group_key: str | None = None,
+        fold_strategy: FoldStrategy | str | None = None,
+        time_key: str | None = None,
+        stratify_bins: int = 5,
         diagnostics_mode: str = "full",
         torch_device: str | None = None,
-        scorer: TaskScorer | ScoreFunction | None = None,
+        scorer: TaskScorer | ScoreFunction | str | None = None,
     ) -> None:
         self.n_splits = int(n_splits)
         self.seed = int(seed)
@@ -95,6 +101,7 @@ class RidgeEvaluator:
         self.torch_device = torch_device
         self.irls_steps = max(0, int(irls_steps))
         self.group_key = group_key
+        self.fold_strategy = coerce_fold_strategy(fold_strategy, group_key=group_key, time_key=time_key, stratify_bins=stratify_bins)
         self.scorer = coerce_scorer(scorer)
         if diagnostics_mode not in {"full", "basic"}:
             raise ValueError("diagnostics_mode must be 'full' or 'basic'.")
@@ -211,6 +218,7 @@ class RidgeEvaluator:
         alphas: list[float] = []
         coefs: list[np.ndarray] = []
         fold_scores: list[float] = []
+        fold_raw_scores: list[float] = []
         fold_irls: list[dict[str, object]] = []
         folds, fold_diagnostics = self._folds(inputs, y)
         for fold_index, (train_idx, val_idx) in enumerate(folds):
@@ -224,6 +232,7 @@ class RidgeEvaluator:
             fold_contributions[val_idx] = x_val * model.coef.reshape(1, -1)
             fold_intercepts[val_idx] = float(model.intercept)
             fold_scores.append(float(self.scorer.score(y[val_idx], preds[val_idx])))
+            fold_raw_scores.append(float(self.scorer.raw_score(y[val_idx], preds[val_idx])))
             alphas.append(float(ridge_fit.alpha))
             coefs.append(model.coef)
             fold_irls.append(
@@ -243,6 +252,7 @@ class RidgeEvaluator:
                 x,
                 y,
                 preds,
+                inputs,
                 names,
                 coefs,
                 feature_dependencies,
@@ -252,11 +262,16 @@ class RidgeEvaluator:
             )
             diagnostics["alternatives"] = alternative_diagnostics(diagnostics["features"], selected_alternatives, score)
         else:
-            diagnostics = self._basic_diagnostics(preds, y, names, selected_alternatives, score)
+            diagnostics = self._basic_diagnostics(preds, y, inputs, names, selected_alternatives, score)
         diagnostics["folds"] = {
             "score": fold_scores,
             "score_mean": float(np.mean(fold_scores)) if fold_scores else 0.0,
             "score_std": float(np.std(fold_scores)) if fold_scores else 0.0,
+            "raw_score": fold_raw_scores,
+            "raw_score_mean": float(np.mean(fold_raw_scores)) if fold_raw_scores else 0.0,
+            "raw_score_std": float(np.std(fold_raw_scores)) if fold_raw_scores else 0.0,
+            "raw_metric": self.scorer.raw_name or self.scorer.name,
+            "raw_higher_is_better": bool(self.scorer.higher_is_better),
             "alphas": alphas,
             **fold_diagnostics,
         }
@@ -306,32 +321,7 @@ class RidgeEvaluator:
         result.diagnostics["global_ridge_pool"] = pool_fit.to_dict(y, self.scorer)
 
     def _folds(self, inputs: dict[str, object], y: np.ndarray) -> tuple[list[tuple[np.ndarray, np.ndarray]], dict[str, object]]:
-        if self.group_key is None or self.group_key not in inputs:
-            return random_folds(y, self.n_splits, self.seed), {"method": "random", "group_key": None}
-        groups = np.asarray(inputs[self.group_key])
-        if groups.ndim != 1 or groups.shape[0] != y.shape[0]:
-            return random_folds(y, self.n_splits, self.seed), {
-                "method": "random",
-                "group_key": self.group_key,
-                "grouped": False,
-                "reason": "group array shape did not match y",
-            }
-        folds = group_folds(y, groups, self.n_splits, self.seed)
-        overlap_count = 0
-        validation_group_counts: list[int] = []
-        for train_idx, val_idx in folds:
-            train_groups = set(np.asarray(groups)[train_idx].tolist())
-            val_groups = set(np.asarray(groups)[val_idx].tolist())
-            overlap_count += len(train_groups & val_groups)
-            validation_group_counts.append(len(val_groups))
-        return folds, {
-            "method": "group_random",
-            "group_key": self.group_key,
-            "grouped": True,
-            "fold_group_overlap_count": int(overlap_count),
-            "validation_group_counts": validation_group_counts,
-            "n_groups": int(np.unique(groups).shape[0]),
-        }
+        return self.fold_strategy.split(inputs, y, self.n_splits, self.seed)
 
     def _fit_global_diagnostic_model(
         self,
@@ -460,7 +450,9 @@ class RidgeEvaluator:
             "scoring": f"configuration-based ({self.scorer.name}; best config score = evoforest score)",
             "scorer": self.scorer.to_dict(),
             "best_config_score": float(result.score),
+            "best_config_raw_score": float(folds.get("raw_score_mean", 0.0)) if isinstance(folds, dict) else 0.0,
             "global_ridge_score": float(global_ridge.get("score", 0.0)) if isinstance(global_ridge, dict) else 0.0,
+            "global_ridge_raw_score": float(global_ridge.get("raw_score", 0.0)) if isinstance(global_ridge, dict) else 0.0,
             "global_feature_pool_ridge_score": float(global_ridge_pool.get("score", 0.0)) if isinstance(global_ridge_pool, dict) else 0.0,
             "config_score_range": search.get("score_range", [float(result.score), float(result.score)]),
             "fold_score_std": float(folds.get("score_std", 0.0)) if isinstance(folds, dict) else 0.0,
@@ -513,10 +505,11 @@ class RidgeEvaluator:
             }
         return sample_weight, residual_rule, diagnostics
 
-    @staticmethod
     def _basic_diagnostics(
+        self,
         preds: np.ndarray,
         y: np.ndarray,
+        inputs: dict[str, object],
         names: list[str],
         selected_alternatives: dict[str, str],
         score: float,
@@ -547,6 +540,7 @@ class RidgeEvaluator:
             ],
             "diagnostics_mode": "basic",
             "n_features": int(len(names)),
+            "objective": self._objective_diagnostics(y, preds, inputs),
         }
 
     def _diagnostics(
@@ -554,6 +548,7 @@ class RidgeEvaluator:
         x: np.ndarray,
         y: np.ndarray,
         preds: np.ndarray,
+        inputs: dict[str, object],
         names: list[str],
         coefs: list[np.ndarray],
         feature_dependencies: dict[str, list[str]],
@@ -612,6 +607,7 @@ class RidgeEvaluator:
         return {
             "prediction_std": float(np.std(preds)),
             "residual_std": float(np.std(residual)),
+            "objective": self._objective_diagnostics(y, preds, inputs),
             "effective_rank": float(effective_rank(x)),
             "mean_max_corr": float(np.mean(redundancy)) if redundancy.size else 0.0,
             "global_ridge": global_ridge,
@@ -625,6 +621,84 @@ class RidgeEvaluator:
             "features": feature_rows,
             "subnodes": subnode_diagnostics(feature_rows),
         }
+
+    def _objective_diagnostics(self, y: np.ndarray, preds: np.ndarray, inputs: dict[str, object]) -> dict[str, object]:
+        residual = np.asarray(y, dtype=np.float64) - np.asarray(preds, dtype=np.float64)
+        rows: dict[str, object] = {
+            "score": float(self.scorer.score(y, preds)),
+            "raw_score": float(self.scorer.raw_score(y, preds)),
+            "raw_metric": self.scorer.raw_name or self.scorer.name,
+            "raw_higher_is_better": bool(self.scorer.higher_is_better),
+            "residual_mean": float(np.mean(residual)) if residual.size else 0.0,
+            "residual_std": float(np.std(residual)) if residual.size else 0.0,
+            "residual_abs_mean": float(np.mean(np.abs(residual))) if residual.size else 0.0,
+            "target_bins": self._target_bin_diagnostics(y, preds, residual),
+        }
+        group_key = self.fold_strategy.group_key or self.group_key
+        if group_key and group_key in inputs:
+            group_values = np.asarray(inputs[group_key])
+            if group_values.ndim == 1 and group_values.shape[0] == y.shape[0]:
+                rows["group_key"] = group_key
+                rows["groups"] = self._group_objective_diagnostics(y, preds, residual, group_values)
+                rows["split_leakage_check"] = "fold diagnostics report group overlap when grouped folds are active"
+        return rows
+
+    def _target_bin_diagnostics(self, y: np.ndarray, preds: np.ndarray, residual: np.ndarray, bins: int = 5) -> list[dict[str, object]]:
+        y_array = np.asarray(y, dtype=np.float64)
+        if y_array.size == 0:
+            return []
+        edges = np.unique(np.quantile(y_array, np.linspace(0.0, 1.0, bins + 1)))
+        if edges.size <= 2:
+            labels = np.zeros(y_array.shape[0], dtype=np.int64)
+            n_bins = 1
+        else:
+            labels = np.searchsorted(edges[1:-1], y_array, side="right")
+            n_bins = int(edges.size - 1)
+        rows: list[dict[str, object]] = []
+        for label in range(n_bins):
+            mask = labels == label
+            if not np.any(mask):
+                continue
+            rows.append(
+                {
+                    "bin": int(label),
+                    "n": int(np.sum(mask)),
+                    "target_min": float(np.min(y_array[mask])),
+                    "target_max": float(np.max(y_array[mask])),
+                    "score": float(self.scorer.score(y_array[mask], np.asarray(preds)[mask])),
+                    "raw_score": float(self.scorer.raw_score(y_array[mask], np.asarray(preds)[mask])),
+                    "residual_abs_mean": float(np.mean(np.abs(residual[mask]))),
+                }
+            )
+        return rows
+
+    def _group_objective_diagnostics(
+        self,
+        y: np.ndarray,
+        preds: np.ndarray,
+        residual: np.ndarray,
+        groups: np.ndarray,
+        *,
+        max_groups: int = 20,
+    ) -> list[dict[str, object]]:
+        rows: list[dict[str, object]] = []
+        unique = np.unique(groups)
+        for group in unique[:max_groups]:
+            mask = groups == group
+            if not np.any(mask):
+                continue
+            rows.append(
+                {
+                    "group": _jsonable_scalar(group),
+                    "n": int(np.sum(mask)),
+                    "score": float(self.scorer.score(y[mask], preds[mask])),
+                    "raw_score": float(self.scorer.raw_score(y[mask], preds[mask])),
+                    "residual_mean": float(np.mean(residual[mask])),
+                    "residual_abs_mean": float(np.mean(np.abs(residual[mask]))),
+                }
+            )
+        rows.sort(key=lambda row: float(row["raw_score"]), reverse=bool(self.scorer.higher_is_better))
+        return rows
 
 
 def effective_rank(x: np.ndarray) -> float:
@@ -783,3 +857,11 @@ def split_alternative_name(name: str) -> tuple[str, str]:
     if "." not in name:
         return name, ""
     return name.split(".", maxsplit=1)
+
+
+def _jsonable_scalar(value: object) -> object:
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)

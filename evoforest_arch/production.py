@@ -14,6 +14,7 @@ from typing import Any
 import numpy as np
 
 from evoforest_arch.agents import EngineerAgent, ScientistAgent
+from evoforest_arch.datasets import LoadedDataset, load_dataset_bundle
 from evoforest_arch.evaluator import EvaluationResult, RidgeEvaluator
 from evoforest_arch.evolution import CandidateOutcome, EvolutionLoop
 from evoforest_arch.feedback import feedback_summary, toon_report
@@ -23,8 +24,7 @@ from evoforest_arch.llm import DEFAULT_ISLAND_TEMPERATURES, LLMEngineerAgent, LL
 from evoforest_arch.mutations import MutationDocument, MutationEngine
 from evoforest_arch.primitives import PrimitiveRegistry
 from evoforest_arch.seed import build_seed_graph
-from evoforest_arch.splits import SplitManifest, make_split_manifest, read_split_manifest, split_dataset, write_split_manifest
-from evoforest_arch.synthetic import make_structural_break_data, make_tabular_data
+from evoforest_arch.splits import SplitManifest, make_grouped_split_manifest, make_split_manifest, read_split_manifest, split_dataset, write_split_manifest
 from evoforest_arch.task import TaskSchema, task_schema_for_dataset
 from evoforest_arch.task_context import build_task_context
 
@@ -59,6 +59,15 @@ class ProductionConfig:
     steps: int = 4
     seed: int = 17
     dataset_name: str = "synthetic-structural-break"
+    dataset_config_file: pathlib.Path | None = None
+    dataset_path: pathlib.Path | None = None
+    dataset_manifest_path: pathlib.Path | None = None
+    dataset_module: str = ""
+    dataset_function: str = "load_dataset"
+    dataset_kwargs: dict[str, Any] = field(default_factory=dict)
+    target_key: str = "y"
+    input_keys: tuple[str, ...] = ()
+    task_schema_path: pathlib.Path | None = None
     n_series: int = 240
     n_features: int = 12
     length: int = 160
@@ -66,7 +75,13 @@ class ProductionConfig:
     validation_fraction: float = 0.2
     test_fraction: float = 0.2
     split_seed: int | None = None
+    split_group_key: str | None = None
     folds: int = 3
+    fold_strategy: str = "random"
+    group_key: str | None = None
+    time_key: str | None = None
+    stratify_bins: int = 5
+    scorer: str = "variance_explained"
     max_configurations: int = 64
     irls_steps: int = 2
     refine_globals: bool = True
@@ -84,14 +99,43 @@ class ProductionConfig:
     torch_device: str | None = None
 
     def dataset_config(self) -> dict[str, Any]:
-        return {
-            "name": self.dataset_name,
+        payload: dict[str, Any] = {}
+        if self.dataset_config_file is not None:
+            config_path = pathlib.Path(self.dataset_config_file)
+            payload.update(json.loads(config_path.read_text(encoding="utf-8")))
+            payload.setdefault("base_dir", str(config_path.parent))
+        if self.dataset_manifest_path is not None:
+            payload.update({"name": "external-manifest", "manifest_path": str(self.dataset_manifest_path)})
+        elif self.dataset_module:
+            payload.update({"name": "python-module", "module": self.dataset_module, "function": self.dataset_function})
+        elif self.dataset_path is not None:
+            payload.update({"name": "external-npz", "path": str(self.dataset_path)})
+        else:
+            if "name" not in payload and payload.get("adapter"):
+                adapter = str(payload.get("adapter", "external-npz"))
+                payload["name"] = "python-module" if adapter == "python-module" else "external-npz"
+            else:
+                payload.setdefault("name", self.dataset_name)
+        payload.update({
             "seed": int(self.seed),
             "n_series": int(self.n_series),
             "n_features": int(self.n_features),
             "length": int(self.length),
             "boundary": self.boundary,
-        }
+        })
+        if self.dataset_kwargs:
+            payload["kwargs"] = dict(self.dataset_kwargs)
+        if (
+            self.target_key
+            and (self.dataset_manifest_path is None or self.target_key != "y")
+            and ("target_key" not in payload or self.target_key != "y")
+        ):
+            payload["target_key"] = self.target_key
+        if self.input_keys:
+            payload["input_keys"] = list(self.input_keys)
+        if self.task_schema_path is not None:
+            payload["task_schema"] = str(self.task_schema_path)
+        return payload
 
     def evaluator_config(self) -> dict[str, Any]:
         return {
@@ -102,7 +146,11 @@ class ProductionConfig:
             "refine_globals": bool(self.refine_globals),
             "refine_steps": int(self.refine_steps),
             "refine_backend": self.refine_backend,
-            "group_key": None,
+            "group_key": self.group_key,
+            "fold_strategy": self.fold_strategy,
+            "time_key": self.time_key,
+            "stratify_bins": int(self.stratify_bins),
+            "scorer": self.scorer,
             "torch_device": self.torch_device,
         }
 
@@ -1237,7 +1285,8 @@ class ProductionEvolutionRunner:
         task_sources: tuple[tuple[str, str], ...] = (),
     ) -> None:
         self.config = config
-        self.task_schema = task_schema_for_dataset(self.config.dataset_name)
+        self._dataset_bundle: LoadedDataset | None = None
+        self.task_schema = self._task_schema_from_existing_manifest() or self._load_dataset_bundle().task_schema
         if self.config.profile not in SUPPORTED_PRODUCTION_PROFILES:
             raise ValueError(f"Unsupported production profile {self.config.profile!r}; expected one of {', '.join(SUPPORTED_PRODUCTION_PROFILES)}.")
         if self.config.promotion_policy not in SUPPORTED_PROMOTION_POLICIES:
@@ -1253,6 +1302,21 @@ class ProductionEvolutionRunner:
         self.memorandum_agent = memorandum_agent
         self.task_context = task_context
         self.task_sources = task_sources
+
+    def _load_dataset_bundle(self) -> LoadedDataset:
+        if self._dataset_bundle is None:
+            self._dataset_bundle = load_dataset_bundle(self.config.dataset_config())
+        return self._dataset_bundle
+
+    def _task_schema_from_existing_manifest(self) -> TaskSchema | None:
+        manifest_path = self.config.output_dir / "run_manifest.json"
+        if not manifest_path.exists():
+            return None
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        task_schema_payload = manifest.get("task_schema", {})
+        if isinstance(task_schema_payload, dict) and task_schema_payload:
+            return TaskSchema.from_dict(task_schema_payload)
+        return None
 
     def run(self, *, resume: bool = False) -> dict[str, Any]:
         if self._should_run_async_islands(resume=resume):
@@ -1863,6 +1927,10 @@ class ProductionEvolutionRunner:
             "refine_steps": int(self.evaluator.refine_steps),
             "refine_backend": self.evaluator.refine_backend,
             "group_key": self.evaluator.group_key,
+            "fold_strategy": self.evaluator.fold_strategy.name,
+            "time_key": self.evaluator.fold_strategy.time_key,
+            "stratify_bins": int(self.evaluator.fold_strategy.stratify_bins),
+            "scorer": self.evaluator.scorer.name,
             "torch_device": self.evaluator.torch_device,
         }
 
@@ -2056,7 +2124,8 @@ class ProductionEvolutionRunner:
         if run_dir.exists() and any(run_dir.iterdir()):
             raise FileExistsError(f"Refusing to overwrite non-empty run directory: {run_dir}")
         run_dir.mkdir(parents=True, exist_ok=True)
-        inputs, y, dataset_metadata = load_dataset_with_metadata(self.config.dataset_config())
+        loaded_dataset = self._load_dataset_bundle()
+        inputs, y, dataset_metadata = loaded_dataset.inputs, loaded_dataset.y, loaded_dataset.metadata
         split_manifest = make_production_split_manifest(
             inputs,
             y,
@@ -2064,6 +2133,7 @@ class ProductionEvolutionRunner:
             seed=self.config.split_seed if self.config.split_seed is not None else self.config.seed,
             validation_fraction=self.config.validation_fraction,
             test_fraction=self.config.test_fraction,
+            group_key=self.config.split_group_key or self.config.group_key,
         )
         write_split_manifest(run_dir / "splits.json", split_manifest)
         splits = split_dataset(inputs, y, split_manifest)
@@ -2110,11 +2180,12 @@ class ProductionEvolutionRunner:
         self.evaluator = RidgeEvaluator(**manifest["evaluator"])
         allow_source = bool(dict(manifest.get("mutation", {})).get("allow_source_mutations", False)) or self.config.allow_source_mutations
         task_schema_payload = manifest.get("task_schema", {})
-        registry = (
-            PrimitiveRegistry.for_task(TaskSchema.from_dict(task_schema_payload))
+        self.task_schema = (
+            TaskSchema.from_dict(task_schema_payload)
             if isinstance(task_schema_payload, dict) and task_schema_payload
-            else PrimitiveRegistry.for_task(task_schema_for_dataset(str(dict(manifest.get("dataset", {})).get("name", self.config.dataset_name))))
+            else task_schema_for_dataset(str(dict(manifest.get("dataset", {})).get("name", self.config.dataset_name)))
         )
+        registry = PrimitiveRegistry.for_task(self.task_schema)
         self.mutation_engine = MutationEngine(registry=registry, allow_source=allow_source)
         split_manifest = read_split_manifest(run_dir / "splits.json")
         inputs, y = load_dataset(dict(manifest["dataset"]))
@@ -2472,40 +2543,8 @@ def _clone_agent_for_island(agent: object | None) -> object | None:
 
 
 def load_dataset_with_metadata(dataset_config: dict[str, Any]) -> tuple[dict[str, object], np.ndarray, dict[str, Any]]:
-    name = str(dataset_config.get("name", "synthetic-structural-break"))
-    if name == "synthetic-structural-break":
-        dataset = make_structural_break_data(
-            n_series=int(dataset_config.get("n_series", 240)),
-            length=int(dataset_config.get("length", 160)),
-            boundary=dataset_config.get("boundary"),
-            seed=int(dataset_config.get("seed", 0)),
-        )
-        return dataset.inputs(), dataset.y, {
-            "name": name,
-            "n_samples": int(dataset.y.shape[0]),
-            "target_mean": float(np.mean(dataset.y)),
-            "target_std": float(np.std(dataset.y)),
-            "target_min": float(np.min(dataset.y)),
-            "target_max": float(np.max(dataset.y)),
-            "mapping": "synthetic structural break generator",
-        }
-    if name == "synthetic-tabular":
-        dataset = make_tabular_data(
-            n_samples=int(dataset_config.get("n_samples", dataset_config.get("n_series", 240))),
-            n_features=int(dataset_config.get("n_features", 12)),
-            seed=int(dataset_config.get("seed", 0)),
-        )
-        return dataset.inputs(), dataset.y, {
-            "name": name,
-            "n_samples": int(dataset.y.shape[0]),
-            "n_features": int(dataset.x.shape[1]),
-            "target_mean": float(np.mean(dataset.y)),
-            "target_std": float(np.std(dataset.y)),
-            "target_min": float(np.min(dataset.y)),
-            "target_max": float(np.max(dataset.y)),
-            "mapping": "synthetic generic tabular generator",
-        }
-    raise ValueError(f"Unsupported dataset {name!r}.")
+    loaded = load_dataset_bundle(dataset_config)
+    return loaded.inputs, loaded.y, loaded.metadata
 
 
 def load_external_reduced_test(dataset_config: dict[str, Any]) -> tuple[dict[str, object], np.ndarray, dict[str, Any]] | None:
@@ -2521,8 +2560,21 @@ def make_production_split_manifest(
     seed: int,
     validation_fraction: float,
     test_fraction: float,
+    group_key: str | None = None,
 ) -> SplitManifest:
     _ = dataset_name
+    if group_key and group_key in inputs:
+        groups = np.asarray(inputs[group_key])
+        if groups.ndim == 1 and groups.shape[0] == np.asarray(y).shape[0]:
+            return make_grouped_split_manifest(
+                inputs,
+                y,
+                groups=groups,
+                group_key=group_key,
+                seed=seed,
+                validation_fraction=validation_fraction,
+                test_fraction=test_fraction,
+            )
     return make_split_manifest(
         inputs,
         y,

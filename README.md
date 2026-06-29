@@ -11,6 +11,8 @@ The implementation focuses on the reusable system design:
 - A shared directed acyclic graph of computational nodes.
 - A task schema that declares row-aligned inputs and selects an appropriate seed
   graph/primitive registry for the current task.
+- A dataset loader registry for built-in smoke datasets, `.npz` files, JSON
+  manifests, and Python module hooks.
 - Intermediate nodes with multiple alternative implementations.
 - Callable-family nodes for reusable projections, gates, and activations.
 - Persistent low-dimensional global parameters.
@@ -18,6 +20,10 @@ The implementation focuses on the reusable system design:
 - Fitting nodes (`ridge_w`, `ridge_g`) that alter sample weighting and iterative
   residual reweighting.
 - A Ridge-based cross-validation evaluator with capped configuration search.
+- Task-aware fold strategies: random, grouped random, leave-group-out style
+  grouped folds, stratified target folds, and time-blocked folds.
+- Objective-aware scoring with raw metric direction preserved for lower-is-better
+  losses such as RMSE and MAE while the optimizer still maximizes a score.
 - Ancestor-conditioned subpath caching shared across evaluated configurations.
 - A paper-style two-phase evaluation path: PyTorch L-BFGS global refinement is
   attempted by default when trainable globals are active, then globals are frozen
@@ -46,6 +52,9 @@ The implementation focuses on the reusable system design:
 - Optional sandboxed source-backed mutation alternatives that store and execute
   paper-style `lambda ctx, values: ...` implementations from mutation YAML with
   timeout, resource-limit, deterministic rerun, and output-contract checks.
+  Feature-producing NumPy lambdas get a simple automatic torch expression when
+  one can be safely derived; callable and fitting nodes use sandbox-safe
+  declarative source specs.
 - Graph maintenance for duplicate collapse, unreachable pruning, and unused globals.
 - Failed generated candidates are rejected, logged into events/memoranda, and fed
   back to the next engineer prompt.
@@ -93,6 +102,7 @@ topology with dedicated devices `cuda:0,cuda:1,cuda:2,cuda:3`.
 ```bash
 evoforest-arch evolve --steps 4 --seed 17 --n-series 240 --length 160 --output runs/production-smoke
 evoforest-arch evolve --dataset synthetic-tabular --steps 4 --seed 17 --n-samples 240 --n-features 12 --output runs/production-tabular-smoke
+evoforest-arch evolve --dataset synthetic-tabular --scorer rmse --fold-strategy stratified --steps 4 --output runs/rmse-stratified-smoke
 evoforest-arch inspect runs/production-smoke
 evoforest-arch export-best runs/production-smoke --output runs/production-smoke-best.json
 evoforest-arch recheck runs/production-smoke
@@ -134,11 +144,50 @@ evoforest-arch recheck runs/production-smoke --include-test
 ```
 
 The built-in `synthetic-structural-break` and `synthetic-tabular` datasets are
-workflow smoke tests. A real strength claim needs a fixed external dataset loader
-plus a committed split manifest; see
-[docs/evolution_workflow.md](docs/evolution_workflow.md). External data loaders,
-contest submissions, and local benchmark artifacts are intentionally kept outside
-this public reimplementation repo.
+workflow smoke tests. Real tasks can be loaded through the external dataset
+interfaces. For a row-aligned `.npz` file:
+
+```bash
+evoforest-arch evolve \
+  --dataset external-npz \
+  --dataset-path data/task.npz \
+  --target-key y \
+  --input-key features \
+  --input-key engine_id \
+  --task-schema-file data/task_schema.json \
+  --fold-strategy group_random \
+  --group-key engine_id \
+  --split-group-key engine_id \
+  --output runs/external-task
+```
+
+Manifest files can keep paths relative to the manifest:
+
+```json
+{
+  "adapter": "external-npz",
+  "path": "task.npz",
+  "target_key": "y",
+  "input_keys": ["features", "engine_id"],
+  "task_schema": {
+    "name": "external-tabular",
+    "kind": "tabular",
+    "inputs": [{"name": "features", "kind": "numeric_matrix"}],
+    "default_input": "features"
+  }
+}
+```
+
+Run it with:
+
+```bash
+evoforest-arch evolve --dataset external-manifest --dataset-manifest data/dataset_manifest.json --output runs/external-manifest
+```
+
+Python hooks are also supported with `--dataset python-module --dataset-module
+package.module --dataset-function load_dataset`. A real strength claim still
+needs a fixed dataset version, fixed split manifest, and no tuning on the held-out
+test split; see [docs/evolution_workflow.md](docs/evolution_workflow.md).
 
 ## Run Benchmarks
 
@@ -218,8 +267,11 @@ default, matching the paper's mutation representation. For deterministic
 non-LLM runs, pass `--allow-source-mutations` to enable source mutation
 documents. Source lambdas are AST-validated and evaluated in a subprocess
 sandbox with timeout, memory limit where supported, deterministic repeated
-evaluation, and output-contract checks. This is a practical local execution
-boundary, not a replacement for an OS/container sandbox for hostile code.
+evaluation, and output-contract checks. Source alternatives can target
+feature-producing, callable, and fitting nodes; callable/fitting source returns a
+declarative spec that is materialized by the parent process. This is a practical
+local execution boundary, not a replacement for an OS/container sandbox for
+hostile code.
 
 LLM mode is fail-fast. If the configured provider is missing, the HTTP request
 fails, the scientist response cannot be parsed into hypotheses, or the engineer
@@ -250,6 +302,7 @@ for experiments with open-ended computational graph evolution.
 
 It also does not claim to recover the private 600-step evolved graph. The global
 refinement phase attempts PyTorch L-BFGS for differentiable primitives and
+source alternatives with provided or safely auto-derived torch expressions. It
 records an explicit skipped-refinement reason when the torch path is unavailable
 or a gradient probe finds no active trainable global influence. The NumPy
 coordinate refiner is retained as an explicit compatibility backend, not as the

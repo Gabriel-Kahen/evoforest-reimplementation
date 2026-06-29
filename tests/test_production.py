@@ -3,9 +3,10 @@ from __future__ import annotations
 from dataclasses import replace
 import json
 
+import numpy as np
 import pytest
 
-from evoforest_arch.cli import main as cli_main
+from evoforest_arch.cli import main as cli_main, task_schema_for_evolve_run
 from evoforest_arch.evaluator import EvaluationResult
 from evoforest_arch.graph_io import graph_from_path
 from evoforest_arch.llm import LLMEngineerAgent, LLMMemorandumAgent, LLMScientistAgent, StaticLLMClient
@@ -87,6 +88,87 @@ def test_production_can_run_generic_tabular_task(tmp_path) -> None:
     assert best.task_schema["kind"] == "tabular"
     assert "x" in best.nodes
     assert "series" not in best.nodes
+
+
+def test_production_loads_external_manifest_with_grouped_task_splits(tmp_path) -> None:
+    rng = np.random.default_rng(54)
+    x = rng.normal(size=(72, 5))
+    y = 1.5 * x[:, 0] - 0.25 * x[:, 1] + rng.normal(scale=0.05, size=72)
+    engine_id = np.asarray([f"engine_{index // 3}" for index in range(72)])
+    data_path = tmp_path / "external_task.npz"
+    np.savez(data_path, features=x, rul=y, engine_id=engine_id)
+    manifest_path = tmp_path / "dataset_manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "adapter": "external-npz",
+                "path": data_path.name,
+                "target_key": "rul",
+                "input_keys": ["features", "engine_id"],
+                "task_schema": {
+                    "name": "external-rul-style-tabular",
+                    "kind": "tabular",
+                    "inputs": [
+                        {
+                            "name": "features",
+                            "kind": "numeric_matrix",
+                            "description": "Row-aligned external feature matrix.",
+                            "shape": ["n_samples", "n_features"],
+                        },
+                        {
+                            "name": "engine_id",
+                            "kind": "group_id",
+                            "description": "Unit identifier used for leakage-safe grouped splitting.",
+                            "shape": ["n_samples"],
+                        },
+                    ],
+                    "target": {
+                        "name": "y",
+                        "kind": "numeric_target",
+                        "description": "External task target.",
+                        "shape": ["n_samples"],
+                    },
+                    "default_input": "features",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    config = small_config(
+        tmp_path,
+        steps=1,
+        seed=54,
+        dataset_name="external-manifest",
+        dataset_manifest_path=manifest_path,
+        split_group_key="engine_id",
+        fold_strategy="group_random",
+        group_key="engine_id",
+    )
+
+    summary = ProductionEvolutionRunner(config).run()
+    run_manifest = json.loads((config.output_dir / "run_manifest.json").read_text(encoding="utf-8"))
+    splits = json.loads((config.output_dir / "splits.json").read_text(encoding="utf-8"))
+    best = graph_from_path(config.output_dir / "best_graph.json")
+
+    assert summary["dataset"]["name"] == "external-manifest"
+    assert run_manifest["task_schema"]["default_input"] == "features"
+    assert run_manifest["dataset_metadata"]["target_key"] == "rul"
+    assert run_manifest["dataset_metadata"]["input_keys"] == ["features", "engine_id"]
+    assert run_manifest["evaluator"]["fold_strategy"] == "group_random"
+    assert splits["method"] == "group_random"
+    assert splits["group_key"] == "engine_id"
+    assert not (set(splits["train_groups"]) & set(splits["validation_groups"]))
+    assert not (set(splits["train_groups"]) & set(splits["test_groups"]))
+    assert best.task_schema is not None
+    assert best.task_schema["default_input"] == "features"
+    assert "features" in best.nodes
+    assert "x" not in best.nodes
+
+    resume_config = ProductionConfig(output_dir=config.output_dir, steps=0)
+    assert task_schema_for_evolve_run(resume_config, resume=True).default_input == "features"
+    resumed = ProductionEvolutionRunner(resume_config).run(resume=True)
+    assert resumed["dataset"]["name"] == "external-manifest"
+    assert resumed["step"] == summary["step"]
 
 
 def test_production_evolve_writes_fixed_splits_and_resumes(tmp_path) -> None:

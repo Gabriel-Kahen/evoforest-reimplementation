@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 import json
 import os
 import pathlib
 
+from evoforest_arch.datasets import load_dataset_bundle
 from evoforest_arch.evaluator import RidgeEvaluator
 from evoforest_arch.evolution import EvolutionLoop
 from evoforest_arch.llm import (
@@ -152,7 +154,19 @@ def main(argv: list[str] | None = None) -> int:
     evolve = sub.add_parser("evolve", help="Run resume-safe production evolution with fixed split manifests.")
     evolve.add_argument("--profile", choices=(PRODUCTION_PROFILE, PAPER_PROFILE), default=PRODUCTION_PROFILE)
     evolve.add_argument("--steps", type=int, default=None, help="New steps to run. With --resume, this is additional steps.")
-    evolve.add_argument("--dataset", choices=("synthetic-structural-break", "synthetic-tabular"), default="synthetic-structural-break")
+    evolve.add_argument(
+        "--dataset",
+        choices=("synthetic-structural-break", "synthetic-tabular", "external-npz", "external-manifest", "python-module"),
+        default="synthetic-structural-break",
+    )
+    evolve.add_argument("--dataset-config-file", type=pathlib.Path, default=None, help="JSON dataset config or manifest consumed by the dataset loader registry.")
+    evolve.add_argument("--dataset-path", type=pathlib.Path, default=None, help="Path for external-npz dataset adapter.")
+    evolve.add_argument("--dataset-manifest", type=pathlib.Path, default=None, help="Path for external-manifest dataset adapter.")
+    evolve.add_argument("--dataset-module", type=str, default="", help="Python module path for python-module dataset adapter.")
+    evolve.add_argument("--dataset-function", type=str, default="load_dataset", help="Function name for python-module dataset adapter.")
+    evolve.add_argument("--target-key", type=str, default="y", help="Target array key for external file adapters.")
+    evolve.add_argument("--input-key", action="append", default=[], help="Input array key for external file adapters; may be repeated.")
+    evolve.add_argument("--task-schema-file", type=pathlib.Path, default=None, help="JSON TaskSchema for external datasets.")
     evolve.add_argument("--n-series", type=int, default=240)
     evolve.add_argument("--n-samples", type=int, default=None, help="Alias for --n-series on generic row-aligned tasks.")
     evolve.add_argument("--n-features", type=int, default=12)
@@ -160,9 +174,15 @@ def main(argv: list[str] | None = None) -> int:
     evolve.add_argument("--boundary", type=int, default=None)
     evolve.add_argument("--seed", type=int, default=17)
     evolve.add_argument("--split-seed", type=int, default=None)
+    evolve.add_argument("--split-group-key", type=str, default=None, help="Input key used to keep production train/validation/test units disjoint.")
     evolve.add_argument("--validation-fraction", type=float, default=0.2)
     evolve.add_argument("--test-fraction", type=float, default=0.2)
     evolve.add_argument("--folds", type=int, default=None)
+    evolve.add_argument("--fold-strategy", choices=("random", "group_random", "leave_group_out", "stratified", "time_blocked"), default=None)
+    evolve.add_argument("--group-key", type=str, default=None, help="Input key used for grouped CV folds, e.g. engine/unit id.")
+    evolve.add_argument("--time-key", type=str, default=None, help="Input key used for time-blocked CV folds.")
+    evolve.add_argument("--stratify-bins", type=int, default=None)
+    evolve.add_argument("--scorer", choices=("variance_explained", "rmse", "mae"), default="variance_explained")
     evolve.add_argument("--max-configurations", type=int, default=None)
     evolve.add_argument("--irls-steps", type=int, default=None)
     evolve.add_argument("--refine-globals", dest="refine_globals", action="store_true", default=None)
@@ -281,14 +301,20 @@ def run_evolve(args: argparse.Namespace) -> int:
     args = apply_evolve_profile(args)
     task_context = args.task_context_file.read_text(encoding="utf-8") if args.task_context_file is not None else ""
     task_sources = read_task_sources(args.task_source_file)
-    registry = PrimitiveRegistry.for_task(task_schema_for_dataset(args.dataset))
-    scientist, engineer, memorandum_agent = build_llm_agents(args, task_context=task_context, registry=registry)
     config = ProductionConfig(
         output_dir=args.output,
         profile=args.profile,
         steps=args.steps,
         seed=args.seed,
         dataset_name=args.dataset,
+        dataset_config_file=args.dataset_config_file,
+        dataset_path=args.dataset_path,
+        dataset_manifest_path=args.dataset_manifest,
+        dataset_module=args.dataset_module,
+        dataset_function=args.dataset_function,
+        target_key=args.target_key,
+        input_keys=tuple(args.input_key or ()),
+        task_schema_path=args.task_schema_file,
         n_series=args.n_samples if args.n_samples is not None else args.n_series,
         n_features=args.n_features,
         length=args.length,
@@ -296,7 +322,13 @@ def run_evolve(args: argparse.Namespace) -> int:
         validation_fraction=args.validation_fraction,
         test_fraction=args.test_fraction,
         split_seed=args.split_seed,
+        split_group_key=args.split_group_key,
         folds=args.folds,
+        fold_strategy=args.fold_strategy or ("group_random" if args.group_key else "random"),
+        group_key=args.group_key,
+        time_key=args.time_key,
+        stratify_bins=args.stratify_bins if args.stratify_bins is not None else 5,
+        scorer=args.scorer,
         max_configurations=args.max_configurations,
         irls_steps=args.irls_steps,
         refine_globals=args.refine_globals,
@@ -305,13 +337,16 @@ def run_evolve(args: argparse.Namespace) -> int:
         promotion_policy=args.promotion_policy,
         min_train_improvement=args.min_train_improvement,
         min_validation_improvement=args.min_validation_improvement,
-        allow_source_mutations=args.allow_source_mutations or scientist is not None or engineer is not None,
+        allow_source_mutations=args.allow_source_mutations,
         islands=args.islands,
         async_islands=args.async_islands,
         island_workers=args.island_workers,
         island_devices=args.island_devices,
         migration_interval=args.migration_interval,
     )
+    registry = PrimitiveRegistry.for_task(task_schema_for_evolve_run(config, resume=args.resume))
+    scientist, engineer, memorandum_agent = build_llm_agents(args, task_context=task_context, registry=registry)
+    config = replace(config, allow_source_mutations=args.allow_source_mutations or scientist is not None or engineer is not None)
     summary = ProductionEvolutionRunner(
         config,
         scientist=scientist,
@@ -322,6 +357,16 @@ def run_evolve(args: argparse.Namespace) -> int:
     ).run(resume=args.resume)
     print(json.dumps(summary, indent=2), flush=True)
     return 0
+
+
+def task_schema_for_evolve_run(config: ProductionConfig, *, resume: bool) -> TaskSchema:
+    manifest_path = config.output_dir / "run_manifest.json"
+    if resume and manifest_path.exists():
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        task_schema_payload = manifest.get("task_schema", {})
+        if isinstance(task_schema_payload, dict) and task_schema_payload:
+            return TaskSchema.from_dict(task_schema_payload)
+    return load_dataset_bundle(config.dataset_config()).task_schema
 
 
 def build_llm_agents(

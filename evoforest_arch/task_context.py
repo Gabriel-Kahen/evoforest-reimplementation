@@ -85,9 +85,15 @@ def build_task_context(
     scorer_obj = getattr(evaluator, "scorer", None)
     scorer_name = str(getattr(scorer_obj, "name", "task_score"))
     scorer_description = str(getattr(scorer_obj, "description", "User-supplied higher-is-better task score."))
+    scorer_raw = str(getattr(scorer_obj, "raw_name", "") or scorer_name)
+    raw_higher_is_better = bool(getattr(scorer_obj, "higher_is_better", True))
+    fold_strategy = getattr(evaluator, "fold_strategy", None)
+    fold_strategy_name = str(getattr(fold_strategy, "name", "random"))
     scorer = (
-        f"Fitness is best configuration mean {scorer_name} across random {int(getattr(evaluator, 'n_splits', 3))}-fold Ridge CV folds.",
+        f"Fitness is best configuration mean {scorer_name} across {fold_strategy_name} {int(getattr(evaluator, 'n_splits', 3))}-fold Ridge CV folds.",
         scorer_description,
+        f"Raw task metric is {scorer_raw}; raw_higher_is_better={raw_higher_is_better}. Lower-is-better raw metrics are optimized as negative raw scores.",
+        f"Fold strategy details: {fold_strategy.to_dict() if hasattr(fold_strategy, 'to_dict') else {}}.",
         f"Configuration enumeration is capped at {int(getattr(evaluator, 'max_configurations', 64))} candidates per evaluation.",
         "Features are standardized inside each fold; Ridge is solved by closed-form SVD.",
         f"Alpha is selected from {len(getattr(evaluator, 'alphas', []))} log-scale values using leave-one-out leverage MSE.",

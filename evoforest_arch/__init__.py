@@ -1,6 +1,7 @@
 """Clean-room EvoForest architecture package."""
 
 from evoforest_arch.agents import EngineerAgent, Hypothesis, ScientistAgent
+from evoforest_arch.datasets import DatasetLoaderRegistry, LoadedDataset, default_dataset_loader_registry, load_dataset_bundle
 from evoforest_arch.evaluator import EvaluationResult, RidgeEvaluator
 from evoforest_arch.evolution import EvolutionLoop
 from evoforest_arch.graph import EvalContext, FeatureBlock, Graph, GraphNode, NodeAlternative, ResidualWeightRule
@@ -21,6 +22,7 @@ from evoforest_arch.llm import (
     load_env_file,
 )
 from evoforest_arch.maintenance import GraphMaintenance, MaintenanceReport
+from evoforest_arch.metrics import DEFAULT_SCORER, MAE_SCORER, RMSE_SCORER, FoldStrategy, TaskScorer, scorer_from_name
 from evoforest_arch.mutations import GlobalSpec, MutationDocument, MutationEngine, MutationSpec, NodeSpec, RemoveSpec
 from evoforest_arch.production import ProductionConfig, ProductionEvolutionRunner, export_best_graph, inspect_run, recheck_run
 from evoforest_arch.refinement import GlobalRefiner, RefinementResult, TorchLBFGSRefiner
@@ -43,13 +45,18 @@ __all__ = [
     "GlobalRefiner",
     "GraphMaintenance",
     "DEFAULT_ISLAND_TEMPERATURES",
+    "DEFAULT_SCORER",
+    "DatasetLoaderRegistry",
+    "FoldStrategy",
     "GeminiLLMClient",
     "Hypothesis",
     "InputSpec",
+    "LoadedDataset",
     "LLMEngineerAgent",
     "LLMMemorandumAgent",
     "LLMScientistAgent",
     "MaintenanceReport",
+    "MAE_SCORER",
     "MutationDocument",
     "MutationEngine",
     "MutationSpec",
@@ -64,6 +71,7 @@ __all__ = [
     "RemoveSpec",
     "ResidualWeightRule",
     "RidgeEvaluator",
+    "RMSE_SCORER",
     "ScientistAgent",
     "SourceExecutionError",
     "SourceSandboxPolicy",
@@ -71,6 +79,7 @@ __all__ = [
     "SUPPORTED_LLM_PROVIDERS",
     "StaticLLMClient",
     "TaskContextSummary",
+    "TaskScorer",
     "TaskSchema",
     "TensorSummary",
     "TorchLBFGSRefiner",
@@ -79,14 +88,17 @@ __all__ = [
     "build_source_alternative",
     "build_structural_break_seed_graph",
     "compile_lambda_source",
+    "default_dataset_loader_registry",
     "export_best_graph",
     "inspect_run",
+    "load_dataset_bundle",
     "llm_client_from_env",
     "llm_provider_from_env",
     "load_env_file",
     "make_structural_break_data",
     "make_tabular_data",
     "recheck_run",
+    "scorer_from_name",
     "build_tabular_seed_graph",
     "task_schema_for_dataset",
 ]

@@ -15,6 +15,14 @@ the following modules.
 - `evoforest_arch.task`
   - Task schemas for row-aligned inputs, targets, default input names, and
     dataset-to-task selection.
+- `evoforest_arch.datasets`
+  - Dataset loader registry for synthetic smoke tasks, external `.npz` files,
+    manifest-driven adapters, and Python module hooks. Loaders return inputs,
+    target arrays, task schema, and metadata.
+- `evoforest_arch.metrics`
+  - Task scorer objects that preserve the raw metric name and natural direction
+    while exposing a maximized optimization score, plus task-aware fold strategy
+    objects for random, grouped, stratified, and time-blocked CV.
 - `evoforest_arch.primitives`
   - A compact primitive library with task-selected tabular or structural-break
     feature primitives plus common callable gates, activations, output
@@ -22,7 +30,9 @@ the following modules.
 - `evoforest_arch.source`
   - Sandboxed source-backed lambda alternatives that mirror the paper's YAML
     mutation representation, with timeout/resource controls, deterministic
-    validation, output contracts, and optional torch-source evaluators.
+    validation, output contracts, callable/fitting-node specs, optional
+    torch-source evaluators, and safe automatic torch-expression derivation for
+    simple feature-producing NumPy lambdas.
 - `evoforest_arch.evaluator`
   - Capped configuration enumeration, default paper-mode global refinement, Ridge
     cross-validation, fitting-node execution, diagnostic global Ridge fitting,
@@ -86,6 +96,14 @@ the following modules.
   a leave-one-out leverage criterion inside each fold, scores each configuration by
   mean fold task score, records fold score dispersion, and summarizes the evaluated
   configuration score range.
+- Scorers keep two values distinct: the raw task metric and the maximized
+  optimization score. Lower-is-better losses such as RMSE/MAE are represented as
+  negative raw values for selection while diagnostics retain the raw loss and its
+  natural direction.
+- Fold selection is task-aware. The evaluator can use random folds, grouped folds
+  for unit/engine leakage control, stratified target folds, and time-blocked folds;
+  the production split manifest can also keep train/validation/test unit groups
+  disjoint.
 - `ridge_g` residual rules are applied through an explicit IRLS loop: after the
   initial Ridge fit, residuals are converted to weights and Ridge is refit for the
   configured number of `irls_steps`, with per-fold iteration diagnostics recorded.
@@ -115,10 +133,14 @@ the following modules.
   Paper-style shorthand lambdas infer parents from `values["parent"]` and global
   references from `ctx.globals.get("name")`; the extended schema preserves
   explicit parents, global refs, output contracts, node kind, and optional
-  `torch_source` for differentiable refinement. LLM-backed engineer prompts are
-  lambda-first and also accept the paper's node-keyed YAML form. The default
-  agents are deterministic, while optional LLM-backed agents use the same
-  document contract and persist their prompts and responses.
+  `torch_source` for differentiable refinement. When a feature-producing NumPy
+  lambda is simple enough, the source compiler derives a torch expression
+  automatically. Callable and fitting source alternatives cross the subprocess
+  boundary as declarative specs and are materialized into safe runtime objects in
+  the parent process. LLM-backed engineer prompts are lambda-first and also
+  accept the paper's node-keyed YAML form. The default agents are deterministic,
+  while optional LLM-backed agents use the same document contract and persist
+  their prompts and responses.
   LLM-backed agents are fail-fast: request failures, unparseable hypotheses, invalid
   mutation documents, malformed memorandum updates, and missing provider
   configuration raise errors instead of falling back to deterministic agents.
@@ -127,8 +149,9 @@ the following modules.
   zero temperature for mutation synthesis.
 - At run startup, a task-context summary is written to `task_context.md` and injected
   into default LLM prompt builders. It records optional task-source excerpts,
-  runtime tensor inventory, target summary, scorer mechanics, and implementation
-  constraints so mutations are grounded in the actual task interface.
+  runtime tensor inventory, target summary, scorer mechanics, fold strategy, and
+  implementation constraints so mutations are grounded in the actual task
+  interface.
 - After each mutation, maintenance validates the DAG, collapses exact duplicate
   alternatives, prunes unreachable structure, and removes unused globals.
 - Generated candidates that fail during mutation application or evaluation are
@@ -171,10 +194,10 @@ faithful software substrate for the paper's architectural pattern.
 Known approximations:
 
 - The paper's private implementation is PyTorch-first. This repo now treats the
-  PyTorch L-BFGS path as paper mode. Registry primitives need a `torch_fn`, and
-  source-backed alternatives need `torch_source`, to participate in that path;
-  otherwise refinement records a skipped torch reason. The deterministic NumPy
-  coordinate refiner is explicit compatibility behavior.
+  PyTorch L-BFGS path as paper mode. Registry primitives need a `torch_fn`; source
+  alternatives need a provided or safely auto-derived torch expression to
+  participate in that path. Otherwise refinement records a skipped torch reason.
+  The deterministic NumPy coordinate refiner is explicit compatibility behavior.
 - The paper's long run used four asynchronous GPU islands; production `evolve`
   now defaults to four durable island-native process actors mapped to
   `cuda:0,cuda:1,cuda:2,cuda:3`, with the paper-style scientist temperature
@@ -203,10 +226,11 @@ Known approximations:
   rather than private LLM-authored domain briefs.
 - The diagnostic table is TOON-like and includes feature dependencies, subnode
   aggregates, importance, standalone score, max correlation, high-correlation counts,
-  residual correlations, class effect size, exact additive Ridge contribution
-  summaries, diagnostic global Ridge score, valid-feature-pool Ridge score,
-  fold-weight stability, fold score dispersion, effective rank, and evaluated
-  configuration score range. It is not the full private
+  residual correlations, target-bin objective rows, group/unit objective rows when
+  a group key is configured, exact additive Ridge contribution summaries,
+  diagnostic global Ridge score, valid-feature-pool Ridge score, fold-weight
+  stability, fold score dispersion, effective rank, and evaluated configuration
+  score range. It is not the full private
   diagnostic schema. Alternative-level history is a clean-room rolling aggregate over
   the best stateful evaluation path rather than the authors' private statistic table,
   the SHAP-style fields are exact for this repo's standardized linear Ridge basis
