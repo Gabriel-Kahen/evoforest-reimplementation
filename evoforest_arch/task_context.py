@@ -37,9 +37,10 @@ class TaskContextSummary:
     source_brief: tuple[str, ...]
     tensors: tuple[TensorSummary, ...]
     target_rows: int
-    positive_count: int
-    negative_count: int
-    positive_rate: float
+    target_mean: float
+    target_std: float
+    target_minimum: float
+    target_maximum: float
     scorer: tuple[str, ...]
     constraints: tuple[str, ...]
 
@@ -58,7 +59,10 @@ class TaskContextSummary:
             [
                 "",
                 "## Target",
-                f"- rows={self.target_rows}, positives={self.positive_count}, negatives={self.negative_count}, positive_rate={self.positive_rate:.6f}.",
+                (
+                    f"- rows={self.target_rows}, mean={self.target_mean:.6f}, std={self.target_std:.6f}, "
+                    f"min={self.target_minimum:.6f}, max={self.target_maximum:.6f}."
+                ),
                 "",
                 "## Scorer Mechanics",
             ]
@@ -78,10 +82,12 @@ def build_task_context(
     task_sources: tuple[tuple[str, str], ...] = (),
 ) -> TaskContextSummary:
     y = np.asarray(y, dtype=np.float64).reshape(-1)
-    positives = int(np.sum(y > 0.5))
-    negatives = int(y.shape[0] - positives)
+    scorer_obj = getattr(evaluator, "scorer", None)
+    scorer_name = str(getattr(scorer_obj, "name", "task_score"))
+    scorer_description = str(getattr(scorer_obj, "description", "User-supplied higher-is-better task score."))
     scorer = (
-        f"Fitness is best configuration mean ROC-AUC across stratified {int(getattr(evaluator, 'n_splits', 3))}-fold Ridge CV folds.",
+        f"Fitness is best configuration mean {scorer_name} across random {int(getattr(evaluator, 'n_splits', 3))}-fold Ridge CV folds.",
+        scorer_description,
         f"Configuration enumeration is capped at {int(getattr(evaluator, 'max_configurations', 64))} candidates per evaluation.",
         "Features are standardized inside each fold; Ridge is solved by closed-form SVD.",
         f"Alpha is selected from {len(getattr(evaluator, 'alphas', []))} log-scale values using leave-one-out leverage MSE.",
@@ -100,9 +106,10 @@ def build_task_context(
         source_brief=_source_brief(task_sources),
         tensors=tuple(_summarize_input(name, value) for name, value in sorted(inputs.items())),
         target_rows=int(y.shape[0]),
-        positive_count=positives,
-        negative_count=negatives,
-        positive_rate=float(positives / max(y.shape[0], 1)),
+        target_mean=float(np.mean(y)) if y.size else 0.0,
+        target_std=float(np.std(y)) if y.size else 0.0,
+        target_minimum=float(np.min(y)) if y.size else 0.0,
+        target_maximum=float(np.max(y)) if y.size else 0.0,
         scorer=scorer,
         constraints=constraints,
     )

@@ -9,7 +9,7 @@ from typing import Any
 from evoforest_arch.evaluator import RidgeEvaluator
 from evoforest_arch.graph import Graph
 from evoforest_arch.primitives import PrimitiveRegistry
-from evoforest_arch.seed import build_seed_graph
+from evoforest_arch.seed import build_structural_break_seed_graph
 from evoforest_arch.synthetic import make_structural_break_data
 
 from benchmarks.common import (
@@ -55,7 +55,7 @@ def configuration_cap_rows(seed: int, quick: bool, repeats: int) -> list[dict[st
             time_scenario(
                 family="configuration_cap",
                 setting=f"max_configurations={cap}",
-                graph=build_seed_graph(),
+                graph=build_structural_break_seed_graph(),
                 dataset_inputs=dataset.inputs(),
                 y=dataset.y,
                 evaluator=RidgeEvaluator(n_splits=3, seed=seed, max_configurations=cap),
@@ -74,7 +74,7 @@ def dataset_scale_rows(seed: int, quick: bool, repeats: int) -> list[dict[str, A
             time_scenario(
                 family="dataset_scale",
                 setting=f"n_series={n_series}, length={length}",
-                graph=build_seed_graph(),
+                graph=build_structural_break_seed_graph(),
                 dataset_inputs=dataset.inputs(),
                 y=dataset.y,
                 evaluator=RidgeEvaluator(n_splits=3, seed=seed, max_configurations=8 if quick else 16),
@@ -104,7 +104,7 @@ def output_feature_rows(seed: int, quick: bool, repeats: int) -> list[dict[str, 
 
 
 def graph_with_extra_outputs(extra_outputs: int) -> Graph:
-    graph = build_seed_graph()
+    graph = build_structural_break_seed_graph()
     registry = PrimitiveRegistry.default()
     parents = ("segment_stats", "trend_stats", "shape_stats")
     for index in range(extra_outputs):
@@ -138,7 +138,7 @@ def time_scenario(
         "setting": setting,
         "seconds": durations,
         "seconds_median": float(median(durations)),
-        "auc": float(last_result.auc),
+        "score": float(last_result.score),
         "evaluation": evaluation,
         "cache_hits": int(cache.get("hits", 0)) if isinstance(cache, dict) else 0,
         "cache_misses": int(cache.get("misses", 0)) if isinstance(cache, dict) else 0,
@@ -151,7 +151,7 @@ def markdown_report(payload: dict[str, Any]) -> str:
             row["family"],
             row["setting"],
             fmt_float(row["seconds_median"], digits=5),
-            fmt_float(row["auc"]),
+            fmt_float(row["score"]),
             row["evaluation"]["n_configs_evaluated"],
             row["evaluation"]["n_configs_total"],
             row["evaluation"]["n_features"],
@@ -166,7 +166,7 @@ def markdown_report(payload: dict[str, Any]) -> str:
             str(payload["scope"]),
             f"Seed: `{payload['seed']}`",
             f"Repeats per scenario: `{payload['summary']['repeats']}`",
-            markdown_table(["Family", "Setting", "Median Seconds", "AUC", "Configs Eval", "Configs Total", "Features", "Cache Hits", "Cache Misses"], rows),
+            markdown_table(["Family", "Setting", "Median Seconds", "Score", "Configs Eval", "Configs Total", "Features", "Cache Hits", "Cache Misses"], rows),
         ]
     )
 

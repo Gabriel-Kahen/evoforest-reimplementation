@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 from dataclasses import dataclass, field
 import hashlib
 import json
@@ -20,6 +21,9 @@ class MutationSpec:
     description: str = ""
     source: str = ""
     global_refs: tuple[str, ...] = ()
+    node_kind: str = ""
+    output_contract: dict[str, object] = field(default_factory=dict)
+    torch_source: str = ""
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -31,6 +35,9 @@ class MutationSpec:
             "description": self.description,
             "source": self.source,
             "global_refs": list(self.global_refs),
+            "node_kind": self.node_kind,
+            "output_contract": self.output_contract,
+            "torch_source": self.torch_source,
         }
 
 
@@ -154,6 +161,9 @@ class MutationDocument:
                 description=str(row.get("description", "")),
                 source=str(row.get("source", "")),
                 global_refs=tuple(str(name) for name in row.get("global_refs", [])),
+                node_kind=str(row.get("node_kind", "")),
+                output_contract=dict(row.get("output_contract", {})) if isinstance(row.get("output_contract", {}), dict) else {},
+                torch_source=str(row.get("torch_source", "")),
             )
             for row in data.get("add", [])
         )
@@ -240,6 +250,9 @@ class MutationEngine:
             raise ValueError(f"Unsupported mutation kind {spec.kind!r}.")
         if spec.target_node not in graph.nodes:
             raise KeyError(f"Unknown target node {spec.target_node!r}.")
+        target_kind = graph.nodes[spec.target_node].kind
+        if spec.node_kind and spec.node_kind != target_kind:
+            raise ValueError(f"Mutation for {spec.target_node!r} declares node_kind {spec.node_kind!r}, but graph node kind is {target_kind!r}.")
         if spec.source:
             if not self.allow_source:
                 raise ValueError("Source-backed mutation alternatives require MutationEngine(allow_source=True).")
@@ -249,6 +262,9 @@ class MutationEngine:
                 spec.source,
                 description=spec.description,
                 global_refs=spec.global_refs,
+                node_kind=target_kind,
+                output_contract=spec.output_contract,
+                torch_source=spec.torch_source,
             )
         else:
             alternative = self.registry.build(spec.primitive, spec.alternative_id, spec.parents)
@@ -331,15 +347,23 @@ def _from_paper_style_yaml(text: str) -> MutationDocument:
                 item = _yaml_scalar(stripped[2:].strip())
                 count = add_counts.get(current_add_node, 0)
                 add_counts[current_add_node] = count + 1
+                payload = _paper_source_payload(item)
+                source = str(payload.get("source", item))
+                parents = tuple(str(parent) for parent in payload.get("parents", _infer_source_parents(source)))
+                global_refs = tuple(str(name) for name in payload.get("global_refs", _infer_source_global_refs(source)))
                 additions.append(
                     MutationSpec(
                         kind="add_alternative",
                         target_node=current_add_node,
                         primitive="source",
-                        alternative_id=_paper_source_alternative_id(current_add_node, item, count),
-                        parents=(),
-                        source=item,
-                        description="Paper-style source-backed lambda alternative.",
+                        alternative_id=str(payload.get("alternative_id", _paper_source_alternative_id(current_add_node, source, count))),
+                        parents=parents,
+                        source=source,
+                        description=str(payload.get("description", "Paper-style source-backed lambda alternative.")),
+                        global_refs=global_refs,
+                        node_kind=str(payload.get("node_kind", "")),
+                        output_contract=dict(payload.get("output_contract", {})) if isinstance(payload.get("output_contract", {}), dict) else {},
+                        torch_source=str(payload.get("torch_source", "")),
                     )
                 )
 
@@ -364,6 +388,74 @@ def _yaml_scalar(value: str) -> str:
     return value
 
 
+def _paper_source_payload(item: str) -> dict[str, object]:
+    stripped = item.strip()
+    if stripped.startswith("{") and stripped.endswith("}"):
+        payload = json.loads(stripped)
+        if not isinstance(payload, dict):
+            raise ValueError("Paper-style source mutation object must be a JSON mapping.")
+        if "source" not in payload:
+            raise ValueError("Paper-style source mutation object requires a source field.")
+        return payload
+    return {"source": item}
+
+
+def _infer_source_parents(source: str) -> tuple[str, ...]:
+    names: list[str] = []
+    try:
+        tree = ast.parse(source.strip(), mode="eval")
+    except SyntaxError:
+        return ()
+    for node in ast.walk(tree):
+        value: str | None = None
+        if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name) and node.value.id == "values":
+            value = _literal_string_slice(node.slice)
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "get"
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "values"
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+            and isinstance(node.args[0].value, str)
+        ):
+            value = node.args[0].value
+        if value is not None and value not in names:
+            names.append(value)
+    return tuple(names)
+
+
+def _infer_source_global_refs(source: str) -> tuple[str, ...]:
+    names: list[str] = []
+    try:
+        tree = ast.parse(source.strip(), mode="eval")
+    except SyntaxError:
+        return ()
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "get"
+            and isinstance(node.func.value, ast.Attribute)
+            and node.func.value.attr == "globals"
+            and isinstance(node.func.value.value, ast.Name)
+            and node.func.value.value.id == "ctx"
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+            and isinstance(node.args[0].value, str)
+            and node.args[0].value not in names
+        ):
+            names.append(node.args[0].value)
+    return tuple(names)
+
+
+def _literal_string_slice(node: ast.AST) -> str | None:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    return None
+
+
 def _split_remove_target(value: str) -> tuple[str, str]:
     if "." in value:
         return tuple(value.split(".", maxsplit=1))  # type: ignore[return-value]
@@ -378,6 +470,30 @@ def _paper_source_alternative_id(target_node: str, source: str, count: int) -> s
 
 def built_in_mutations() -> list[MutationSpec]:
     return [
+        MutationSpec(
+            kind="add_alternative",
+            target_node="output",
+            primitive="pass_outputs",
+            alternative_id="generic_base_summary_output_mutation",
+            parents=("base_features", "summary_features"),
+            description="Add a compact generic output path over direct and summary features.",
+        ),
+        MutationSpec(
+            kind="add_alternative",
+            target_node="output",
+            primitive="activated_outputs",
+            alternative_id="generic_activated_base_output_mutation",
+            parents=("base_features", "nonlinear_features", "activation"),
+            description="Add an activated generic output path over direct and nonlinear features.",
+        ),
+        MutationSpec(
+            kind="add_alternative",
+            target_node="output",
+            primitive="projection_outputs",
+            alternative_id="generic_projection_output_mutation",
+            parents=("base_features", "nonlinear_features"),
+            description="Add a trainable-projection generic output path.",
+        ),
         MutationSpec(
             kind="add_alternative",
             target_node="shape_stats",

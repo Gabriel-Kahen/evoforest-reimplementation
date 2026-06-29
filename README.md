@@ -9,6 +9,8 @@ See the paper here: https://arxiv.org/abs/2604.19761
 The implementation focuses on the reusable system design:
 
 - A shared directed acyclic graph of computational nodes.
+- A task schema that declares row-aligned inputs and selects an appropriate seed
+  graph/primitive registry for the current task.
 - Intermediate nodes with multiple alternative implementations.
 - Callable-family nodes for reusable projections, gates, and activations.
 - Persistent low-dimensional global parameters.
@@ -31,15 +33,19 @@ The implementation focuses on the reusable system design:
 - Optional OpenAI, Claude, or Gemini LLM scientist, engineer, and memorandum
   agents that use paper-style prompt artifacts. LLM mutation synthesis is
   lambda-first and accepts paper-style node-keyed YAML such as `add: output:
-  - "lambda ctx, values: ..."`. In island mode the scientist agent defaults to
+  - "lambda ctx, values: ..."`. Shorthand lambdas infer parents from
+  `values["parent"]`; the extended schema can also declare `parents`,
+  `global_refs`, `node_kind`, `output_contract`, and `torch_source`. In island
+  mode the scientist agent defaults to
   the paper's fixed temperature schedule `(0.35, 0.5, 0.6, 0.75)`, while
   engineer synthesis and memorandum updates default to temperature `0`.
-- Cached task-context summaries with tensor inventory, target balance, scorer
+- Cached task-context summaries with tensor inventory, target summary, scorer
   mechanics, and implementation constraints injected into LLM prompts.
 - Node-level mutation support so a document can introduce a new intermediate,
   callable, output, or fitting node before adding alternatives to it.
-- Optional trusted source-backed mutation alternatives that store and execute
-  paper-style `lambda ctx, values: ...` implementations from mutation YAML.
+- Optional sandboxed source-backed mutation alternatives that store and execute
+  paper-style `lambda ctx, values: ...` implementations from mutation YAML with
+  timeout, resource-limit, deterministic rerun, and output-contract checks.
 - Graph maintenance for duplicate collapse, unreachable pruning, and unused globals.
 - Failed generated candidates are rejected, logged into events/memoranda, and fed
   back to the next engineer prompt.
@@ -86,6 +92,7 @@ topology with dedicated devices `cuda:0,cuda:1,cuda:2,cuda:3`.
 
 ```bash
 evoforest-arch evolve --steps 4 --seed 17 --n-series 240 --length 160 --output runs/production-smoke
+evoforest-arch evolve --dataset synthetic-tabular --steps 4 --seed 17 --n-samples 240 --n-features 12 --output runs/production-tabular-smoke
 evoforest-arch inspect runs/production-smoke
 evoforest-arch export-best runs/production-smoke --output runs/production-smoke-best.json
 evoforest-arch recheck runs/production-smoke
@@ -105,7 +112,7 @@ evoforest-arch evolve --steps 4 --island-devices cpu:0,cpu:1,cpu:2,cpu:3 --no-re
 For the closest clean-room match to the paper's reported long run, use the paper
 profile. It sets 600 target steps, four async islands, dedicated `cuda:0..3`
 devices, 64 configurations, PyTorch L-BFGS refinement, scientist temperatures
-`0.35,0.5,0.6,0.75`, engineer temperature `0`, and CV ROC-AUC promotion without
+`0.35,0.5,0.6,0.75`, engineer temperature `0`, and CV task score promotion without
 the production validation gate:
 
 ```bash
@@ -126,11 +133,12 @@ only when you are ready to burn the holdout:
 evoforest-arch recheck runs/production-smoke --include-test
 ```
 
-This command currently wires the synthetic structural-break dataset. A real
-strength claim needs a fixed external dataset loader plus a committed split
-manifest; see [docs/evolution_workflow.md](docs/evolution_workflow.md). External
-data loaders, contest submissions, and local benchmark artifacts are intentionally
-kept outside this public reimplementation repo.
+The built-in `synthetic-structural-break` and `synthetic-tabular` datasets are
+workflow smoke tests. A real strength claim needs a fixed external dataset loader
+plus a committed split manifest; see
+[docs/evolution_workflow.md](docs/evolution_workflow.md). External data loaders,
+contest submissions, and local benchmark artifacts are intentionally kept outside
+this public reimplementation repo.
 
 ## Run Benchmarks
 
@@ -207,9 +215,11 @@ Ridge fit.
 
 LLM-generated mutation documents may include source-backed lambda alternatives by
 default, matching the paper's mutation representation. For deterministic
-non-LLM runs, pass `--allow-source-mutations` to enable trusted local source
-mutation documents. Source lambdas are AST-validated and executed in-process;
-this is a trust boundary, not a security sandbox.
+non-LLM runs, pass `--allow-source-mutations` to enable source mutation
+documents. Source lambdas are AST-validated and evaluated in a subprocess
+sandbox with timeout, memory limit where supported, deterministic repeated
+evaluation, and output-contract checks. This is a practical local execution
+boundary, not a replacement for an OS/container sandbox for hostile code.
 
 LLM mode is fail-fast. If the configured provider is missing, the HTTP request
 fails, the scientist response cannot be parsed into hypotheses, or the engineer
@@ -235,7 +245,7 @@ the chosen output directory. Memoranda use the paper-style sections
 ## Scope
 
 This repository intentionally excludes competition-specific code, hidden benchmark
-logic, and local-label feature selection. It is meant as a clean architecture substrate
+logic, and private target-specific feature selection. It is meant as a clean architecture substrate
 for experiments with open-ended computational graph evolution.
 
 It also does not claim to recover the private 600-step evolved graph. The global
@@ -251,7 +261,7 @@ persists per-island state, graph artifacts, checkpoints, memoranda, job logs, an
 migration records from inside the island actor, so resume restores the island
 frontier instead of restarting from a seed graph. It preserves the paper's fixed
 four-temperature scientist schedule by default. The `--profile paper` preset switches promotion from the
-default held-out validation gate to the paper's CV ROC-AUC frontier and records
+default held-out validation gate to the paper's CV task score frontier and records
 that contract in the manifest. The scientist/engineer loop can run
 deterministically offline or call an opt-in OpenAI, Claude, or Gemini provider.
 It does not include the authors' private model, exact prompts, full private

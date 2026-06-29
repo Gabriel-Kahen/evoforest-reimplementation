@@ -24,9 +24,10 @@ from evoforest_arch.maintenance import GraphMaintenance, MaintenanceReport
 from evoforest_arch.mutations import GlobalSpec, MutationDocument, MutationEngine, MutationSpec, NodeSpec, RemoveSpec
 from evoforest_arch.production import ProductionConfig, ProductionEvolutionRunner, export_best_graph, inspect_run, recheck_run
 from evoforest_arch.refinement import GlobalRefiner, RefinementResult, TorchLBFGSRefiner
-from evoforest_arch.seed import build_seed_graph
-from evoforest_arch.source import build_source_alternative, compile_lambda_source
-from evoforest_arch.synthetic import make_structural_break_data
+from evoforest_arch.seed import build_seed_graph, build_structural_break_seed_graph, build_tabular_seed_graph
+from evoforest_arch.source import SourceExecutionError, SourceSandboxPolicy, SourceTimeoutError, build_source_alternative, compile_lambda_source
+from evoforest_arch.synthetic import make_structural_break_data, make_tabular_data
+from evoforest_arch.task import InputSpec, TaskSchema, task_schema_for_dataset
 from evoforest_arch.task_context import TaskContextSummary, TensorSummary, build_task_context
 
 __all__ = [
@@ -44,6 +45,7 @@ __all__ = [
     "DEFAULT_ISLAND_TEMPERATURES",
     "GeminiLLMClient",
     "Hypothesis",
+    "InputSpec",
     "LLMEngineerAgent",
     "LLMMemorandumAgent",
     "LLMScientistAgent",
@@ -63,14 +65,19 @@ __all__ = [
     "ResidualWeightRule",
     "RidgeEvaluator",
     "ScientistAgent",
+    "SourceExecutionError",
+    "SourceSandboxPolicy",
+    "SourceTimeoutError",
     "SUPPORTED_LLM_PROVIDERS",
     "StaticLLMClient",
     "TaskContextSummary",
+    "TaskSchema",
     "TensorSummary",
     "TorchLBFGSRefiner",
     "build_task_context",
     "build_seed_graph",
     "build_source_alternative",
+    "build_structural_break_seed_graph",
     "compile_lambda_source",
     "export_best_graph",
     "inspect_run",
@@ -78,5 +85,8 @@ __all__ = [
     "llm_provider_from_env",
     "load_env_file",
     "make_structural_break_data",
+    "make_tabular_data",
     "recheck_run",
+    "build_tabular_seed_graph",
+    "task_schema_for_dataset",
 ]

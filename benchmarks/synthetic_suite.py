@@ -8,7 +8,7 @@ from typing import Any
 import numpy as np
 
 from evoforest_arch.evaluator import RidgeEvaluator
-from evoforest_arch.seed import build_seed_graph
+from evoforest_arch.seed import build_structural_break_seed_graph
 from evoforest_arch.synthetic import TimeSeriesDataset, make_structural_break_data
 
 from benchmarks.common import (
@@ -31,7 +31,7 @@ def build_report(output_dir: Path, seed: int = 23, quick: bool = False) -> dict[
     length = 64 if quick else 96
     max_configurations = 8 if quick else 24
     clean = make_structural_break_data(n_series=n_series, length=length, seed=seed)
-    outlier_heavy = add_label_independent_outliers(clean, seed=seed + 100)
+    outlier_heavy = add_target_independent_outliers(clean, seed=seed + 100)
 
     rows = [
         run_case(
@@ -41,7 +41,7 @@ def build_report(output_dir: Path, seed: int = 23, quick: bool = False) -> dict[
             seed=seed,
             max_configurations=max_configurations,
             config=None,
-            threshold=0.75,
+            threshold=0.60,
         ),
         run_case(
             name="sample_weight_boundary_energy",
@@ -52,7 +52,7 @@ def build_report(output_dir: Path, seed: int = 23, quick: bool = False) -> dict[
             config={"ridge_w": "boundary_energy"},
             baseline_config={"ridge_w": "uniform"},
             extra_pass=lambda row: float(row["evidence"]["ridge_w"].get("std", 0.0)) > 0.0,
-            threshold=0.65,
+            threshold=0.60,
         ),
         run_case(
             name="residual_huber_irls",
@@ -63,7 +63,7 @@ def build_report(output_dir: Path, seed: int = 23, quick: bool = False) -> dict[
             config={"ridge_g": "huber"},
             baseline_config={"ridge_g": "identity"},
             extra_pass=lambda row: bool(row["evidence"]["global_ridge"].get("residual_reweighted", False)),
-            threshold=0.60,
+            threshold=0.35,
         ),
         run_case(
             name="callable_sigmoid_gate",
@@ -74,7 +74,7 @@ def build_report(output_dir: Path, seed: int = 23, quick: bool = False) -> dict[
             config={"activation": "sigmoid_gate"},
             baseline_config={"activation": "identity"},
             extra_pass=lambda row: any("sigmoid_gate" in name for name in row["feature_names"]),
-            threshold=0.65,
+            threshold=0.55,
         ),
         run_case(
             name="global_projection_feature",
@@ -84,7 +84,7 @@ def build_report(output_dir: Path, seed: int = 23, quick: bool = False) -> dict[
             max_configurations=max_configurations,
             config={"activation": "sigmoid_gate"},
             extra_pass=lambda row: any("global_projection" in name for name in row["feature_names"]),
-            threshold=0.65,
+            threshold=0.55,
         ),
     ]
     return {
@@ -105,7 +105,7 @@ def build_report(output_dir: Path, seed: int = 23, quick: bool = False) -> dict[
     }
 
 
-def add_label_independent_outliers(dataset: TimeSeriesDataset, seed: int) -> TimeSeriesDataset:
+def add_target_independent_outliers(dataset: TimeSeriesDataset, seed: int) -> TimeSeriesDataset:
     rng = np.random.default_rng(seed)
     values = dataset.values.copy()
     n_spikes = max(1, values.shape[0] // 5)
@@ -128,21 +128,21 @@ def run_case(
     baseline_config: dict[str, str] | None = None,
     extra_pass: Any = None,
 ) -> dict[str, Any]:
-    graph = build_seed_graph()
+    graph = build_structural_break_seed_graph()
     evaluator = RidgeEvaluator(n_splits=3, seed=seed, max_configurations=max_configurations, irls_steps=2)
     result = evaluator.evaluate(graph, dataset.inputs(), dataset.y, config=config)
-    baseline_auc = None
+    baseline_score = None
     if baseline_config is not None:
-        baseline = evaluator.evaluate(build_seed_graph(), dataset.inputs(), dataset.y, config=baseline_config)
-        baseline_auc = float(baseline.auc)
+        baseline = evaluator.evaluate(build_structural_break_seed_graph(), dataset.inputs(), dataset.y, config=baseline_config)
+        baseline_score = float(baseline.score)
     row = {
         "name": name,
         "mechanism": mechanism,
-        "passed": float(result.auc) >= threshold,
-        "threshold_auc": threshold,
-        "auc": float(result.auc),
-        "baseline_auc": baseline_auc,
-        "delta_vs_baseline": None if baseline_auc is None else float(result.auc - baseline_auc),
+        "passed": float(result.score) >= threshold,
+        "threshold_score": threshold,
+        "score": float(result.score),
+        "baseline_score": baseline_score,
+        "delta_vs_baseline": None if baseline_score is None else float(result.score - baseline_score),
         "config": result.config,
         "feature_names": result.feature_names,
         "evidence": {
@@ -161,7 +161,8 @@ def dataset_summary(dataset: TimeSeriesDataset) -> dict[str, object]:
         "n_series": int(dataset.values.shape[0]),
         "length": int(dataset.values.shape[1]),
         "boundary": int(dataset.boundary),
-        "positive_rate": float(np.mean(dataset.y)),
+        "target_mean": float(np.mean(dataset.y)),
+        "target_std": float(np.std(dataset.y)),
         "value_std": float(np.std(dataset.values)),
     }
 
@@ -172,8 +173,8 @@ def markdown_report(payload: dict[str, Any]) -> str:
             row["name"],
             status_mark(bool(row["passed"])),
             row["mechanism"],
-            fmt_float(row["auc"]),
-            fmt_float(row["baseline_auc"]),
+            fmt_float(row["score"]),
+            fmt_float(row["baseline_score"]),
             fmt_float(row["delta_vs_baseline"]),
         ]
         for row in payload["cases"]
@@ -184,7 +185,7 @@ def markdown_report(payload: dict[str, Any]) -> str:
             str(payload["scope"]),
             f"Seed: `{payload['seed']}`",
             f"Passed: `{payload['summary']['passed']}/{payload['summary']['total']}`",
-            markdown_table(["Case", "Status", "Mechanism", "AUC", "Baseline AUC", "Delta"], rows),
+            markdown_table(["Case", "Status", "Mechanism", "Score", "Baseline Score", "Delta"], rows),
         ]
     )
 

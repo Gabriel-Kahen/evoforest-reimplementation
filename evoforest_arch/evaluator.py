@@ -6,13 +6,13 @@ from itertools import product
 import numpy as np
 
 from evoforest_arch.graph import EvalContext, Graph, ResidualWeightRule
-from evoforest_arch.metrics import roc_auc_score, stratified_folds, stratified_group_folds
+from evoforest_arch.metrics import DEFAULT_SCORER, ScoreFunction, TaskScorer, coerce_scorer, group_folds, random_folds, safe_corr, target_alignment
 from evoforest_arch.readout import DEFAULT_ALPHAS, RidgeModel, Standardizer, combine_sample_weights, fit_ridge, normalize_sample_weight, select_alpha
 
 
 @dataclass
 class EvaluationResult:
-    auc: float
+    score: float
     config: dict[str, str]
     feature_names: list[str]
     predictions: np.ndarray
@@ -22,7 +22,7 @@ class EvaluationResult:
 
     def to_dict(self) -> dict[str, object]:
         return {
-            "auc": self.auc,
+            "score": self.score,
             "config": self.config,
             "feature_names": self.feature_names,
             "alphas": self.alphas,
@@ -41,11 +41,11 @@ class LinearDiagnosticFit:
     sample_weight: np.ndarray
     irls_iterations: list[dict[str, object]]
 
-    def to_dict(self, y: np.ndarray) -> dict[str, object]:
+    def to_dict(self, y: np.ndarray, scorer: TaskScorer = DEFAULT_SCORER) -> dict[str, object]:
         reconstructed = self.intercept + np.sum(self.contributions, axis=1)
         return {
             "alpha": float(self.alpha),
-            "auc": float(roc_auc_score(y, self.predictions)),
+            "score": float(scorer.score(y, self.predictions)),
             "intercept": float(self.intercept),
             "prediction_std": float(np.std(self.predictions)),
             "residual_std": float(np.std(y - self.predictions)),
@@ -83,6 +83,7 @@ class RidgeEvaluator:
         group_key: str | None = None,
         diagnostics_mode: str = "full",
         torch_device: str | None = None,
+        scorer: TaskScorer | ScoreFunction | None = None,
     ) -> None:
         self.n_splits = int(n_splits)
         self.seed = int(seed)
@@ -94,6 +95,7 @@ class RidgeEvaluator:
         self.torch_device = torch_device
         self.irls_steps = max(0, int(irls_steps))
         self.group_key = group_key
+        self.scorer = coerce_scorer(scorer)
         if diagnostics_mode not in {"full", "basic"}:
             raise ValueError("diagnostics_mode must be 'full' or 'basic'.")
         self.diagnostics_mode = diagnostics_mode
@@ -136,7 +138,7 @@ class RidgeEvaluator:
                 search_cache_hits += int(cache_row.get("hits", 0))
                 search_cache_misses += int(cache_row.get("misses", 0))
             result.diagnostics["configuration_search"] = self._configuration_search_diagnostics(
-                [{"auc": result.auc, "config": result.config, "n_features": len(result.feature_names)}],
+                [{"score": result.score, "config": result.config, "n_features": len(result.feature_names)}],
                 total_configurations=1,
             )
         else:
@@ -153,14 +155,14 @@ class RidgeEvaluator:
                     search_cache_misses += int(cache_row.get("misses", 0))
                 config_rows.append(
                     {
-                        "auc": result.auc,
+                        "score": result.score,
                         "config": result.config,
                         "n_features": len(result.feature_names),
                         "cache_hits": int(cache_row.get("hits", 0)) if isinstance(cache_row, dict) else 0,
                         "cache_misses": int(cache_row.get("misses", 0)) if isinstance(cache_row, dict) else 0,
                     }
                 )
-                if best is None or result.auc > best.auc:
+                if best is None or result.score > best.score:
                     best = result
             if best is None:
                 raise ValueError("No graph configurations were available for evaluation.")
@@ -208,7 +210,7 @@ class RidgeEvaluator:
         fold_intercepts = np.zeros_like(y, dtype=np.float64)
         alphas: list[float] = []
         coefs: list[np.ndarray] = []
-        fold_aucs: list[float] = []
+        fold_scores: list[float] = []
         fold_irls: list[dict[str, object]] = []
         folds, fold_diagnostics = self._folds(inputs, y)
         for fold_index, (train_idx, val_idx) in enumerate(folds):
@@ -221,7 +223,7 @@ class RidgeEvaluator:
             preds[val_idx] = model.predict(x_val)
             fold_contributions[val_idx] = x_val * model.coef.reshape(1, -1)
             fold_intercepts[val_idx] = float(model.intercept)
-            fold_aucs.append(float(roc_auc_score(y[val_idx], preds[val_idx])))
+            fold_scores.append(float(self.scorer.score(y[val_idx], preds[val_idx])))
             alphas.append(float(ridge_fit.alpha))
             coefs.append(model.coef)
             fold_irls.append(
@@ -232,7 +234,7 @@ class RidgeEvaluator:
                     "iterations": ridge_fit.irls_iterations,
                 }
             )
-        auc = float(np.mean(fold_aucs)) if fold_aucs else roc_auc_score(y, preds)
+        score = float(np.mean(fold_scores)) if fold_scores else self.scorer.score(y, preds)
         selected_alternatives = graph.selected_alternatives(config)
         if self.diagnostics_mode == "full":
             feature_dependencies = feature_dependency_rows(names, graph.output_dependency_map(config))
@@ -248,13 +250,13 @@ class RidgeEvaluator:
                 fold_intercepts,
                 global_fit,
             )
-            diagnostics["alternatives"] = alternative_diagnostics(diagnostics["features"], selected_alternatives, auc)
+            diagnostics["alternatives"] = alternative_diagnostics(diagnostics["features"], selected_alternatives, score)
         else:
-            diagnostics = self._basic_diagnostics(preds, y, names, selected_alternatives, auc)
+            diagnostics = self._basic_diagnostics(preds, y, names, selected_alternatives, score)
         diagnostics["folds"] = {
-            "auc": fold_aucs,
-            "auc_mean": float(np.mean(fold_aucs)) if fold_aucs else 0.0,
-            "auc_std": float(np.std(fold_aucs)) if fold_aucs else 0.0,
+            "score": fold_scores,
+            "score_mean": float(np.mean(fold_scores)) if fold_scores else 0.0,
+            "score_std": float(np.std(fold_scores)) if fold_scores else 0.0,
             "alphas": alphas,
             **fold_diagnostics,
         }
@@ -275,7 +277,7 @@ class RidgeEvaluator:
             "selected_alternatives": selected_alternatives,
         }
         return EvaluationResult(
-            auc=float(auc),
+            score=float(score),
             config=dict(config),
             feature_names=names,
             predictions=preds,
@@ -301,20 +303,20 @@ class RidgeEvaluator:
             "n_features": int(x_pool.shape[1]),
             "n_feature_names": int(len(names)),
         }
-        result.diagnostics["global_ridge_pool"] = pool_fit.to_dict(y)
+        result.diagnostics["global_ridge_pool"] = pool_fit.to_dict(y, self.scorer)
 
     def _folds(self, inputs: dict[str, object], y: np.ndarray) -> tuple[list[tuple[np.ndarray, np.ndarray]], dict[str, object]]:
         if self.group_key is None or self.group_key not in inputs:
-            return stratified_folds(y, self.n_splits, self.seed), {"method": "stratified_random", "group_key": None}
+            return random_folds(y, self.n_splits, self.seed), {"method": "random", "group_key": None}
         groups = np.asarray(inputs[self.group_key])
         if groups.ndim != 1 or groups.shape[0] != y.shape[0]:
-            return stratified_folds(y, self.n_splits, self.seed), {
-                "method": "stratified_random",
+            return random_folds(y, self.n_splits, self.seed), {
+                "method": "random",
                 "group_key": self.group_key,
                 "grouped": False,
                 "reason": "group array shape did not match y",
             }
-        folds = stratified_group_folds(y, groups, self.n_splits, self.seed)
+        folds = group_folds(y, groups, self.n_splits, self.seed)
         overlap_count = 0
         validation_group_counts: list[int] = []
         for train_idx, val_idx in folds:
@@ -323,7 +325,7 @@ class RidgeEvaluator:
             overlap_count += len(train_groups & val_groups)
             validation_group_counts.append(len(val_groups))
         return folds, {
-            "method": "stratified_group_random",
+            "method": "group_random",
             "group_key": self.group_key,
             "grouped": True,
             "fold_group_overlap_count": int(overlap_count),
@@ -412,18 +414,18 @@ class RidgeEvaluator:
 
     @staticmethod
     def _configuration_search_diagnostics(config_rows: list[dict[str, object]], total_configurations: int) -> dict[str, object]:
-        aucs = np.asarray([float(row["auc"]) for row in config_rows], dtype=np.float64)
+        scores = np.asarray([float(row["score"]) for row in config_rows], dtype=np.float64)
         n_features = [int(row.get("n_features", 0)) for row in config_rows]
-        top_rows = sorted(config_rows, key=lambda row: float(row["auc"]), reverse=True)[:8]
-        if aucs.size == 0:
+        top_rows = sorted(config_rows, key=lambda row: float(row["score"]), reverse=True)[:8]
+        if scores.size == 0:
             return {
                 "evaluated": 0,
                 "total": int(total_configurations),
                 "capped": False,
-                "auc_range": [0.0, 0.0],
-                "auc_mean": 0.0,
-                "auc_std": 0.0,
-                "best_config_auc": 0.0,
+                "score_range": [0.0, 0.0],
+                "score_mean": 0.0,
+                "score_std": 0.0,
+                "best_config_score": 0.0,
                 "n_features_global": 0,
                 "n_features_best_config": 0,
                 "top_configs": [],
@@ -432,15 +434,15 @@ class RidgeEvaluator:
             "evaluated": len(config_rows),
             "total": int(total_configurations),
             "capped": int(total_configurations) > len(config_rows),
-            "auc_range": [float(np.min(aucs)), float(np.max(aucs))],
-            "auc_mean": float(np.mean(aucs)),
-            "auc_std": float(np.std(aucs)),
-            "best_config_auc": float(np.max(aucs)),
+            "score_range": [float(np.min(scores)), float(np.max(scores))],
+            "score_mean": float(np.mean(scores)),
+            "score_std": float(np.std(scores)),
+            "best_config_score": float(np.max(scores)),
             "n_features_global": int(np.sum(n_features)),
             "n_features_best_config": int(top_rows[0].get("n_features", 0)) if top_rows else 0,
             "top_configs": [
                 {
-                    "auc": float(row["auc"]),
+                    "score": float(row["score"]),
                     "n_features": int(row.get("n_features", 0)),
                     "config": row["config"],
                 }
@@ -448,20 +450,20 @@ class RidgeEvaluator:
             ],
         }
 
-    @staticmethod
-    def _scoring_context(result: EvaluationResult) -> dict[str, object]:
+    def _scoring_context(self, result: EvaluationResult) -> dict[str, object]:
         search = result.diagnostics.get("configuration_search", {})
         folds = result.diagnostics.get("folds", {})
         global_ridge = result.diagnostics.get("global_ridge", {})
         global_ridge_pool = result.diagnostics.get("global_ridge_pool", {})
         linear_shap = result.diagnostics.get("linear_shap", {})
         return {
-            "scoring": "configuration-based (best config AUC = evoforest score)",
-            "best_config_auc": float(result.auc),
-            "global_ridge_auc": float(global_ridge.get("auc", 0.0)) if isinstance(global_ridge, dict) else 0.0,
-            "global_feature_pool_ridge_auc": float(global_ridge_pool.get("auc", 0.0)) if isinstance(global_ridge_pool, dict) else 0.0,
-            "config_auc_range": search.get("auc_range", [float(result.auc), float(result.auc)]),
-            "fold_auc_std": float(folds.get("auc_std", 0.0)) if isinstance(folds, dict) else 0.0,
+            "scoring": f"configuration-based ({self.scorer.name}; best config score = evoforest score)",
+            "scorer": self.scorer.to_dict(),
+            "best_config_score": float(result.score),
+            "global_ridge_score": float(global_ridge.get("score", 0.0)) if isinstance(global_ridge, dict) else 0.0,
+            "global_feature_pool_ridge_score": float(global_ridge_pool.get("score", 0.0)) if isinstance(global_ridge_pool, dict) else 0.0,
+            "config_score_range": search.get("score_range", [float(result.score), float(result.score)]),
+            "fold_score_std": float(folds.get("score_std", 0.0)) if isinstance(folds, dict) else 0.0,
             "effective_rank": float(result.diagnostics.get("effective_rank", 0.0)),
             "mean_max_corr": float(result.diagnostics.get("mean_max_corr", 0.0)),
             "shap_reconstruction_error": float(linear_shap.get("global_reconstruction_error", 0.0)) if isinstance(linear_shap, dict) else 0.0,
@@ -517,7 +519,7 @@ class RidgeEvaluator:
         y: np.ndarray,
         names: list[str],
         selected_alternatives: dict[str, str],
-        auc: float,
+        score: float,
     ) -> dict[str, object]:
         residual = y - preds
         return {
@@ -539,7 +541,7 @@ class RidgeEvaluator:
                 {
                     "name": f"{node}.{alternative}",
                     "selected": True,
-                    "last_auc": float(auc),
+                    "last_score": float(score),
                 }
                 for node, alternative in selected_alternatives.items()
             ],
@@ -547,8 +549,8 @@ class RidgeEvaluator:
             "n_features": int(len(names)),
         }
 
-    @staticmethod
     def _diagnostics(
+        self,
         x: np.ndarray,
         y: np.ndarray,
         preds: np.ndarray,
@@ -584,9 +586,9 @@ class RidgeEvaluator:
                     "depth": len(dependencies),
                     "importance": float(importance[idx] / total),
                     "coef_sign": int(np.sign(mean_coef[idx])),
-                    "individual_auc": float(max(roc_auc_score(y, feature), 1.0 - roc_auc_score(y, feature))),
-                    "rank_corr": float(rank_corr(feature, y)),
-                    "class_effect": float(class_effect_size(feature, y)),
+                    "target_alignment": float(target_alignment(feature, y)),
+                    "target_corr": float(safe_corr(feature, y)),
+                    "target_quadratic_corr": float(safe_corr(feature * feature, y)),
                     "max_corr": float(redundancy[idx]),
                     "n_high_corr": int(high_corr_counts[idx]),
                     "most_correlated": most_correlated[idx],
@@ -600,13 +602,13 @@ class RidgeEvaluator:
                     "shap_mean_abs": float(global_abs_contribution[idx]),
                     "shap_std": float(np.std(contribution)),
                     "shap_importance": float(global_abs_contribution[idx] / shap_total),
-                    "shap_class_effect": float(class_effect_size(contribution, y)),
+                    "shap_target_corr": float(safe_corr(contribution, y)),
                     "cv_shap_mean_abs": float(fold_abs_contribution[idx]),
                 }
             )
         feature_rows.sort(key=lambda row: row["importance"], reverse=True)
         cv_reconstructed = fold_intercepts + np.sum(fold_contributions, axis=1)
-        global_ridge = global_fit.to_dict(y)
+        global_ridge = global_fit.to_dict(y, self.scorer)
         return {
             "prediction_std": float(np.std(preds)),
             "residual_std": float(np.std(residual)),
@@ -623,45 +625,6 @@ class RidgeEvaluator:
             "features": feature_rows,
             "subnodes": subnode_diagnostics(feature_rows),
         }
-
-
-def safe_corr(a: np.ndarray, b: np.ndarray) -> float:
-    a = np.asarray(a, dtype=np.float64)
-    b = np.asarray(b, dtype=np.float64)
-    if np.std(a) < 1e-12 or np.std(b) < 1e-12:
-        return 0.0
-    return float(np.corrcoef(a, b)[0, 1])
-
-
-def rank_corr(a: np.ndarray, b: np.ndarray) -> float:
-    return safe_corr(rankdata(a), rankdata(b))
-
-
-def rankdata(values: np.ndarray) -> np.ndarray:
-    values = np.asarray(values, dtype=np.float64)
-    order = np.argsort(values, kind="mergesort")
-    ranks = np.empty_like(order, dtype=np.float64)
-    ranks[order] = np.arange(values.shape[0], dtype=np.float64)
-    unique_values, first_indices, counts = np.unique(values[order], return_index=True, return_counts=True)
-    del unique_values
-    for first, count in zip(first_indices, counts, strict=True):
-        if count > 1:
-            tied = order[first : first + count]
-            ranks[tied] = float(np.mean(ranks[tied]))
-    return ranks
-
-
-def class_effect_size(feature: np.ndarray, y: np.ndarray) -> float:
-    feature = np.asarray(feature, dtype=np.float64)
-    y = np.asarray(y, dtype=np.float64)
-    pos = feature[y > 0.5]
-    neg = feature[y <= 0.5]
-    if pos.size == 0 or neg.size == 0:
-        return 0.0
-    pooled = np.sqrt(0.5 * (np.var(pos) + np.var(neg)))
-    if pooled < 1e-12:
-        return 0.0
-    return float((np.mean(pos) - np.mean(neg)) / pooled)
 
 
 def effective_rank(x: np.ndarray) -> float:
@@ -743,7 +706,7 @@ def subnode_diagnostics(features: list[dict[str, object]]) -> list[dict[str, obj
                     "feature_count": 0,
                     "importance": 0.0,
                     "shap_importance": 0.0,
-                    "max_feature_auc": 0.0,
+                    "max_target_alignment": 0.0,
                     "mean_abs_shap": 0.0,
                     "mean_abs_residual_corr": 0.0,
                     "mean_redundancy": 0.0,
@@ -753,7 +716,7 @@ def subnode_diagnostics(features: list[dict[str, object]]) -> list[dict[str, obj
             row["feature_count"] = int(row["feature_count"]) + 1
             row["importance"] = float(row["importance"]) + float(feature.get("importance", 0.0))
             row["shap_importance"] = float(row["shap_importance"]) + float(feature.get("shap_importance", 0.0))
-            row["max_feature_auc"] = max(float(row["max_feature_auc"]), float(feature.get("individual_auc", 0.0)))
+            row["max_target_alignment"] = max(float(row["max_target_alignment"]), float(feature.get("target_alignment", 0.0)))
             row["mean_abs_shap"] = float(row["mean_abs_shap"]) + float(feature.get("shap_mean_abs", 0.0))
             row["mean_abs_residual_corr"] = float(row["mean_abs_residual_corr"]) + abs(float(feature.get("residual_corr", 0.0)))
             row["mean_redundancy"] = float(row["mean_redundancy"]) + float(feature.get("redundancy", 0.0))
@@ -770,7 +733,7 @@ def subnode_diagnostics(features: list[dict[str, object]]) -> list[dict[str, obj
 def alternative_diagnostics(
     features: list[dict[str, object]],
     selected_alternatives: dict[str, str],
-    config_auc: float,
+    config_score: float,
 ) -> list[dict[str, object]]:
     rows: dict[str, dict[str, object]] = {}
     for row in subnode_diagnostics(features):
@@ -781,7 +744,7 @@ def alternative_diagnostics(
             "node": node,
             "alternative": alternative,
             "selected": False,
-            "config_auc": float(config_auc),
+            "config_score": float(config_score),
         }
 
     for node, alternative in selected_alternatives.items():
@@ -795,22 +758,22 @@ def alternative_diagnostics(
                 "feature_count": 0,
                 "importance": 0.0,
                 "shap_importance": 0.0,
-                "max_feature_auc": 0.0,
+                "max_target_alignment": 0.0,
                 "mean_abs_shap": 0.0,
                 "mean_abs_residual_corr": 0.0,
                 "mean_redundancy": 0.0,
                 "mean_weight_stability": 0.0,
-                "config_auc": float(config_auc),
+                "config_score": float(config_score),
             },
         )
         rows[name]["selected"] = True
-        rows[name]["config_auc"] = float(config_auc)
+        rows[name]["config_score"] = float(config_score)
 
     return sorted(
         rows.values(),
         key=lambda row: (
             -float(row.get("importance", 0.0)),
-            -float(row.get("max_feature_auc", 0.0)),
+            -float(row.get("max_target_alignment", 0.0)),
             str(row.get("name", "")),
         ),
     )

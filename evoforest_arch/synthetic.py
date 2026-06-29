@@ -15,6 +15,15 @@ class TimeSeriesDataset:
         return {"series": self.values, "boundary": self.boundary}
 
 
+@dataclass(frozen=True)
+class TabularDataset:
+    x: np.ndarray
+    y: np.ndarray
+
+    def inputs(self) -> dict[str, object]:
+        return {"x": self.x}
+
+
 def make_structural_break_data(
     n_series: int = 240,
     length: int = 160,
@@ -44,3 +53,18 @@ def make_structural_break_data(
                 series[boundary:] += 0.45 * np.sin(np.linspace(0.0, 7.0, length - boundary))
         values[idx] = series
     return TimeSeriesDataset(values=values, y=y, boundary=boundary)
+
+
+def make_tabular_data(
+    n_samples: int = 240,
+    n_features: int = 12,
+    seed: int = 0,
+) -> TabularDataset:
+    rng = np.random.default_rng(seed)
+    x = rng.normal(0.0, 1.0, size=(n_samples, n_features))
+    linear = 1.2 * x[:, 0] - 0.7 * x[:, min(1, n_features - 1)]
+    nonlinear = 0.5 * np.square(x[:, min(2, n_features - 1)]) - 0.4 * np.abs(x[:, min(3, n_features - 1)])
+    interaction = 0.35 * x[:, 0] * x[:, min(4, n_features - 1)]
+    y = linear + nonlinear + interaction + rng.normal(0.0, 0.2, size=n_samples)
+    y = (y - np.mean(y)) / max(float(np.std(y)), 1e-8)
+    return TabularDataset(x=x, y=y.astype(np.float64))

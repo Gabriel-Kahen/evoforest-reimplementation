@@ -1,9 +1,9 @@
-rationale: "Engineer selected segment_stats.segment_robust from 4 diagnostic hypotheses."
+rationale: "Engineer selected output.row_baseline_outputs from 4 diagnostic hypotheses."
 hypotheses:
-  - "expand_productive_bottleneck on segment_stats: segment_stats.basic carries high aggregate importance 1.0000. Expected: more competing implementations around a productive subpath. Risk: Conservative."
-  - "residual_feature_search on output: output.activated.identity_std_log_ratio has residual correlation 0.1273. Expected: a complementary output feature that explains remaining residual structure. Risk: Balanced."
-  - "robust_fitting_rule on ridge_g: The selected residual rule is identity, leaving robust fitting unexplored. Expected: better handling of heavy-tailed residuals. Risk: Conservative."
-  - "diversify_underexplored_node on trend_stats: trend_stats has fewer alternatives than neighboring search axes. Expected: broader configuration diversity. Risk: Balanced."
+  - "expand_productive_bottleneck on segment_stats: segment_stats.basic carries high aggregate importance 0.6778. Expected: more competing implementations around a productive subpath. Risk: Conservative. Self-Evaluation: Improvement 5/10, Creativity 5/10, Implementability 5/10, Risk 5/10."
+  - "residual_feature_search on output: output.event_detection_output_mutation_2.tail_jump_abs has residual correlation -0.2074. Expected: a complementary output feature that explains remaining residual structure. Risk: Balanced. Self-Evaluation: Improvement 5/10, Creativity 5/10, Implementability 5/10, Risk 5/10."
+  - "robust_fitting_rule on ridge_g: The selected residual rule is identity, leaving robust fitting unexplored. Expected: better handling of heavy-tailed residuals. Risk: Conservative. Self-Evaluation: Improvement 5/10, Creativity 5/10, Implementability 5/10, Risk 5/10."
+  - "diversify_underexplored_node on trend_stats: trend_stats has fewer alternatives than neighboring search axes. Expected: broader configuration diversity. Risk: Balanced. Self-Evaluation: Improvement 5/10, Creativity 5/10, Implementability 5/10, Risk 5/10."
 nodes:
   []
 remove:
@@ -11,4 +11,4 @@ remove:
 globals:
   []
 add:
-  - {"alternative_id": "robust_mutation_3", "description": "Add a quantile-based robust segment alternative.", "global_refs": [], "kind": "add_alternative", "parents": ["series"], "primitive": "segment_robust", "source": "", "target_node": "segment_stats"}
+  - {"alternative_id": "row_baseline_output_mutation_3", "description": "Add the deterministic row-level baseline feature block as graph outputs.", "global_refs": [], "kind": "add_alternative", "parents": ["series"], "primitive": "row_baseline_outputs", "source": "", "target_node": "output"}

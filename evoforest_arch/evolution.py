@@ -179,7 +179,7 @@ class EvolutionLoop:
                 result = outcome.result
                 if application is None or candidate_graph is None or result is None:
                     raise RuntimeError("Candidate evaluation returned an incomplete success outcome.")
-                accepted = result.auc >= best_result.auc
+                accepted = result.score >= best_result.score
                 salvaged: list[str] = []
                 if accepted:
                     current_graph = candidate_graph
@@ -206,8 +206,8 @@ class EvolutionLoop:
                     step=step,
                     mode="single",
                     accepted=accepted,
-                    score=float(result.auc),
-                    best_score=float(best_result.auc),
+                    score=float(result.score),
+                    best_score=float(best_result.score),
                     mutation=document.to_dict(),
                     config=result.config,
                     maintenance=application.maintenance.to_dict(),
@@ -247,7 +247,7 @@ class EvolutionLoop:
             self._write_memorandum(island_dir, result, state.history, state.errors)
             states.append(state)
 
-        global_best_state = max(states, key=lambda state: state.best_result.auc)
+        global_best_state = max(states, key=lambda state: state.best_result.score)
         global_best_graph = global_best_state.best_graph.clone()
         global_best_result = global_best_state.best_result
         self._write_checkpoint(output_dir, global_best_graph, global_best_result, step=0, island=global_best_state.island)
@@ -306,7 +306,7 @@ class EvolutionLoop:
                         best_result=state.best_result,
                         error=outcome.error or "Unknown candidate failure.",
                         island=state.island,
-                        global_best_score=float(global_best_result.auc),
+                        global_best_score=float(global_best_result.score),
                     )
                     events.write(json.dumps(event.to_dict()) + "\n")
                     self._record_event(state.history, state.errors, event)
@@ -319,7 +319,7 @@ class EvolutionLoop:
                 result = outcome.result
                 if application is None or candidate_graph is None or result is None:
                     raise RuntimeError("Candidate evaluation returned an incomplete success outcome.")
-                accepted = result.auc >= state.best_result.auc
+                accepted = result.score >= state.best_result.score
                 salvaged: list[str] = []
                 if accepted:
                     state.current_graph = candidate_graph
@@ -350,7 +350,7 @@ class EvolutionLoop:
                             step=global_step,
                             island=state.island,
                         )
-                new_global_best = state.best_result.auc > global_best_result.auc
+                new_global_best = state.best_result.score > global_best_result.score
                 if new_global_best:
                     global_best_graph = state.best_graph.clone()
                     global_best_result = state.best_result
@@ -392,9 +392,9 @@ class EvolutionLoop:
                     mode="sequential_island",
                     island=state.island,
                     accepted=accepted,
-                    score=float(result.auc),
-                    best_score=float(state.best_result.auc),
-                    global_best_score=float(global_best_result.auc),
+                    score=float(result.score),
+                    best_score=float(state.best_result.score),
+                    global_best_score=float(global_best_result.score),
                     mutation=document.to_dict(),
                     config=result.config,
                     maintenance=application.maintenance.to_dict(),
@@ -453,7 +453,7 @@ class EvolutionLoop:
         states = self._initialize_island_states(inputs, y, islands, output_dir)
         for state in states:
             self._write_task_context(output_dir / f"island_{state.island}", task_context)
-        global_best_state = max(states, key=lambda state: state.best_result.auc)
+        global_best_state = max(states, key=lambda state: state.best_result.score)
         global_best_graph = global_best_state.best_graph.clone()
         global_best_result = global_best_state.best_result
         self._write_checkpoint(output_dir, global_best_graph, global_best_result, step=0, island=global_best_state.island)
@@ -532,7 +532,7 @@ class EvolutionLoop:
                                 best_result=state.best_result,
                                 error=outcome.error or "Unknown candidate failure.",
                                 island=state.island,
-                                global_best_score=float(global_best_result.auc),
+                                global_best_score=float(global_best_result.score),
                                 round_index=round_index,
                             )
                             event_row = event.to_dict()
@@ -548,7 +548,7 @@ class EvolutionLoop:
                         result = outcome.result
                         if application is None or candidate_graph is None or result is None:
                             raise RuntimeError("Candidate evaluation returned an incomplete success outcome.")
-                        accepted = result.auc >= state.best_result.auc
+                        accepted = result.score >= state.best_result.score
                         salvaged: list[str] = []
                         if accepted:
                             state.current_graph = candidate_graph
@@ -579,7 +579,7 @@ class EvolutionLoop:
                                     step=event_step,
                                     island=state.island,
                                 )
-                        new_global_best = state.best_result.auc > global_best_result.auc
+                        new_global_best = state.best_result.score > global_best_result.score
                         if new_global_best:
                             global_best_graph = state.best_graph.clone()
                             global_best_result = state.best_result
@@ -624,9 +624,9 @@ class EvolutionLoop:
                             round_index=round_index,
                             island=state.island,
                             accepted=accepted,
-                            score=float(result.auc),
-                            best_score=float(state.best_result.auc),
-                            global_best_score=float(global_best_result.auc),
+                            score=float(result.score),
+                            best_score=float(state.best_result.score),
+                            global_best_score=float(global_best_result.score),
                             mutation=document.to_dict(),
                             config=result.config,
                             maintenance=application.maintenance.to_dict(),
@@ -785,9 +785,9 @@ class EvolutionLoop:
         source_island: int | None = None,
         global_best_version: int | None = None,
     ) -> tuple[Graph, EvaluationResult, dict[str, object] | None]:
-        weakest = min(states, key=lambda item: item.best_result.auc)
-        if weakest.best_result.auc < global_best_result.auc:
-            previous_score = float(weakest.best_result.auc)
+        weakest = min(states, key=lambda item: item.best_result.score)
+        if weakest.best_result.score < global_best_result.score:
+            previous_score = float(weakest.best_result.score)
             weakest.current_graph = global_best_graph.clone()
             weakest.best_graph = global_best_graph.clone()
             weakest.best_result = global_best_result
@@ -797,7 +797,7 @@ class EvolutionLoop:
                 "target_island": weakest.island,
                 "global_best_version": global_best_version,
                 "previous_best_score": previous_score,
-                "global_best_score": float(global_best_result.auc),
+                "global_best_score": float(global_best_result.score),
             }
         return global_best_graph, global_best_result, None
 
@@ -838,7 +838,7 @@ class EvolutionLoop:
             trial.nodes[spec.target_node].add_alternative(copy.deepcopy(candidate_alt))
             trial, _report = self.mutation_engine.maintenance.clean(trial)
             result = self.evaluator.evaluate(trial, inputs, y, update_graph=True)
-            if result.auc >= incumbent_best_result.auc:
+            if result.score >= incumbent_best_result.score:
                 incumbent = trial
                 incumbent_best_graph = trial.clone()
                 incumbent_best_result = result
@@ -900,7 +900,7 @@ class EvolutionLoop:
             "step": step,
             "mode": mode,
             "island": island,
-            "auc": float(result.auc),
+            "score": float(result.score),
             "config": result.config,
             "graph": graph.to_dict(),
             "result": result.to_dict(),
@@ -913,7 +913,7 @@ class EvolutionLoop:
             "step": step,
             "mode": mode,
             "island": island,
-            "auc": float(result.auc),
+            "score": float(result.score),
             "config": result.config,
             "path": filename,
         }
@@ -1004,7 +1004,7 @@ class EvolutionLoop:
         subnodes = feedback.get("top_subnodes", [])
         alternatives = feedback.get("top_alternatives", [])
         lines = [
-            f"- Best AUC: {result.auc:.6f}; config={result.config}.",
+            f"- Best score: {result.score:.6f}; config={result.config}.",
         ]
         if isinstance(search, dict):
             lines.append(
@@ -1017,7 +1017,7 @@ class EvolutionLoop:
                 "- Representation: "
                 f"effective_rank={float(scoring.get('effective_rank', 0.0)):.4f}, "
                 f"mean_max_corr={float(scoring.get('mean_max_corr', 0.0)):.4f}, "
-                f"global_ridge_auc={float(scoring.get('global_ridge_auc', 0.0)):.6f}."
+                f"global_ridge_score={float(scoring.get('global_ridge_score', 0.0)):.6f}."
             )
         if isinstance(cache, dict):
             lines.append(
@@ -1031,7 +1031,7 @@ class EvolutionLoop:
                 lines.append(
                     "- Dominant feature: "
                     f"{top.get('name', '')} imp={float(top.get('importance', 0.0)):.4f}, "
-                    f"ind_auc={float(top.get('individual_auc', 0.0)):.4f}, "
+                    f"target_align={float(top.get('target_alignment', 0.0)):.4f}, "
                     f"resid={float(top.get('residual_corr', 0.0)):.4f}."
                 )
         if isinstance(subnodes, list) and subnodes:
@@ -1141,7 +1141,7 @@ class EvolutionLoop:
             failed=True,
             error=error,
             score=None,
-            best_score=float(best_result.auc),
+            best_score=float(best_result.score),
             global_best_score=global_best_score,
             mutation=document.to_dict(),
             config=best_result.config,

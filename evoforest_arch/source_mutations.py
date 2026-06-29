@@ -27,7 +27,7 @@ class SourceMutationCheck:
 
 
 def structural_break_source_mutations() -> tuple[MutationSpec, ...]:
-    """Trusted source-backed structural-break feature templates.
+    """Source-backed structural-break feature templates.
 
     These templates approximate the paper's source-backed mutation surface while
     staying deterministic and reviewable. Real LLM mutations can use the same
@@ -41,8 +41,9 @@ def structural_break_source_mutations() -> tuple[MutationSpec, ...]:
             primitive="source",
             alternative_id="source_distribution_shift",
             parents=("series",),
-            source=SOURCE_DISTRIBUTION_SHIFT,
+            source=SOURCE_SIMPLE_DISTRIBUTION_SHIFT,
             description="Source-backed robust distribution-shift features across the known boundary.",
+            output_contract={"type": "feature_block", "n_columns": 4},
         ),
         MutationSpec(
             kind="add_alternative",
@@ -50,8 +51,9 @@ def structural_break_source_mutations() -> tuple[MutationSpec, ...]:
             primitive="source",
             alternative_id="source_autocorr_volatility_shift",
             parents=("series",),
-            source=SOURCE_AUTOCORR_VOLATILITY_SHIFT,
+            source=SOURCE_SIMPLE_VOLATILITY_SHIFT,
             description="Source-backed autocorrelation, volatility, and increment-regime change features.",
+            output_contract={"type": "feature_block", "n_columns": 3},
         ),
         MutationSpec(
             kind="add_alternative",
@@ -59,71 +61,9 @@ def structural_break_source_mutations() -> tuple[MutationSpec, ...]:
             primitive="source",
             alternative_id="source_multiscale_tail_shift",
             parents=("series",),
-            source=SOURCE_MULTISCALE_TAIL_SHIFT,
+            source=SOURCE_SIMPLE_TAIL_SHIFT,
             description="Source-backed multiscale tail/head structural-break features.",
-        ),
-        MutationSpec(
-            kind="add_alternative",
-            target_node="output",
-            primitive="source",
-            alternative_id="source_rank_shape_shift",
-            parents=("series",),
-            source=SOURCE_RANK_SHAPE_SHIFT,
-            description="Source-backed rank and ordinal-shape shift features.",
-        ),
-        MutationSpec(
-            kind="add_alternative",
-            target_node="output",
-            primitive="source",
-            alternative_id="source_spectral_entropy_shift",
-            parents=("series",),
-            source=SOURCE_SPECTRAL_ENTROPY_SHIFT,
-            description="Source-backed spectral entropy and frequency centroid shift features.",
-        ),
-        MutationSpec(
-            kind="add_alternative",
-            target_node="output",
-            primitive="source",
-            alternative_id="source_tail_extrema_shift",
-            parents=("series",),
-            source=SOURCE_TAIL_EXTREMA_SHIFT,
-            description="Source-backed tail extrema, range, and exceedance-rate shift features.",
-        ),
-        MutationSpec(
-            kind="add_alternative",
-            target_node="output",
-            primitive="source",
-            alternative_id="source_moment_shape_shift",
-            parents=("series",),
-            source=SOURCE_MOMENT_SHAPE_SHIFT,
-            description="Source-backed skewness, kurtosis, and centered-moment shift features.",
-        ),
-        MutationSpec(
-            kind="add_alternative",
-            target_node="output",
-            primitive="source",
-            alternative_id="source_multiresolution_cusum_shift",
-            parents=("series",),
-            source=SOURCE_MULTIRESOLUTION_CUSUM_SHIFT,
-            description="Source-backed multi-resolution CUSUM location and energy-shift features.",
-        ),
-        MutationSpec(
-            kind="add_alternative",
-            target_node="output",
-            primitive="source",
-            alternative_id="source_haar_scale_energy_shift",
-            parents=("series",),
-            source=SOURCE_HAAR_SCALE_ENERGY_SHIFT,
-            description="Source-backed Haar-style scale-energy shift features.",
-        ),
-        MutationSpec(
-            kind="add_alternative",
-            target_node="output",
-            primitive="source",
-            alternative_id="source_quantile_transport_shift",
-            parents=("series",),
-            source=SOURCE_QUANTILE_TRANSPORT_SHIFT,
-            description="Source-backed quantile transport and tail-balance shift features.",
+            output_contract={"type": "feature_block", "n_columns": 3},
         ),
     )
 
@@ -148,6 +88,37 @@ def validate_source_mutations(
         except Exception as exc:
             checks.append(SourceMutationCheck(spec.alternative_id, False, error=str(exc)))
     return checks
+
+
+SOURCE_SIMPLE_DISTRIBUTION_SHIFT = """lambda ctx, values: FeatureBlock(
+    np.column_stack([
+        np.mean(values["series"][:, int(ctx.read_input("boundary")):], axis=1) - np.mean(values["series"][:, :int(ctx.read_input("boundary"))], axis=1),
+        np.abs(np.mean(values["series"][:, int(ctx.read_input("boundary")):], axis=1) - np.mean(values["series"][:, :int(ctx.read_input("boundary"))], axis=1)),
+        np.log((np.std(values["series"][:, int(ctx.read_input("boundary")):], axis=1) + 1e-8) / (np.std(values["series"][:, :int(ctx.read_input("boundary"))], axis=1) + 1e-8)),
+        np.median(values["series"][:, int(ctx.read_input("boundary")):], axis=1) - np.median(values["series"][:, :int(ctx.read_input("boundary"))], axis=1)
+    ]),
+    ["src_mean_delta", "src_mean_delta_abs", "src_std_log_ratio", "src_median_delta"]
+)"""
+
+
+SOURCE_SIMPLE_VOLATILITY_SHIFT = """lambda ctx, values: FeatureBlock(
+    np.column_stack([
+        np.std(np.diff(values["series"][:, int(ctx.read_input("boundary")):], axis=1), axis=1) - np.std(np.diff(values["series"][:, :int(ctx.read_input("boundary"))], axis=1), axis=1),
+        np.mean(np.abs(np.diff(values["series"][:, int(ctx.read_input("boundary")):], axis=1)), axis=1) - np.mean(np.abs(np.diff(values["series"][:, :int(ctx.read_input("boundary"))], axis=1)), axis=1),
+        np.max(np.abs(values["series"][:, int(ctx.read_input("boundary")):]), axis=1) - np.max(np.abs(values["series"][:, :int(ctx.read_input("boundary"))]), axis=1)
+    ]),
+    ["src_diff_std_delta", "src_abs_diff_mean_delta", "src_abs_max_delta"]
+)"""
+
+
+SOURCE_SIMPLE_TAIL_SHIFT = """lambda ctx, values: FeatureBlock(
+    np.column_stack([
+        np.mean(values["series"][:, -max(2, values["series"].shape[1] // 8):], axis=1) - np.mean(values["series"][:, :max(2, values["series"].shape[1] // 8)], axis=1),
+        np.std(values["series"][:, -max(2, values["series"].shape[1] // 8):], axis=1) - np.std(values["series"][:, :max(2, values["series"].shape[1] // 8)], axis=1),
+        np.mean(np.abs(values["series"][:, -max(2, values["series"].shape[1] // 8):]), axis=1) - np.mean(np.abs(values["series"][:, :max(2, values["series"].shape[1] // 8)]), axis=1)
+    ]),
+    ["src_tail_head_mean_delta", "src_tail_head_std_delta", "src_tail_head_abs_delta"]
+)"""
 
 
 SOURCE_DISTRIBUTION_SHIFT = """lambda ctx, values: (

@@ -3,11 +3,9 @@
   "quick": false,
   "scenarios": [
     {
-      "auc": 0.9956597222222222,
       "cache_hits": 6,
       "cache_misses": 9,
       "evaluation": {
-        "auc": 0.9956597222222222,
         "cache": {
           "entries": 9,
           "hits": 6,
@@ -24,7 +22,7 @@
           "trend_stats": "linear"
         },
         "configuration_search_capped": true,
-        "global_ridge_auc": 0.9982638888888888,
+        "global_ridge_score": 0.8144186855994523,
         "n_configs_evaluated": 1,
         "n_configs_total": 48,
         "n_features": 21,
@@ -66,23 +64,23 @@
           "min": 1.0,
           "std": 0.0
         },
+        "score": 0.7487369256391089,
         "shap_reconstruction_error": 2.220446049250313e-16
       },
       "family": "configuration_cap",
+      "score": 0.7487369256391089,
       "seconds": [
-        0.011142458009999245,
-        0.011292375042103231,
-        0.011490708973724395
+        0.010232125059701502,
+        0.010182540980167687,
+        0.010065707960166037
       ],
-      "seconds_median": 0.011292375042103231,
+      "seconds_median": 0.010182540980167687,
       "setting": "max_configurations=1"
     },
     {
-      "auc": 0.9956597222222222,
       "cache_hits": 59,
       "cache_misses": 23,
       "evaluation": {
-        "auc": 0.9956597222222222,
         "cache": {
           "entries": 23,
           "hits": 59,
@@ -99,7 +97,7 @@
           "trend_stats": "linear"
         },
         "configuration_search_capped": true,
-        "global_ridge_auc": 0.9982638888888888,
+        "global_ridge_score": 0.8144186855994523,
         "n_configs_evaluated": 8,
         "n_configs_total": 48,
         "n_features": 21,
@@ -141,287 +139,23 @@
           "min": 1.0,
           "std": 0.0
         },
+        "score": 0.7487369256391089,
         "shap_reconstruction_error": 2.220446049250313e-16
       },
       "family": "configuration_cap",
+      "score": 0.7487369256391089,
       "seconds": [
-        0.1056713750003837,
-        0.11448625003686175,
-        0.12799725000513718
+        0.08289554202929139,
+        0.08384774997830391,
+        0.08651979104615748
       ],
-      "seconds_median": 0.11448625003686175,
+      "seconds_median": 0.08384774997830391,
       "setting": "max_configurations=8"
     },
     {
-      "auc": 0.9991319444444444,
       "cache_hits": 111,
       "cache_misses": 29,
       "evaluation": {
-        "auc": 0.9991319444444444,
-        "cache": {
-          "entries": 29,
-          "hits": 111,
-          "key": "ancestor_conditioned_subpath",
-          "misses": 29,
-          "shared_across_configurations": true
-        },
-        "config": {
-          "activation": "identity",
-          "ridge_g": "huber",
-          "ridge_w": "boundary_energy",
-          "segment_stats": "basic",
-          "shape_stats": "spectral",
-          "trend_stats": "linear"
-        },
-        "configuration_search_capped": true,
-        "global_ridge_auc": 0.9991319444444444,
-        "n_configs_evaluated": 16,
-        "n_configs_total": 48,
-        "n_features": 21,
-        "ridge_g": {
-          "alternative": "huber",
-          "description": "Huber-style residual downweighting.",
-          "irls": [
-            {
-              "final_alpha": 10.0,
-              "fold": 0,
-              "iterations": [
-                {
-                  "alpha": 10.0,
-                  "residual_std": 0.2063209131364906,
-                  "step": 1,
-                  "weight_max": 1.0,
-                  "weight_mean": 1.0,
-                  "weight_min": 1.0,
-                  "weight_std": 0.0
-                },
-                {
-                  "alpha": 10.0,
-                  "residual_std": 0.2063209131364906,
-                  "step": 2,
-                  "weight_max": 1.0,
-                  "weight_mean": 1.0,
-                  "weight_min": 1.0,
-                  "weight_std": 0.0
-                }
-              ],
-              "steps_used": 2
-            },
-            {
-              "final_alpha": 31.622776601683793,
-              "fold": 1,
-              "iterations": [
-                {
-                  "alpha": 31.622776601683793,
-                  "residual_std": 0.21690792587203603,
-                  "step": 1,
-                  "weight_max": 1.0,
-                  "weight_mean": 1.0,
-                  "weight_min": 1.0,
-                  "weight_std": 0.0
-                },
-                {
-                  "alpha": 31.622776601683793,
-                  "residual_std": 0.21690792587203597,
-                  "step": 2,
-                  "weight_max": 1.0,
-                  "weight_mean": 1.0,
-                  "weight_min": 1.0,
-                  "weight_std": 0.0
-                }
-              ],
-              "steps_used": 2
-            },
-            {
-              "final_alpha": 10.0,
-              "fold": 2,
-              "iterations": [
-                {
-                  "alpha": 10.0,
-                  "residual_std": 0.21101797198126995,
-                  "step": 1,
-                  "weight_max": 1.0,
-                  "weight_mean": 1.0,
-                  "weight_min": 1.0,
-                  "weight_std": 0.0
-                },
-                {
-                  "alpha": 10.0,
-                  "residual_std": 0.21101797198126995,
-                  "step": 2,
-                  "weight_max": 1.0,
-                  "weight_mean": 1.0,
-                  "weight_min": 1.0,
-                  "weight_std": 0.0
-                }
-              ],
-              "steps_used": 2
-            }
-          ],
-          "irls_steps_requested": 2,
-          "irls_steps_used_per_fold": [
-            2,
-            2,
-            2
-          ],
-          "rule": "huber"
-        },
-        "ridge_w": {
-          "alternative": "boundary_energy",
-          "max": 1.3949098049815642,
-          "mean": 0.9999999999999999,
-          "min": 0.4753577389716895,
-          "std": 0.28078917118152424
-        },
-        "shap_reconstruction_error": 4.440892098500626e-16
-      },
-      "family": "configuration_cap",
-      "seconds": [
-        0.2709752920200117,
-        0.249324708012864,
-        0.2906593329971656
-      ],
-      "seconds_median": 0.2709752920200117,
-      "setting": "max_configurations=16"
-    },
-    {
-      "auc": 0.9991319444444444,
-      "cache_hits": 200,
-      "cache_misses": 32,
-      "evaluation": {
-        "auc": 0.9991319444444444,
-        "cache": {
-          "entries": 32,
-          "hits": 200,
-          "key": "ancestor_conditioned_subpath",
-          "misses": 32,
-          "shared_across_configurations": true
-        },
-        "config": {
-          "activation": "identity",
-          "ridge_g": "huber",
-          "ridge_w": "boundary_energy",
-          "segment_stats": "basic",
-          "shape_stats": "spectral",
-          "trend_stats": "linear"
-        },
-        "configuration_search_capped": true,
-        "global_ridge_auc": 0.9991319444444444,
-        "n_configs_evaluated": 32,
-        "n_configs_total": 48,
-        "n_features": 21,
-        "ridge_g": {
-          "alternative": "huber",
-          "description": "Huber-style residual downweighting.",
-          "irls": [
-            {
-              "final_alpha": 10.0,
-              "fold": 0,
-              "iterations": [
-                {
-                  "alpha": 10.0,
-                  "residual_std": 0.2063209131364906,
-                  "step": 1,
-                  "weight_max": 1.0,
-                  "weight_mean": 1.0,
-                  "weight_min": 1.0,
-                  "weight_std": 0.0
-                },
-                {
-                  "alpha": 10.0,
-                  "residual_std": 0.2063209131364906,
-                  "step": 2,
-                  "weight_max": 1.0,
-                  "weight_mean": 1.0,
-                  "weight_min": 1.0,
-                  "weight_std": 0.0
-                }
-              ],
-              "steps_used": 2
-            },
-            {
-              "final_alpha": 31.622776601683793,
-              "fold": 1,
-              "iterations": [
-                {
-                  "alpha": 31.622776601683793,
-                  "residual_std": 0.21690792587203603,
-                  "step": 1,
-                  "weight_max": 1.0,
-                  "weight_mean": 1.0,
-                  "weight_min": 1.0,
-                  "weight_std": 0.0
-                },
-                {
-                  "alpha": 31.622776601683793,
-                  "residual_std": 0.21690792587203597,
-                  "step": 2,
-                  "weight_max": 1.0,
-                  "weight_mean": 1.0,
-                  "weight_min": 1.0,
-                  "weight_std": 0.0
-                }
-              ],
-              "steps_used": 2
-            },
-            {
-              "final_alpha": 10.0,
-              "fold": 2,
-              "iterations": [
-                {
-                  "alpha": 10.0,
-                  "residual_std": 0.21101797198126995,
-                  "step": 1,
-                  "weight_max": 1.0,
-                  "weight_mean": 1.0,
-                  "weight_min": 1.0,
-                  "weight_std": 0.0
-                },
-                {
-                  "alpha": 10.0,
-                  "residual_std": 0.21101797198126995,
-                  "step": 2,
-                  "weight_max": 1.0,
-                  "weight_mean": 1.0,
-                  "weight_min": 1.0,
-                  "weight_std": 0.0
-                }
-              ],
-              "steps_used": 2
-            }
-          ],
-          "irls_steps_requested": 2,
-          "irls_steps_used_per_fold": [
-            2,
-            2,
-            2
-          ],
-          "rule": "huber"
-        },
-        "ridge_w": {
-          "alternative": "boundary_energy",
-          "max": 1.3949098049815642,
-          "mean": 0.9999999999999999,
-          "min": 0.4753577389716895,
-          "std": 0.28078917118152424
-        },
-        "shap_reconstruction_error": 4.440892098500626e-16
-      },
-      "family": "configuration_cap",
-      "seconds": [
-        0.7605353340040892,
-        0.6565776250208728,
-        0.5752255000406876
-      ],
-      "seconds_median": 0.6565776250208728,
-      "setting": "max_configurations=32"
-    },
-    {
-      "auc": 0.9618055555555556,
-      "cache_hits": 111,
-      "cache_misses": 29,
-      "evaluation": {
-        "auc": 0.9618055555555556,
         "cache": {
           "entries": 29,
           "hits": 111,
@@ -431,72 +165,261 @@
         },
         "config": {
           "activation": "clipped_linear",
-          "ridge_g": "identity",
-          "ridge_w": "boundary_energy",
+          "ridge_g": "huber",
+          "ridge_w": "uniform",
           "segment_stats": "basic",
           "shape_stats": "cusum",
           "trend_stats": "linear"
         },
         "configuration_search_capped": true,
-        "global_ridge_auc": 0.9930555555555556,
+        "global_ridge_score": 0.833496362183197,
         "n_configs_evaluated": 16,
         "n_configs_total": 48,
         "n_features": 21,
         "ridge_g": {
-          "alternative": "identity",
-          "description": "No residual reweighting.",
+          "alternative": "huber",
+          "description": "Huber-style residual downweighting.",
           "irls": [
             {
-              "final_alpha": 10.0,
+              "final_alpha": 0.01,
               "fold": 0,
-              "iterations": [],
-              "steps_used": 0
+              "iterations": [
+                {
+                  "alpha": 0.01,
+                  "residual_std": 0.1422624609631766,
+                  "step": 1,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                },
+                {
+                  "alpha": 0.01,
+                  "residual_std": 0.1422624609631766,
+                  "step": 2,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                }
+              ],
+              "steps_used": 2
             },
             {
-              "final_alpha": 3.1622776601683795,
+              "final_alpha": 10.0,
               "fold": 1,
-              "iterations": [],
-              "steps_used": 0
+              "iterations": [
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.2164664604312554,
+                  "step": 1,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                },
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.2164664604312554,
+                  "step": 2,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                }
+              ],
+              "steps_used": 2
             },
             {
-              "final_alpha": 3.1622776601683795,
+              "final_alpha": 10.0,
               "fold": 2,
-              "iterations": [],
-              "steps_used": 0
+              "iterations": [
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.2215265674833159,
+                  "step": 1,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                },
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.2215265674833159,
+                  "step": 2,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                }
+              ],
+              "steps_used": 2
             }
           ],
           "irls_steps_requested": 2,
           "irls_steps_used_per_fold": [
-            0,
-            0,
-            0
+            2,
+            2,
+            2
           ],
-          "rule": "identity"
+          "rule": "huber"
         },
         "ridge_w": {
-          "alternative": "boundary_energy",
-          "max": 1.3711518667915221,
+          "alternative": "uniform",
+          "max": 1.0,
           "mean": 1.0,
-          "min": 0.46991722016809895,
-          "std": 0.2951850376377577
+          "min": 1.0,
+          "std": 0.0
         },
-        "shap_reconstruction_error": 4.440892098500626e-16
+        "score": 0.7531004158237771,
+        "shap_reconstruction_error": 2.220446049250313e-16
       },
-      "family": "dataset_scale",
+      "family": "configuration_cap",
+      "score": 0.7531004158237771,
       "seconds": [
-        0.29681754199555144,
-        0.29072099999757484,
-        0.2706093750311993
+        0.17067891592159867,
+        0.17032920895144343,
+        0.16975195799022913
       ],
-      "seconds_median": 0.29072099999757484,
-      "setting": "n_series=48, length=64"
+      "seconds_median": 0.17032920895144343,
+      "setting": "max_configurations=16"
     },
     {
-      "auc": 0.9991319444444444,
+      "cache_hits": 200,
+      "cache_misses": 32,
+      "evaluation": {
+        "cache": {
+          "entries": 32,
+          "hits": 200,
+          "key": "ancestor_conditioned_subpath",
+          "misses": 32,
+          "shared_across_configurations": true
+        },
+        "config": {
+          "activation": "clipped_linear",
+          "ridge_g": "huber",
+          "ridge_w": "uniform",
+          "segment_stats": "basic",
+          "shape_stats": "cusum",
+          "trend_stats": "linear"
+        },
+        "configuration_search_capped": true,
+        "global_ridge_score": 0.833496362183197,
+        "n_configs_evaluated": 32,
+        "n_configs_total": 48,
+        "n_features": 21,
+        "ridge_g": {
+          "alternative": "huber",
+          "description": "Huber-style residual downweighting.",
+          "irls": [
+            {
+              "final_alpha": 0.01,
+              "fold": 0,
+              "iterations": [
+                {
+                  "alpha": 0.01,
+                  "residual_std": 0.1422624609631766,
+                  "step": 1,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                },
+                {
+                  "alpha": 0.01,
+                  "residual_std": 0.1422624609631766,
+                  "step": 2,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                }
+              ],
+              "steps_used": 2
+            },
+            {
+              "final_alpha": 10.0,
+              "fold": 1,
+              "iterations": [
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.2164664604312554,
+                  "step": 1,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                },
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.2164664604312554,
+                  "step": 2,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                }
+              ],
+              "steps_used": 2
+            },
+            {
+              "final_alpha": 10.0,
+              "fold": 2,
+              "iterations": [
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.2215265674833159,
+                  "step": 1,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                },
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.2215265674833159,
+                  "step": 2,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                }
+              ],
+              "steps_used": 2
+            }
+          ],
+          "irls_steps_requested": 2,
+          "irls_steps_used_per_fold": [
+            2,
+            2,
+            2
+          ],
+          "rule": "huber"
+        },
+        "ridge_w": {
+          "alternative": "uniform",
+          "max": 1.0,
+          "mean": 1.0,
+          "min": 1.0,
+          "std": 0.0
+        },
+        "score": 0.7531004158237771,
+        "shap_reconstruction_error": 2.220446049250313e-16
+      },
+      "family": "configuration_cap",
+      "score": 0.7531004158237771,
+      "seconds": [
+        0.33900854201056063,
+        0.33620762499049306,
+        0.33560912497341633
+      ],
+      "seconds_median": 0.33620762499049306,
+      "setting": "max_configurations=32"
+    },
+    {
       "cache_hits": 111,
       "cache_misses": 29,
       "evaluation": {
-        "auc": 0.9991319444444444,
         "cache": {
           "entries": 29,
           "hits": 111,
@@ -513,7 +436,7 @@
           "trend_stats": "linear"
         },
         "configuration_search_capped": true,
-        "global_ridge_auc": 0.9991319444444444,
+        "global_ridge_score": 0.7205361976507916,
         "n_configs_evaluated": 16,
         "n_configs_total": 48,
         "n_features": 21,
@@ -522,12 +445,12 @@
           "description": "Huber-style residual downweighting.",
           "irls": [
             {
-              "final_alpha": 10.0,
+              "final_alpha": 31.622776601683793,
               "fold": 0,
               "iterations": [
                 {
-                  "alpha": 10.0,
-                  "residual_std": 0.2063209131364906,
+                  "alpha": 31.622776601683793,
+                  "residual_std": 0.22139035685627584,
                   "step": 1,
                   "weight_max": 1.0,
                   "weight_mean": 1.0,
@@ -535,8 +458,33 @@
                   "weight_std": 0.0
                 },
                 {
-                  "alpha": 10.0,
-                  "residual_std": 0.2063209131364906,
+                  "alpha": 31.622776601683793,
+                  "residual_std": 0.22139035685627595,
+                  "step": 2,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                }
+              ],
+              "steps_used": 2
+            },
+            {
+              "final_alpha": 0.0001,
+              "fold": 1,
+              "iterations": [
+                {
+                  "alpha": 0.0001,
+                  "residual_std": 0.25800597763967387,
+                  "step": 1,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                },
+                {
+                  "alpha": 0.0001,
+                  "residual_std": 0.25800597763967387,
                   "step": 2,
                   "weight_max": 1.0,
                   "weight_mean": 1.0,
@@ -548,36 +496,11 @@
             },
             {
               "final_alpha": 31.622776601683793,
-              "fold": 1,
-              "iterations": [
-                {
-                  "alpha": 31.622776601683793,
-                  "residual_std": 0.21690792587203603,
-                  "step": 1,
-                  "weight_max": 1.0,
-                  "weight_mean": 1.0,
-                  "weight_min": 1.0,
-                  "weight_std": 0.0
-                },
-                {
-                  "alpha": 31.622776601683793,
-                  "residual_std": 0.21690792587203597,
-                  "step": 2,
-                  "weight_max": 1.0,
-                  "weight_mean": 1.0,
-                  "weight_min": 1.0,
-                  "weight_std": 0.0
-                }
-              ],
-              "steps_used": 2
-            },
-            {
-              "final_alpha": 10.0,
               "fold": 2,
               "iterations": [
                 {
-                  "alpha": 10.0,
-                  "residual_std": 0.21101797198126995,
+                  "alpha": 31.622776601683793,
+                  "residual_std": 0.29131946797753283,
                   "step": 1,
                   "weight_max": 1.0,
                   "weight_mean": 1.0,
@@ -585,8 +508,8 @@
                   "weight_std": 0.0
                 },
                 {
-                  "alpha": 10.0,
-                  "residual_std": 0.21101797198126995,
+                  "alpha": 31.622776601683793,
+                  "residual_std": 0.29131946797753283,
                   "step": 2,
                   "weight_max": 1.0,
                   "weight_mean": 1.0,
@@ -607,28 +530,160 @@
         },
         "ridge_w": {
           "alternative": "boundary_energy",
-          "max": 1.3949098049815642,
-          "mean": 0.9999999999999999,
-          "min": 0.4753577389716895,
-          "std": 0.28078917118152424
+          "max": 1.3711518667915221,
+          "mean": 1.0,
+          "min": 0.46991722016809895,
+          "std": 0.2951850376377577
         },
-        "shap_reconstruction_error": 4.440892098500626e-16
+        "score": 0.504472031815494,
+        "shap_reconstruction_error": 2.220446049250313e-16
       },
       "family": "dataset_scale",
+      "score": 0.504472031815494,
       "seconds": [
-        0.4272732089739293,
-        0.4040067090536468,
-        0.3633259999915026
+        0.14995320804882795,
+        0.1489882089663297,
+        0.14866004197392613
       ],
-      "seconds_median": 0.4040067090536468,
-      "setting": "n_series=96, length=96"
+      "seconds_median": 0.1489882089663297,
+      "setting": "n_series=48, length=64"
     },
     {
-      "auc": 0.9992283950617284,
       "cache_hits": 111,
       "cache_misses": 29,
       "evaluation": {
-        "auc": 0.9992283950617284,
+        "cache": {
+          "entries": 29,
+          "hits": 111,
+          "key": "ancestor_conditioned_subpath",
+          "misses": 29,
+          "shared_across_configurations": true
+        },
+        "config": {
+          "activation": "clipped_linear",
+          "ridge_g": "huber",
+          "ridge_w": "uniform",
+          "segment_stats": "basic",
+          "shape_stats": "cusum",
+          "trend_stats": "linear"
+        },
+        "configuration_search_capped": true,
+        "global_ridge_score": 0.833496362183197,
+        "n_configs_evaluated": 16,
+        "n_configs_total": 48,
+        "n_features": 21,
+        "ridge_g": {
+          "alternative": "huber",
+          "description": "Huber-style residual downweighting.",
+          "irls": [
+            {
+              "final_alpha": 0.01,
+              "fold": 0,
+              "iterations": [
+                {
+                  "alpha": 0.01,
+                  "residual_std": 0.1422624609631766,
+                  "step": 1,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                },
+                {
+                  "alpha": 0.01,
+                  "residual_std": 0.1422624609631766,
+                  "step": 2,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                }
+              ],
+              "steps_used": 2
+            },
+            {
+              "final_alpha": 10.0,
+              "fold": 1,
+              "iterations": [
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.2164664604312554,
+                  "step": 1,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                },
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.2164664604312554,
+                  "step": 2,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                }
+              ],
+              "steps_used": 2
+            },
+            {
+              "final_alpha": 10.0,
+              "fold": 2,
+              "iterations": [
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.2215265674833159,
+                  "step": 1,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                },
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.2215265674833159,
+                  "step": 2,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                }
+              ],
+              "steps_used": 2
+            }
+          ],
+          "irls_steps_requested": 2,
+          "irls_steps_used_per_fold": [
+            2,
+            2,
+            2
+          ],
+          "rule": "huber"
+        },
+        "ridge_w": {
+          "alternative": "uniform",
+          "max": 1.0,
+          "mean": 1.0,
+          "min": 1.0,
+          "std": 0.0
+        },
+        "score": 0.7531004158237771,
+        "shap_reconstruction_error": 2.220446049250313e-16
+      },
+      "family": "dataset_scale",
+      "score": 0.7531004158237771,
+      "seconds": [
+        0.16900108300615102,
+        0.1837790000718087,
+        0.1714327500667423
+      ],
+      "seconds_median": 0.1714327500667423,
+      "setting": "n_series=96, length=96"
+    },
+    {
+      "cache_hits": 111,
+      "cache_misses": 29,
+      "evaluation": {
         "cache": {
           "entries": 29,
           "hits": 111,
@@ -645,7 +700,7 @@
           "trend_stats": "linear"
         },
         "configuration_search_capped": true,
-        "global_ridge_auc": 1.0,
+        "global_ridge_score": 0.8765353232337127,
         "n_configs_evaluated": 16,
         "n_configs_total": 48,
         "n_features": 21,
@@ -654,19 +709,19 @@
           "description": "No residual reweighting.",
           "irls": [
             {
-              "final_alpha": 1.0,
+              "final_alpha": 3.1622776601683795,
               "fold": 0,
               "iterations": [],
               "steps_used": 0
             },
             {
-              "final_alpha": 10.0,
+              "final_alpha": 0.31622776601683794,
               "fold": 1,
               "iterations": [],
               "steps_used": 0
             },
             {
-              "final_alpha": 1.0,
+              "final_alpha": 0.31622776601683794,
               "fold": 2,
               "iterations": [],
               "steps_used": 0
@@ -687,23 +742,23 @@
           "min": 1.0,
           "std": 0.0
         },
-        "shap_reconstruction_error": 4.440892098500626e-16
+        "score": 0.8299648896421941,
+        "shap_reconstruction_error": 2.220446049250313e-16
       },
       "family": "dataset_scale",
+      "score": 0.8299648896421941,
       "seconds": [
-        0.416043457982596,
-        0.3276914579910226,
-        0.32899104204261675
+        0.1834859170485288,
+        0.18171000003349036,
+        0.1845727920299396
       ],
-      "seconds_median": 0.32899104204261675,
+      "seconds_median": 0.1834859170485288,
       "setting": "n_series=144, length=128"
     },
     {
-      "auc": 0.9991319444444444,
       "cache_hits": 111,
       "cache_misses": 29,
       "evaluation": {
-        "auc": 0.9991319444444444,
         "cache": {
           "entries": 29,
           "hits": 111,
@@ -712,15 +767,15 @@
           "shared_across_configurations": true
         },
         "config": {
-          "activation": "identity",
+          "activation": "clipped_linear",
           "ridge_g": "huber",
-          "ridge_w": "boundary_energy",
+          "ridge_w": "uniform",
           "segment_stats": "basic",
-          "shape_stats": "spectral",
+          "shape_stats": "cusum",
           "trend_stats": "linear"
         },
         "configuration_search_capped": true,
-        "global_ridge_auc": 0.9991319444444444,
+        "global_ridge_score": 0.833496362183197,
         "n_configs_evaluated": 16,
         "n_configs_total": 48,
         "n_features": 21,
@@ -729,12 +784,37 @@
           "description": "Huber-style residual downweighting.",
           "irls": [
             {
-              "final_alpha": 10.0,
+              "final_alpha": 0.01,
               "fold": 0,
               "iterations": [
                 {
+                  "alpha": 0.01,
+                  "residual_std": 0.1422624609631766,
+                  "step": 1,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                },
+                {
+                  "alpha": 0.01,
+                  "residual_std": 0.1422624609631766,
+                  "step": 2,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                }
+              ],
+              "steps_used": 2
+            },
+            {
+              "final_alpha": 10.0,
+              "fold": 1,
+              "iterations": [
+                {
                   "alpha": 10.0,
-                  "residual_std": 0.2063209131364906,
+                  "residual_std": 0.2164664604312554,
                   "step": 1,
                   "weight_max": 1.0,
                   "weight_mean": 1.0,
@@ -743,7 +823,139 @@
                 },
                 {
                   "alpha": 10.0,
-                  "residual_std": 0.2063209131364906,
+                  "residual_std": 0.2164664604312554,
+                  "step": 2,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                }
+              ],
+              "steps_used": 2
+            },
+            {
+              "final_alpha": 10.0,
+              "fold": 2,
+              "iterations": [
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.2215265674833159,
+                  "step": 1,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                },
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.2215265674833159,
+                  "step": 2,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                }
+              ],
+              "steps_used": 2
+            }
+          ],
+          "irls_steps_requested": 2,
+          "irls_steps_used_per_fold": [
+            2,
+            2,
+            2
+          ],
+          "rule": "huber"
+        },
+        "ridge_w": {
+          "alternative": "uniform",
+          "max": 1.0,
+          "mean": 1.0,
+          "min": 1.0,
+          "std": 0.0
+        },
+        "score": 0.7531004158237771,
+        "shap_reconstruction_error": 2.220446049250313e-16
+      },
+      "family": "output_feature_growth",
+      "score": 0.7531004158237771,
+      "seconds": [
+        0.1700197079917416,
+        0.16914258303586394,
+        0.17028670897707343
+      ],
+      "seconds_median": 0.1700197079917416,
+      "setting": "extra_output_alternatives=0"
+    },
+    {
+      "cache_hits": 207,
+      "cache_misses": 45,
+      "evaluation": {
+        "cache": {
+          "entries": 45,
+          "hits": 207,
+          "key": "ancestor_conditioned_subpath",
+          "misses": 45,
+          "shared_across_configurations": true
+        },
+        "config": {
+          "activation": "clipped_linear",
+          "ridge_g": "huber",
+          "ridge_w": "uniform",
+          "segment_stats": "basic",
+          "shape_stats": "cusum",
+          "trend_stats": "linear"
+        },
+        "configuration_search_capped": true,
+        "global_ridge_score": 0.8330750302103482,
+        "n_configs_evaluated": 16,
+        "n_configs_total": 48,
+        "n_features": 25,
+        "ridge_g": {
+          "alternative": "huber",
+          "description": "Huber-style residual downweighting.",
+          "irls": [
+            {
+              "final_alpha": 0.01,
+              "fold": 0,
+              "iterations": [
+                {
+                  "alpha": 0.01,
+                  "residual_std": 0.14226246054968536,
+                  "step": 1,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                },
+                {
+                  "alpha": 0.01,
+                  "residual_std": 0.14226246054968536,
+                  "step": 2,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                }
+              ],
+              "steps_used": 2
+            },
+            {
+              "final_alpha": 10.0,
+              "fold": 1,
+              "iterations": [
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.2162970731265365,
+                  "step": 1,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                },
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.2162970731265365,
                   "step": 2,
                   "weight_max": 1.0,
                   "weight_mean": 1.0,
@@ -755,36 +967,11 @@
             },
             {
               "final_alpha": 31.622776601683793,
-              "fold": 1,
-              "iterations": [
-                {
-                  "alpha": 31.622776601683793,
-                  "residual_std": 0.21690792587203603,
-                  "step": 1,
-                  "weight_max": 1.0,
-                  "weight_mean": 1.0,
-                  "weight_min": 1.0,
-                  "weight_std": 0.0
-                },
-                {
-                  "alpha": 31.622776601683793,
-                  "residual_std": 0.21690792587203597,
-                  "step": 2,
-                  "weight_max": 1.0,
-                  "weight_mean": 1.0,
-                  "weight_min": 1.0,
-                  "weight_std": 0.0
-                }
-              ],
-              "steps_used": 2
-            },
-            {
-              "final_alpha": 10.0,
               "fold": 2,
               "iterations": [
                 {
-                  "alpha": 10.0,
-                  "residual_std": 0.21101797198126995,
+                  "alpha": 31.622776601683793,
+                  "residual_std": 0.23115186778429403,
                   "step": 1,
                   "weight_max": 1.0,
                   "weight_mean": 1.0,
@@ -792,8 +979,8 @@
                   "weight_std": 0.0
                 },
                 {
-                  "alpha": 10.0,
-                  "residual_std": 0.21101797198126995,
+                  "alpha": 31.622776601683793,
+                  "residual_std": 0.23115186778429403,
                   "step": 2,
                   "weight_max": 1.0,
                   "weight_mean": 1.0,
@@ -813,161 +1000,29 @@
           "rule": "huber"
         },
         "ridge_w": {
-          "alternative": "boundary_energy",
-          "max": 1.3949098049815642,
-          "mean": 0.9999999999999999,
-          "min": 0.4753577389716895,
-          "std": 0.28078917118152424
+          "alternative": "uniform",
+          "max": 1.0,
+          "mean": 1.0,
+          "min": 1.0,
+          "std": 0.0
         },
+        "score": 0.7462849194009854,
         "shap_reconstruction_error": 4.440892098500626e-16
       },
       "family": "output_feature_growth",
+      "score": 0.7462849194009854,
       "seconds": [
-        0.23441216704668477,
-        0.23903395800152794,
-        0.24172766698757187
+        0.19064683292526752,
+        0.19060354202520102,
+        0.19231754099018872
       ],
-      "seconds_median": 0.23903395800152794,
-      "setting": "extra_output_alternatives=0"
-    },
-    {
-      "auc": 0.9991319444444444,
-      "cache_hits": 207,
-      "cache_misses": 45,
-      "evaluation": {
-        "auc": 0.9991319444444444,
-        "cache": {
-          "entries": 45,
-          "hits": 207,
-          "key": "ancestor_conditioned_subpath",
-          "misses": 45,
-          "shared_across_configurations": true
-        },
-        "config": {
-          "activation": "identity",
-          "ridge_g": "huber",
-          "ridge_w": "boundary_energy",
-          "segment_stats": "basic",
-          "shape_stats": "spectral",
-          "trend_stats": "linear"
-        },
-        "configuration_search_capped": true,
-        "global_ridge_auc": 0.9991319444444444,
-        "n_configs_evaluated": 16,
-        "n_configs_total": 48,
-        "n_features": 25,
-        "ridge_g": {
-          "alternative": "huber",
-          "description": "Huber-style residual downweighting.",
-          "irls": [
-            {
-              "final_alpha": 10.0,
-              "fold": 0,
-              "iterations": [
-                {
-                  "alpha": 10.0,
-                  "residual_std": 0.2063657535279264,
-                  "step": 1,
-                  "weight_max": 1.0,
-                  "weight_mean": 1.0,
-                  "weight_min": 1.0,
-                  "weight_std": 0.0
-                },
-                {
-                  "alpha": 10.0,
-                  "residual_std": 0.2063657535279264,
-                  "step": 2,
-                  "weight_max": 1.0,
-                  "weight_mean": 1.0,
-                  "weight_min": 1.0,
-                  "weight_std": 0.0
-                }
-              ],
-              "steps_used": 2
-            },
-            {
-              "final_alpha": 10.0,
-              "fold": 1,
-              "iterations": [
-                {
-                  "alpha": 10.0,
-                  "residual_std": 0.20614249078872643,
-                  "step": 1,
-                  "weight_max": 1.0,
-                  "weight_mean": 1.0,
-                  "weight_min": 1.0,
-                  "weight_std": 0.0
-                },
-                {
-                  "alpha": 10.0,
-                  "residual_std": 0.2061424907887264,
-                  "step": 2,
-                  "weight_max": 1.0,
-                  "weight_mean": 1.0,
-                  "weight_min": 1.0,
-                  "weight_std": 0.0
-                }
-              ],
-              "steps_used": 2
-            },
-            {
-              "final_alpha": 10.0,
-              "fold": 2,
-              "iterations": [
-                {
-                  "alpha": 10.0,
-                  "residual_std": 0.21104741972894311,
-                  "step": 1,
-                  "weight_max": 1.0,
-                  "weight_mean": 1.0,
-                  "weight_min": 1.0,
-                  "weight_std": 0.0
-                },
-                {
-                  "alpha": 10.0,
-                  "residual_std": 0.21104741972894317,
-                  "step": 2,
-                  "weight_max": 1.0,
-                  "weight_mean": 1.0,
-                  "weight_min": 1.0,
-                  "weight_std": 0.0
-                }
-              ],
-              "steps_used": 2
-            }
-          ],
-          "irls_steps_requested": 2,
-          "irls_steps_used_per_fold": [
-            2,
-            2,
-            2
-          ],
-          "rule": "huber"
-        },
-        "ridge_w": {
-          "alternative": "boundary_energy",
-          "max": 1.3949098049815642,
-          "mean": 0.9999999999999999,
-          "min": 0.4753577389716895,
-          "std": 0.28078917118152424
-        },
-        "shap_reconstruction_error": 4.440892098500626e-16
-      },
-      "family": "output_feature_growth",
-      "seconds": [
-        0.2741055419901386,
-        0.2519032920245081,
-        0.24054245895240456
-      ],
-      "seconds_median": 0.2519032920245081,
+      "seconds_median": 0.19064683292526752,
       "setting": "extra_output_alternatives=4"
     },
     {
-      "auc": 0.9991319444444444,
       "cache_hits": 303,
       "cache_misses": 61,
       "evaluation": {
-        "auc": 0.9991319444444444,
         "cache": {
           "entries": 61,
           "hits": 303,
@@ -984,7 +1039,7 @@
           "trend_stats": "linear"
         },
         "configuration_search_capped": true,
-        "global_ridge_auc": 0.9991319444444444,
+        "global_ridge_score": 0.8227903050375419,
         "n_configs_evaluated": 16,
         "n_configs_total": 48,
         "n_features": 29,
@@ -998,7 +1053,7 @@
               "iterations": [
                 {
                   "alpha": 10.0,
-                  "residual_std": 0.20638275458826372,
+                  "residual_std": 0.18274375947208016,
                   "step": 1,
                   "weight_max": 1.0,
                   "weight_mean": 1.0,
@@ -1007,7 +1062,7 @@
                 },
                 {
                   "alpha": 10.0,
-                  "residual_std": 0.20638275458826372,
+                  "residual_std": 0.18274375947208016,
                   "step": 2,
                   "weight_max": 1.0,
                   "weight_mean": 1.0,
@@ -1023,7 +1078,7 @@
               "iterations": [
                 {
                   "alpha": 10.0,
-                  "residual_std": 0.20617796314913683,
+                  "residual_std": 0.20909278604663029,
                   "step": 1,
                   "weight_max": 1.0,
                   "weight_mean": 1.0,
@@ -1032,7 +1087,7 @@
                 },
                 {
                   "alpha": 10.0,
-                  "residual_std": 0.20617796314913683,
+                  "residual_std": 0.20909278604663029,
                   "step": 2,
                   "weight_max": 1.0,
                   "weight_mean": 1.0,
@@ -1048,7 +1103,7 @@
               "iterations": [
                 {
                   "alpha": 10.0,
-                  "residual_std": 0.21106877254825754,
+                  "residual_std": 0.2190541099832934,
                   "step": 1,
                   "weight_max": 1.0,
                   "weight_mean": 1.0,
@@ -1057,7 +1112,7 @@
                 },
                 {
                   "alpha": 10.0,
-                  "residual_std": 0.21106877254825754,
+                  "residual_std": 0.2190541099832934,
                   "step": 2,
                   "weight_max": 1.0,
                   "weight_mean": 1.0,
@@ -1083,23 +1138,23 @@
           "min": 0.4753577389716895,
           "std": 0.28078917118152424
         },
+        "score": 0.7377371828262466,
         "shap_reconstruction_error": 2.220446049250313e-16
       },
       "family": "output_feature_growth",
+      "score": 0.7377371828262466,
       "seconds": [
-        0.3111060840310529,
-        0.2888632499962114,
-        0.26901766599621624
+        0.21171812491957098,
+        0.21219300001394004,
+        0.21250545897055417
       ],
-      "seconds_median": 0.2888632499962114,
+      "seconds_median": 0.21219300001394004,
       "setting": "extra_output_alternatives=8"
     },
     {
-      "auc": 0.9991319444444444,
       "cache_hits": 399,
       "cache_misses": 77,
       "evaluation": {
-        "auc": 0.9991319444444444,
         "cache": {
           "entries": 77,
           "hits": 399,
@@ -1116,7 +1171,7 @@
           "trend_stats": "linear"
         },
         "configuration_search_capped": true,
-        "global_ridge_auc": 0.9991319444444444,
+        "global_ridge_score": 0.8227768223064492,
         "n_configs_evaluated": 16,
         "n_configs_total": 48,
         "n_features": 33,
@@ -1130,7 +1185,7 @@
               "iterations": [
                 {
                   "alpha": 10.0,
-                  "residual_std": 0.20639121973068766,
+                  "residual_std": 0.1827552910454382,
                   "step": 1,
                   "weight_max": 1.0,
                   "weight_mean": 1.0,
@@ -1139,7 +1194,7 @@
                 },
                 {
                   "alpha": 10.0,
-                  "residual_std": 0.20639121973068766,
+                  "residual_std": 0.1827552910454382,
                   "step": 2,
                   "weight_max": 1.0,
                   "weight_mean": 1.0,
@@ -1155,7 +1210,7 @@
               "iterations": [
                 {
                   "alpha": 10.0,
-                  "residual_std": 0.2061967498353096,
+                  "residual_std": 0.2091105692656129,
                   "step": 1,
                   "weight_max": 1.0,
                   "weight_mean": 1.0,
@@ -1164,7 +1219,7 @@
                 },
                 {
                   "alpha": 10.0,
-                  "residual_std": 0.20619674983530964,
+                  "residual_std": 0.2091105692656129,
                   "step": 2,
                   "weight_max": 1.0,
                   "weight_mean": 1.0,
@@ -1180,7 +1235,7 @@
               "iterations": [
                 {
                   "alpha": 10.0,
-                  "residual_std": 0.21108107057688416,
+                  "residual_std": 0.2190717693001522,
                   "step": 1,
                   "weight_max": 1.0,
                   "weight_mean": 1.0,
@@ -1189,7 +1244,7 @@
                 },
                 {
                   "alpha": 10.0,
-                  "residual_std": 0.2110810705768842,
+                  "residual_std": 0.2190717693001522,
                   "step": 2,
                   "weight_max": 1.0,
                   "weight_mean": 1.0,
@@ -1215,19 +1270,21 @@
           "min": 0.4753577389716895,
           "std": 0.28078917118152424
         },
+        "score": 0.7376133793681361,
         "shap_reconstruction_error": 2.220446049250313e-16
       },
       "family": "output_feature_growth",
+      "score": 0.7376133793681361,
       "seconds": [
-        0.28589537501102313,
-        0.3191455419873819,
-        0.29870912502519786
+        0.245153708034195,
+        0.23742212494835258,
+        0.23703929095063359
       ],
-      "seconds_median": 0.29870912502519786,
+      "seconds_median": 0.23742212494835258,
       "setting": "extra_output_alternatives=12"
     }
   ],
-  "scope": "These benchmarks validate architecture-level behavior of this clean-room reimplementation. They do not claim to reproduce the authors' private evolved graph, private code-generation stack, competition pipeline, or reported ROC-AUC.",
+  "scope": "These benchmarks validate architecture-level behavior of this clean-room reimplementation. They do not claim to reproduce the authors' private evolved graph, private code-generation stack, competition pipeline, or reported task score.",
   "seed": 37,
   "summary": {
     "passed": true,

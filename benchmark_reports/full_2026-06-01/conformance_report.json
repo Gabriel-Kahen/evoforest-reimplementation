@@ -1,7 +1,6 @@
 {
   "benchmark": "conformance",
   "evaluation": {
-    "auc": 0.9930555555555556,
     "cache": {
       "entries": 29,
       "hits": 111,
@@ -10,15 +9,15 @@
       "shared_across_configurations": true
     },
     "config": {
-      "activation": "identity",
+      "activation": "clipped_linear",
       "ridge_g": "huber",
       "ridge_w": "uniform",
       "segment_stats": "basic",
-      "shape_stats": "spectral",
+      "shape_stats": "cusum",
       "trend_stats": "linear"
     },
     "configuration_search_capped": true,
-    "global_ridge_auc": 0.9984567901234568,
+    "global_ridge_score": 0.7999207016773409,
     "n_configs_evaluated": 16,
     "n_configs_total": 48,
     "n_features": 21,
@@ -27,12 +26,12 @@
       "description": "Huber-style residual downweighting.",
       "irls": [
         {
-          "final_alpha": 31.622776601683793,
+          "final_alpha": 10.0,
           "fold": 0,
           "iterations": [
             {
-              "alpha": 31.622776601683793,
-              "residual_std": 0.2370658186113104,
+              "alpha": 10.0,
+              "residual_std": 0.1791924493475738,
               "step": 1,
               "weight_max": 1.0,
               "weight_mean": 1.0,
@@ -40,8 +39,8 @@
               "weight_std": 0.0
             },
             {
-              "alpha": 31.622776601683793,
-              "residual_std": 0.2370658186113104,
+              "alpha": 10.0,
+              "residual_std": 0.1791924493475738,
               "step": 2,
               "weight_max": 1.0,
               "weight_mean": 1.0,
@@ -52,12 +51,12 @@
           "steps_used": 2
         },
         {
-          "final_alpha": 10.0,
+          "final_alpha": 1.0,
           "fold": 1,
           "iterations": [
             {
-              "alpha": 10.0,
-              "residual_std": 0.22959607534097481,
+              "alpha": 1.0,
+              "residual_std": 0.21585946416514507,
               "step": 1,
               "weight_max": 1.0,
               "weight_mean": 1.0,
@@ -65,8 +64,8 @@
               "weight_std": 0.0
             },
             {
-              "alpha": 10.0,
-              "residual_std": 0.22959607534097481,
+              "alpha": 1.0,
+              "residual_std": 0.21585946416514507,
               "step": 2,
               "weight_max": 1.0,
               "weight_mean": 1.0,
@@ -77,12 +76,12 @@
           "steps_used": 2
         },
         {
-          "final_alpha": 10.0,
+          "final_alpha": 1.0,
           "fold": 2,
           "iterations": [
             {
-              "alpha": 10.0,
-              "residual_std": 0.23429620098437406,
+              "alpha": 1.0,
+              "residual_std": 0.25140214586593174,
               "step": 1,
               "weight_max": 1.0,
               "weight_mean": 1.0,
@@ -90,8 +89,8 @@
               "weight_std": 0.0
             },
             {
-              "alpha": 10.0,
-              "residual_std": 0.23429620098437406,
+              "alpha": 1.0,
+              "residual_std": 0.25140214586593174,
               "step": 2,
               "weight_max": 1.0,
               "weight_mean": 1.0,
@@ -117,69 +116,127 @@
       "min": 1.0,
       "std": 0.0
     },
-    "shap_reconstruction_error": 2.220446049250313e-16
+    "score": 0.7477819221905148,
+    "shap_reconstruction_error": 4.440892098500626e-16
   },
   "evolution": {
-    "auc": 0.9760802469135802,
     "cache": {
-      "entries": 19,
-      "hits": 29,
+      "entries": 20,
+      "hits": 28,
       "key": "ancestor_conditioned_subpath",
-      "misses": 19,
+      "misses": 20,
       "shared_across_configurations": true
     },
     "config": {
-      "activation": "sigmoid_gate",
-      "ridge_g": "identity",
-      "ridge_w": "boundary_energy",
+      "activation": "clipped_linear",
+      "ridge_g": "huber",
+      "ridge_w": "uniform",
       "segment_stats": "basic",
-      "shape_stats": "spectral",
+      "shape_stats": "cusum",
       "trend_stats": "linear"
     },
     "configuration_search_capped": true,
-    "global_ridge_auc": 0.9969135802469136,
+    "global_ridge_score": 0.7999207016773409,
     "n_configs_evaluated": 4,
-    "n_configs_total": 48,
+    "n_configs_total": 72,
     "n_features": 21,
     "ridge_g": {
-      "alternative": "identity",
-      "description": "No residual reweighting.",
+      "alternative": "huber",
+      "description": "Huber-style residual downweighting.",
       "irls": [
         {
-          "final_alpha": 0.0031622776601683794,
+          "final_alpha": 10.0,
           "fold": 0,
-          "iterations": [],
-          "steps_used": 0
+          "iterations": [
+            {
+              "alpha": 10.0,
+              "residual_std": 0.1791924493475738,
+              "step": 1,
+              "weight_max": 1.0,
+              "weight_mean": 1.0,
+              "weight_min": 1.0,
+              "weight_std": 0.0
+            },
+            {
+              "alpha": 10.0,
+              "residual_std": 0.1791924493475738,
+              "step": 2,
+              "weight_max": 1.0,
+              "weight_mean": 1.0,
+              "weight_min": 1.0,
+              "weight_std": 0.0
+            }
+          ],
+          "steps_used": 2
         },
         {
-          "final_alpha": 0.0001,
+          "final_alpha": 1.0,
           "fold": 1,
-          "iterations": [],
-          "steps_used": 0
+          "iterations": [
+            {
+              "alpha": 1.0,
+              "residual_std": 0.21585946416514507,
+              "step": 1,
+              "weight_max": 1.0,
+              "weight_mean": 1.0,
+              "weight_min": 1.0,
+              "weight_std": 0.0
+            },
+            {
+              "alpha": 1.0,
+              "residual_std": 0.21585946416514507,
+              "step": 2,
+              "weight_max": 1.0,
+              "weight_mean": 1.0,
+              "weight_min": 1.0,
+              "weight_std": 0.0
+            }
+          ],
+          "steps_used": 2
         },
         {
-          "final_alpha": 0.01,
+          "final_alpha": 1.0,
           "fold": 2,
-          "iterations": [],
-          "steps_used": 0
+          "iterations": [
+            {
+              "alpha": 1.0,
+              "residual_std": 0.25140214586593174,
+              "step": 1,
+              "weight_max": 1.0,
+              "weight_mean": 1.0,
+              "weight_min": 1.0,
+              "weight_std": 0.0
+            },
+            {
+              "alpha": 1.0,
+              "residual_std": 0.25140214586593174,
+              "step": 2,
+              "weight_max": 1.0,
+              "weight_mean": 1.0,
+              "weight_min": 1.0,
+              "weight_std": 0.0
+            }
+          ],
+          "steps_used": 2
         }
       ],
       "irls_steps_requested": 2,
       "irls_steps_used_per_fold": [
-        0,
-        0,
-        0
+        2,
+        2,
+        2
       ],
-      "rule": "identity"
+      "rule": "huber"
     },
     "ridge_w": {
-      "alternative": "boundary_energy",
-      "max": 1.3389269727836857,
+      "alternative": "uniform",
+      "max": 1.0,
       "mean": 1.0,
-      "min": 0.4470845153157063,
-      "std": 0.2835252944557492
+      "min": 1.0,
+      "std": 0.0
     },
-    "shap_reconstruction_error": 1.1102230246251565e-15
+    "score": 0.7477819221905148,
+    "shap_reconstruction_error": 4.440892098500626e-16
   },
   "graph": {
     "alternatives": 15,
@@ -246,7 +303,7 @@
         "shape": [
           1
         ],
-        "trainable": true,
+        "trainable": false,
         "value": [
           1.0
         ]
@@ -294,11 +351,11 @@
       "passed": true
     },
     {
-      "description": "Evaluator scores capped graph configurations and reports best-config ROC-AUC.",
+      "description": "Evaluator scores capped graph configurations and reports the best configured task score.",
       "evidence": {
-        "auc": 0.9930555555555556,
         "capped": true,
         "evaluated": 16,
+        "score": 0.7477819221905148,
         "total": 48
       },
       "id": "configuration_search",
@@ -324,12 +381,12 @@
           "description": "Huber-style residual downweighting.",
           "irls": [
             {
-              "final_alpha": 31.622776601683793,
+              "final_alpha": 10.0,
               "fold": 0,
               "iterations": [
                 {
-                  "alpha": 31.622776601683793,
-                  "residual_std": 0.2370658186113104,
+                  "alpha": 10.0,
+                  "residual_std": 0.1791924493475738,
                   "step": 1,
                   "weight_max": 1.0,
                   "weight_mean": 1.0,
@@ -337,8 +394,8 @@
                   "weight_std": 0.0
                 },
                 {
-                  "alpha": 31.622776601683793,
-                  "residual_std": 0.2370658186113104,
+                  "alpha": 10.0,
+                  "residual_std": 0.1791924493475738,
                   "step": 2,
                   "weight_max": 1.0,
                   "weight_mean": 1.0,
@@ -349,12 +406,12 @@
               "steps_used": 2
             },
             {
-              "final_alpha": 10.0,
+              "final_alpha": 1.0,
               "fold": 1,
               "iterations": [
                 {
-                  "alpha": 10.0,
-                  "residual_std": 0.22959607534097481,
+                  "alpha": 1.0,
+                  "residual_std": 0.21585946416514507,
                   "step": 1,
                   "weight_max": 1.0,
                   "weight_mean": 1.0,
@@ -362,8 +419,8 @@
                   "weight_std": 0.0
                 },
                 {
-                  "alpha": 10.0,
-                  "residual_std": 0.22959607534097481,
+                  "alpha": 1.0,
+                  "residual_std": 0.21585946416514507,
                   "step": 2,
                   "weight_max": 1.0,
                   "weight_mean": 1.0,
@@ -374,12 +431,12 @@
               "steps_used": 2
             },
             {
-              "final_alpha": 10.0,
+              "final_alpha": 1.0,
               "fold": 2,
               "iterations": [
                 {
-                  "alpha": 10.0,
-                  "residual_std": 0.23429620098437406,
+                  "alpha": 1.0,
+                  "residual_std": 0.25140214586593174,
                   "step": 1,
                   "weight_max": 1.0,
                   "weight_mean": 1.0,
@@ -387,8 +444,8 @@
                   "weight_std": 0.0
                 },
                 {
-                  "alpha": 10.0,
-                  "residual_std": 0.23429620098437406,
+                  "alpha": 1.0,
+                  "residual_std": 0.25140214586593174,
                   "step": 2,
                   "weight_max": 1.0,
                   "weight_mean": 1.0,
@@ -428,28 +485,26 @@
         ],
         "trainable_globals": [
           "gate_scale",
-          "projection_vector",
-          "residual_huber_scale"
+          "projection_vector"
         ]
       },
       "id": "global_parameters",
       "passed": true
     },
     {
-      "description": "Optional global refinement runs before frozen Ridge structural scoring.",
+      "description": "Paper-mode global refinement uses PyTorch L-BFGS or explicitly reports a skipped torch probe.",
       "evidence": {
         "accepted_updates": 0,
-        "backend": "numpy_coordinate",
-        "enabled": true,
-        "fallback_reason": "",
+        "backend": "torch_l_bfgs",
+        "enabled": false,
+        "fallback_reason": "PyTorch is not installed; install the torch extra to enable L-BFGS refinement.",
         "final_loss": 0.056878406904416506,
         "initial_loss": 0.056878406904416506,
-        "requested_backend": "numpy",
-        "steps": 1,
+        "requested_backend": "auto",
+        "steps": 0,
         "trainable_globals": [
           "gate_scale",
-          "projection_vector",
-          "residual_huber_scale"
+          "projection_vector"
         ]
       },
       "id": "two_phase_evaluation",
@@ -461,26 +516,32 @@
         "linear_shap": {
           "basis": "standardized linear Ridge contribution z_j * coefficient_j",
           "cv_reconstruction_error": 2.220446049250313e-16,
-          "global_reconstruction_error": 2.220446049250313e-16,
-          "mean_abs_contribution_total": 0.7288811873813736,
-          "top_feature": "output.raw_concat.mean_delta"
+          "global_reconstruction_error": 4.440892098500626e-16,
+          "mean_abs_contribution_total": 0.953441700679708,
+          "top_feature": "output.raw_concat.std_log_ratio_abs"
         },
         "scoring_context": {
-          "best_config_auc": 0.9930555555555556,
-          "config_auc_range": [
-            0.9205246913580247,
-            0.9930555555555556
+          "best_config_score": 0.7477819221905148,
+          "config_score_range": [
+            0.4736681591577248,
+            0.7477819221905148
           ],
-          "effective_rank": 7.948003402466314,
-          "fold_auc_std": 0.0,
-          "global_ridge_auc": 0.9984567901234568,
-          "mean_max_corr": 0.984558659976133,
+          "effective_rank": 9.14426392413185,
+          "fold_score_std": 0.14978097049245614,
+          "global_feature_pool_ridge_score": 0.8339661803462767,
+          "global_ridge_score": 0.7999207016773409,
+          "mean_max_corr": 0.9247862528869041,
           "n_configs": 16,
           "n_configs_total": 48,
           "n_features_best_config": 21,
           "n_features_global": 336,
-          "scoring": "configuration-based (best config AUC = evoforest score)",
-          "shap_reconstruction_error": 2.220446049250313e-16
+          "scorer": {
+            "description": "Variance explained by predictions against the supplied target; callers may provide any higher-is-better task scorer.",
+            "higher_is_better": true,
+            "name": "variance_explained"
+          },
+          "scoring": "configuration-based (variance_explained; best config score = evoforest score)",
+          "shap_reconstruction_error": 4.440892098500626e-16
         }
       },
       "id": "ridge_diagnostics",
@@ -494,27 +555,27 @@
           {
             "age": 1,
             "alternative": "basic",
-            "best_config_auc": 0.9930555555555556,
+            "best_config_score": 0.7477819221905148,
             "kind": "intermediate",
-            "last_abs_residual_corr": 0.051277847047258594,
-            "last_config_auc": 0.9930555555555556,
+            "last_abs_residual_corr": 0.046866698080756955,
+            "last_config_score": 0.7477819221905148,
             "last_feature_count": 21,
-            "last_importance": 1.0000000000000002,
-            "last_mean_abs_shap": 0.034708627970541604,
+            "last_importance": 0.9999999999999998,
+            "last_mean_abs_shap": 0.04540198574665276,
             "last_participation_age": 1,
-            "last_redundancy": 0.9845586599761331,
+            "last_redundancy": 0.9247862528869042,
             "last_selected": true,
-            "last_shap_importance": 1.0000000000000002,
-            "last_weight_stability": 6.56422770775372,
-            "max_feature_auc": 0.8078703703703703,
-            "mean_abs_residual_corr": 0.051277847047258594,
-            "mean_abs_shap": 0.034708627970541604,
-            "mean_config_auc": 0.9930555555555556,
+            "last_shap_importance": 0.9999999999999999,
+            "last_weight_stability": 3.2709452370026377,
+            "max_target_alignment": 0.660965093749147,
+            "mean_abs_residual_corr": 0.046866698080756955,
+            "mean_abs_shap": 0.04540198574665276,
+            "mean_config_score": 0.7477819221905148,
             "mean_feature_count": 21.0,
-            "mean_importance": 1.0000000000000002,
-            "mean_redundancy": 0.9845586599761331,
-            "mean_shap_importance": 1.0000000000000002,
-            "mean_weight_stability": 6.56422770775372,
+            "mean_importance": 0.9999999999999998,
+            "mean_redundancy": 0.9247862528869042,
+            "mean_shap_importance": 0.9999999999999999,
+            "mean_weight_stability": 3.2709452370026377,
             "name": "segment_stats.basic",
             "node": "segment_stats",
             "output_count": 0,
@@ -523,29 +584,29 @@
           },
           {
             "age": 1,
-            "alternative": "spectral",
-            "best_config_auc": 0.9930555555555556,
+            "alternative": "cusum",
+            "best_config_score": 0.7477819221905148,
             "kind": "intermediate",
-            "last_abs_residual_corr": 0.051277847047258594,
-            "last_config_auc": 0.9930555555555556,
+            "last_abs_residual_corr": 0.046866698080756955,
+            "last_config_score": 0.7477819221905148,
             "last_feature_count": 21,
-            "last_importance": 1.0000000000000002,
-            "last_mean_abs_shap": 0.034708627970541604,
+            "last_importance": 0.9999999999999998,
+            "last_mean_abs_shap": 0.04540198574665276,
             "last_participation_age": 1,
-            "last_redundancy": 0.9845586599761331,
+            "last_redundancy": 0.9247862528869042,
             "last_selected": true,
-            "last_shap_importance": 1.0000000000000002,
-            "last_weight_stability": 6.56422770775372,
-            "max_feature_auc": 0.8078703703703703,
-            "mean_abs_residual_corr": 0.051277847047258594,
-            "mean_abs_shap": 0.034708627970541604,
-            "mean_config_auc": 0.9930555555555556,
+            "last_shap_importance": 0.9999999999999999,
+            "last_weight_stability": 3.2709452370026377,
+            "max_target_alignment": 0.660965093749147,
+            "mean_abs_residual_corr": 0.046866698080756955,
+            "mean_abs_shap": 0.04540198574665276,
+            "mean_config_score": 0.7477819221905148,
             "mean_feature_count": 21.0,
-            "mean_importance": 1.0000000000000002,
-            "mean_redundancy": 0.9845586599761331,
-            "mean_shap_importance": 1.0000000000000002,
-            "mean_weight_stability": 6.56422770775372,
-            "name": "shape_stats.spectral",
+            "mean_importance": 0.9999999999999998,
+            "mean_redundancy": 0.9247862528869042,
+            "mean_shap_importance": 0.9999999999999999,
+            "mean_weight_stability": 3.2709452370026377,
+            "name": "shape_stats.cusum",
             "node": "shape_stats",
             "output_count": 0,
             "participation_count": 1,
@@ -554,27 +615,27 @@
           {
             "age": 1,
             "alternative": "linear",
-            "best_config_auc": 0.9930555555555556,
+            "best_config_score": 0.7477819221905148,
             "kind": "intermediate",
-            "last_abs_residual_corr": 0.051277847047258594,
-            "last_config_auc": 0.9930555555555556,
+            "last_abs_residual_corr": 0.046866698080756955,
+            "last_config_score": 0.7477819221905148,
             "last_feature_count": 21,
-            "last_importance": 1.0000000000000002,
-            "last_mean_abs_shap": 0.034708627970541604,
+            "last_importance": 0.9999999999999998,
+            "last_mean_abs_shap": 0.04540198574665276,
             "last_participation_age": 1,
-            "last_redundancy": 0.9845586599761331,
+            "last_redundancy": 0.9247862528869042,
             "last_selected": true,
-            "last_shap_importance": 1.0000000000000002,
-            "last_weight_stability": 6.56422770775372,
-            "max_feature_auc": 0.8078703703703703,
-            "mean_abs_residual_corr": 0.051277847047258594,
-            "mean_abs_shap": 0.034708627970541604,
-            "mean_config_auc": 0.9930555555555556,
+            "last_shap_importance": 0.9999999999999999,
+            "last_weight_stability": 3.2709452370026377,
+            "max_target_alignment": 0.660965093749147,
+            "mean_abs_residual_corr": 0.046866698080756955,
+            "mean_abs_shap": 0.04540198574665276,
+            "mean_config_score": 0.7477819221905148,
             "mean_feature_count": 21.0,
-            "mean_importance": 1.0000000000000002,
-            "mean_redundancy": 0.9845586599761331,
-            "mean_shap_importance": 1.0000000000000002,
-            "mean_weight_stability": 6.56422770775372,
+            "mean_importance": 0.9999999999999998,
+            "mean_redundancy": 0.9247862528869042,
+            "mean_shap_importance": 0.9999999999999999,
+            "mean_weight_stability": 3.2709452370026377,
             "name": "trend_stats.linear",
             "node": "trend_stats",
             "output_count": 0,
@@ -637,7 +698,7 @@
     {
       "description": "Evolution writes events, checkpoint, archive, task context, mutation YAML, and memorandum artifacts.",
       "evidence": {
-        "archive_rows": 1,
+        "archive_rows": 2,
         "checkpoint_keys": [
           "diagnostics_toon",
           "feedback",
@@ -711,7 +772,7 @@
       "passed": true
     }
   ],
-  "scope": "These benchmarks validate architecture-level behavior of this clean-room reimplementation. They do not claim to reproduce the authors' private evolved graph, private code-generation stack, competition pipeline, or reported ROC-AUC.",
+  "scope": "These benchmarks validate architecture-level behavior of this clean-room reimplementation. They do not claim to reproduce the authors' private evolved graph, private code-generation stack, competition pipeline, or reported task score.",
   "seed": 17,
   "summary": {
     "all_passed": true,

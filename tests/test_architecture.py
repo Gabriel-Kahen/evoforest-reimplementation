@@ -14,12 +14,30 @@ from evoforest_arch.llm import ClaudeLLMClient, GeminiLLMClient, LLMEngineerAgen
 from evoforest_arch.maintenance import GraphMaintenance
 from evoforest_arch.mutations import GlobalSpec, MutationDocument, MutationEngine, MutationSpec, NodeSpec, RemoveSpec
 from evoforest_arch.rank_readout import fit_rank_feature_expansion, select_rank_ensemble
-from evoforest_arch.seed import build_seed_graph
-from evoforest_arch.synthetic import make_structural_break_data
+from evoforest_arch.seed import build_seed_graph, build_structural_break_seed_graph
+from evoforest_arch.source import SourceExecutionError
+from evoforest_arch.synthetic import make_structural_break_data, make_tabular_data
+
+
+def test_default_seed_graph_is_task_independent_tabular() -> None:
+    dataset = make_tabular_data(n_samples=80, n_features=8, seed=4)
+    graph = build_seed_graph()
+    assert graph.task_schema is not None
+    assert graph.task_schema["kind"] == "tabular"
+    assert "x" in graph.nodes
+    assert "series" not in graph.nodes
+    assert "boundary" not in graph.nodes
+    assert graph.nodes["base_features"].kind == "intermediate"
+    assert graph.nodes["output"].kind == "output"
+
+    result = RidgeEvaluator(n_splits=3, seed=4, max_configurations=8).evaluate(graph, dataset.inputs(), dataset.y)
+
+    assert result.score > 0.5
+    assert result.diagnostics["features"]
 
 
 def test_seed_graph_exposes_paper_architecture_motifs() -> None:
-    graph = build_seed_graph()
+    graph = build_structural_break_seed_graph()
     assert graph.nodes["segment_stats"].kind == "intermediate"
     assert graph.nodes["activation"].kind == "callable"
     assert graph.nodes["output"].kind == "output"
@@ -38,7 +56,7 @@ def test_seed_graph_exposes_paper_architecture_motifs() -> None:
 
 def test_graph_evaluates_alternatives_callables_and_globals() -> None:
     dataset = make_structural_break_data(n_series=40, length=80, seed=3)
-    graph = build_seed_graph()
+    graph = build_structural_break_seed_graph()
     config = graph.default_config()
     config["activation"] = "sigmoid_gate"
     x, names, ctx = graph.evaluate_features(dataset.inputs(), config)
@@ -110,27 +128,27 @@ def test_configuration_search_uses_ancestor_conditioned_shared_cache() -> None:
 
 def test_ridge_evaluator_scores_synthetic_breaks() -> None:
     dataset = make_structural_break_data(n_series=120, length=100, seed=11)
-    graph = build_seed_graph()
+    graph = build_structural_break_seed_graph()
     result = RidgeEvaluator(n_splits=3, seed=11).evaluate(graph, dataset.inputs(), dataset.y)
-    assert result.auc > 0.8
+    assert result.score > 0.8
     assert result.diagnostics["features"]
     assert result.diagnostics["graph"]["alternatives"] >= 14
     assert result.diagnostics["configuration_search"]["evaluated"] >= 12
     search = result.diagnostics["configuration_search"]
     assert search["cache"]["shared_across_configurations"] is True
     assert search["cache"]["key"] == "ancestor_conditioned_subpath"
-    assert search["auc_range"][0] <= result.auc <= search["auc_range"][1]
-    assert search["best_config_auc"] == result.auc
+    assert search["score_range"][0] <= result.score <= search["score_range"][1]
+    assert search["best_config_score"] == result.score
     scoring = result.diagnostics["scoring_context"]
-    assert scoring["best_config_auc"] == result.auc
-    assert scoring["global_ridge_auc"] > 0.8
+    assert scoring["best_config_score"] == result.score
+    assert scoring["global_ridge_score"] > 0.8
     assert scoring["shap_reconstruction_error"] < 1e-8
     assert scoring["n_configs"] == search["evaluated"]
     assert scoring["n_features_best_config"] == len(result.feature_names)
-    assert result.diagnostics["global_ridge"]["auc"] == scoring["global_ridge_auc"]
+    assert result.diagnostics["global_ridge"]["score"] == scoring["global_ridge_score"]
     assert result.diagnostics["linear_shap"]["global_reconstruction_error"] < 1e-8
     assert result.diagnostics["linear_shap"]["cv_reconstruction_error"] < 1e-8
-    assert result.diagnostics["folds"]["auc_std"] >= 0.0
+    assert result.diagnostics["folds"]["score_std"] >= 0.0
     assert result.diagnostics["effective_rank"] > 0.0
     assert result.diagnostics["mean_max_corr"] >= 0.0
     assert result.diagnostics["fitting"]["ridge_w"]["alternative"] in {"uniform", "boundary_energy"}
@@ -147,7 +165,9 @@ def test_ridge_evaluator_scores_synthetic_breaks() -> None:
         "redundancy",
         "residual_quadratic_corr",
         "weight_stability",
-        "class_effect",
+        "target_alignment",
+        "target_corr",
+        "target_quadratic_corr",
         "global_coef",
         "shap_mean_abs",
         "shap_importance",
@@ -162,16 +182,16 @@ def test_ridge_evaluator_scores_synthetic_breaks() -> None:
     assert result.diagnostics["graph"]["selected_alternatives"]["activation"] in {"identity", "sigmoid_gate", "clipped_linear"}
     toon = toon_report(result)
     assert "context:" in toon
-    assert "global_ridge_auc:" in toon
+    assert "global_ridge_score:" in toon
     assert "effective_rank:" in toon
-    assert "features[name,depth,imp,auc,sign,max_corr" in toon
+    assert "features[name,depth,imp,align,sign,max_corr" in toon
     assert "shap" in toon
     assert "alternatives[name,age,evals,sel,n,imp,shap" in toon
 
 
 def test_ridge_evaluator_basic_diagnostics_skips_feature_rows() -> None:
     dataset = make_structural_break_data(n_series=80, length=80, seed=10)
-    graph = build_seed_graph()
+    graph = build_structural_break_seed_graph()
 
     result = RidgeEvaluator(n_splits=2, seed=10, max_configurations=4, diagnostics_mode="basic").evaluate(
         graph,
@@ -179,7 +199,7 @@ def test_ridge_evaluator_basic_diagnostics_skips_feature_rows() -> None:
         dataset.y,
     )
 
-    assert result.auc > 0.7
+    assert result.score > 0.6
     assert result.diagnostics["diagnostics_mode"] == "basic"
     assert result.diagnostics["features"] == []
     assert result.diagnostics["subnodes"] == []
@@ -188,7 +208,7 @@ def test_ridge_evaluator_basic_diagnostics_skips_feature_rows() -> None:
 
 def test_ridge_g_runs_iterative_reweighted_least_squares() -> None:
     dataset = make_structural_break_data(n_series=84, length=90, seed=16)
-    graph = build_seed_graph()
+    graph = build_structural_break_seed_graph()
     result = RidgeEvaluator(n_splits=3, seed=16, max_configurations=4, irls_steps=3).evaluate(
         graph,
         dataset.inputs(),
@@ -210,7 +230,7 @@ def test_ridge_g_runs_iterative_reweighted_least_squares() -> None:
 
 def test_rank_interaction_readout_selects_oof_features() -> None:
     dataset = make_structural_break_data(n_series=96, length=80, seed=31)
-    graph = build_seed_graph()
+    graph = build_structural_break_seed_graph()
     config = graph.default_config()
     x, names, _ctx = graph.evaluate_features(dataset.inputs(), config=config)
     expansion = fit_rank_feature_expansion(x, dataset.y, names, max_interaction_base=6)
@@ -221,14 +241,14 @@ def test_rank_interaction_readout_selects_oof_features() -> None:
     predictions = selection.model.predict(expanded)
 
     assert expanded.shape[1] > x.shape[1]
-    assert selection.oof_auc > 0.7
+    assert selection.oof_score > 0.4
     assert predictions.shape == dataset.y.shape
     assert selection.model.feature_indices.size > 0
 
 
 def test_update_graph_persists_alternative_statistics_and_age() -> None:
     dataset = make_structural_break_data(n_series=90, length=90, seed=12)
-    graph = build_seed_graph()
+    graph = build_structural_break_seed_graph()
     result = RidgeEvaluator(n_splits=3, seed=12, max_configurations=8).evaluate(
         graph,
         dataset.inputs(),
@@ -240,7 +260,7 @@ def test_update_graph_persists_alternative_statistics_and_age() -> None:
     assert selected.age == 1
     assert selected.stats["participation_count"] == 1
     assert selected.stats["selected_count"] == 1
-    assert selected.stats["last_config_auc"] == result.auc
+    assert selected.stats["last_config_score"] == result.score
     assert selected.stats["last_feature_count"] > 0
     assert selected.stats["mean_shap_importance"] > 0.0
     assert selected.stats["mean_abs_shap"] > 0.0
@@ -254,12 +274,12 @@ def test_update_graph_persists_alternative_statistics_and_age() -> None:
     row = next(item for item in snapshot if item["name"] == f"segment_stats.{selected_segment}")
     assert row["age"] == 1
     assert row["participation_count"] == 1
-    assert row["best_config_auc"] == result.auc
+    assert row["best_config_score"] == result.score
 
 
 def test_scientist_and_engineer_generate_diagnostic_mutation_documents() -> None:
     dataset = make_structural_break_data(n_series=80, length=90, seed=15)
-    graph = build_seed_graph()
+    graph = build_structural_break_seed_graph()
     result = RidgeEvaluator(n_splits=3, seed=15, max_configurations=8).evaluate(graph, dataset.inputs(), dataset.y)
     hypotheses = ScientistAgent().generate(graph, result)
     document = EngineerAgent().synthesize(graph, result, hypotheses, step=7, island=2, rng=np.random.default_rng(15))
@@ -270,7 +290,7 @@ def test_scientist_and_engineer_generate_diagnostic_mutation_documents() -> None
 
 
 def test_mutation_engine_adds_alternative_without_mutating_parent_graph() -> None:
-    graph = build_seed_graph()
+    graph = build_structural_break_seed_graph()
     before = len(graph.nodes["shape_stats"].alternatives)
     spec = MutationSpec(
         kind="add_alternative",
@@ -298,7 +318,7 @@ def test_mutation_engine_adds_alternative_without_mutating_parent_graph() -> Non
 
 
 def test_mutation_document_round_trip_and_maintenance() -> None:
-    graph = build_seed_graph()
+    graph = build_structural_break_seed_graph()
     document = MutationDocument(
         hypotheses=("Remove weak duplicate and add a distinct robust segment alternative.",),
         rationale="Exercise paper-style YAML mutation documents.",
@@ -325,7 +345,7 @@ def test_mutation_document_round_trip_and_maintenance() -> None:
 
 
 def test_mutation_document_can_introduce_reachable_nodes() -> None:
-    graph = build_seed_graph()
+    graph = build_structural_break_seed_graph()
     document = MutationDocument(
         hypotheses=("Introduce a reusable local_stats node and expose it through output.",),
         rationale="Exercise node-level graph mutation.",
@@ -356,9 +376,9 @@ def test_mutation_document_can_introduce_reachable_nodes() -> None:
     assert any(alternative.id == "local_stats_output" for alternative in applied.graph.nodes["output"].alternatives)
 
 
-def test_trusted_source_mutation_adds_lambda_alternative() -> None:
+def test_sandboxed_source_mutation_adds_lambda_alternative() -> None:
     dataset = make_structural_break_data(n_series=30, length=70, seed=29)
-    graph = build_seed_graph()
+    graph = build_structural_break_seed_graph()
     source_payload = {
         "kind": "add_alternative",
         "target_node": "output",
@@ -369,7 +389,7 @@ def test_trusted_source_mutation_adds_lambda_alternative() -> None:
     }
     text = "\n".join(
         [
-            'rationale: "exercise trusted source-backed alternatives"',
+            'rationale: "exercise sandboxed source-backed alternatives"',
             "hypotheses:",
             "  []",
             "nodes:",
@@ -401,7 +421,7 @@ def test_paper_style_lambda_mutation_yaml_is_supported() -> None:
                 "  - output.raw_concat",
                 "add:",
                 "  output:",
-                "    - \"lambda ctx, values: FeatureBlock(ctx.read_input('series')[:, :1], ['first_value'])\"",
+                "    - \"lambda ctx, values: FeatureBlock(values['segment_stats'].values[:, :1] * ctx.globals.get('gate_scale')[0], ['first_value'])\"",
             ]
         )
     )
@@ -411,6 +431,100 @@ def test_paper_style_lambda_mutation_yaml_is_supported() -> None:
     assert document.add[0].target_node == "output"
     assert document.add[0].primitive == "source"
     assert document.add[0].source.startswith("lambda ctx, values:")
+    assert document.add[0].parents == ("segment_stats",)
+    assert document.add[0].global_refs == ("gate_scale",)
+
+
+def test_paper_style_source_object_preserves_contracts_and_node_kind() -> None:
+    document = MutationDocument.from_yaml(
+        "\n".join(
+            [
+                "add:",
+                "  output:",
+                '    - {"source": "lambda ctx, values: FeatureBlock(values[\'segment_stats\'].values[:, :1], [\'first_value\'])", "parents": ["segment_stats"], "node_kind": "output", "output_contract": {"type": "feature_block", "n_columns": 1}, "torch_source": "lambda ctx, values: values[\'segment_stats\'][:, :1]"}',
+            ]
+        )
+    )
+
+    spec = document.add[0]
+    assert spec.parents == ("segment_stats",)
+    assert spec.node_kind == "output"
+    assert spec.output_contract == {"type": "feature_block", "n_columns": 1}
+    assert spec.torch_source.startswith("lambda ctx, values:")
+
+
+def test_source_output_contract_rejects_wrong_shape() -> None:
+    dataset = make_structural_break_data(n_series=24, length=70, seed=34)
+    graph = build_structural_break_seed_graph()
+    document = MutationDocument(
+        add=(
+            MutationSpec(
+                kind="add_alternative",
+                target_node="output",
+                primitive="source",
+                alternative_id="wrong_contract_source",
+                parents=("segment_stats",),
+                source="lambda ctx, values: FeatureBlock(values['segment_stats'].values[:, :1], ['one_col'])",
+                output_contract={"type": "feature_block", "n_columns": 2},
+            ),
+        )
+    )
+    applied = MutationEngine(allow_source=True).apply_document(graph, document).graph
+
+    with pytest.raises(SourceExecutionError, match="columns"):
+        applied.evaluate_features(dataset.inputs(), applied.default_config())
+
+
+def test_source_lambda_defaults_are_rejected_before_execution() -> None:
+    graph = build_structural_break_seed_graph()
+    document = MutationDocument(
+        add=(
+            MutationSpec(
+                kind="add_alternative",
+                target_node="output",
+                primitive="source",
+                alternative_id="default_arg_source",
+                parents=("segment_stats",),
+                source="lambda ctx, values, expensive=np.ones((10**8,)): FeatureBlock(values['segment_stats'].values[:, :1], ['x'])",
+            ),
+        )
+    )
+
+    with pytest.raises(ValueError, match="no defaults"):
+        MutationEngine(allow_source=True).apply_document(graph, document)
+
+
+def test_maintenance_keeps_source_alternatives_with_different_contracts() -> None:
+    graph = build_structural_break_seed_graph()
+    base_source = "lambda ctx, values: FeatureBlock(values['segment_stats'].values[:, :1], ['x'])"
+    document = MutationDocument(
+        add=(
+            MutationSpec(
+                kind="add_alternative",
+                target_node="output",
+                primitive="source",
+                alternative_id="source_contract_one",
+                parents=("segment_stats",),
+                source=base_source,
+                description="Same description.",
+                output_contract={"type": "feature_block", "n_columns": 1},
+            ),
+            MutationSpec(
+                kind="add_alternative",
+                target_node="output",
+                primitive="source",
+                alternative_id="source_contract_range",
+                parents=("segment_stats",),
+                source=base_source,
+                description="Same description.",
+                output_contract={"type": "feature_block", "min_columns": 1},
+            ),
+        )
+    )
+    applied = MutationEngine(allow_source=True).apply_document(graph, document)
+    output_ids = {alternative.id for alternative in applied.graph.nodes["output"].alternatives}
+
+    assert {"source_contract_one", "source_contract_range"} <= output_ids
 
 
 def test_paper_style_lambda_mutation_ids_are_stable_across_documents() -> None:
@@ -435,7 +549,7 @@ def test_paper_style_lambda_mutation_ids_are_stable_across_documents() -> None:
 
     assert first.add[0].alternative_id != second.add[0].alternative_id
     engine = MutationEngine(allow_source=True)
-    graph = engine.apply_document(build_seed_graph(), first).graph
+    graph = engine.apply_document(build_structural_break_seed_graph(), first).graph
     graph = engine.apply_document(graph, second).graph
     output_ids = {alternative.id for alternative in graph.nodes["output"].alternatives}
     assert first.add[0].alternative_id in output_ids
@@ -443,7 +557,7 @@ def test_paper_style_lambda_mutation_ids_are_stable_across_documents() -> None:
 
 
 def test_maintenance_prunes_unreachable_nodes_and_unused_globals() -> None:
-    graph = build_seed_graph()
+    graph = build_structural_break_seed_graph()
     graph.add_node("dead_branch", "intermediate", "Unreachable branch.")
     graph.globals.add("unused", [1.0], trainable=True, description="Unused test parameter.")
     cleaned, report = GraphMaintenance().clean(graph)
@@ -455,7 +569,7 @@ def test_maintenance_prunes_unreachable_nodes_and_unused_globals() -> None:
 
 def test_global_refinement_phase_runs_without_mutating_parent_graph() -> None:
     dataset = make_structural_break_data(n_series=50, length=80, seed=13)
-    graph = build_seed_graph()
+    graph = build_structural_break_seed_graph()
     before = graph.globals.get("gate_scale").copy()
     result = RidgeEvaluator(n_splits=3, seed=13, max_configurations=4, refine_globals=True, refine_steps=2).evaluate(
         graph,
@@ -471,7 +585,7 @@ def test_global_refinement_phase_runs_without_mutating_parent_graph() -> None:
 
 def test_numpy_refinement_backend_can_be_requested_explicitly() -> None:
     dataset = make_structural_break_data(n_series=40, length=70, seed=17)
-    graph = build_seed_graph()
+    graph = build_structural_break_seed_graph()
     result = RidgeEvaluator(
         n_splits=3,
         seed=17,
@@ -487,7 +601,7 @@ def test_numpy_refinement_backend_can_be_requested_explicitly() -> None:
 def test_torch_l_bfgs_refinement_backend_when_available() -> None:
     pytest.importorskip("torch")
     dataset = make_structural_break_data(n_series=32, length=70, seed=19)
-    graph = build_seed_graph()
+    graph = build_structural_break_seed_graph()
     result = RidgeEvaluator(
         n_splits=3,
         seed=19,
@@ -500,16 +614,53 @@ def test_torch_l_bfgs_refinement_backend_when_available() -> None:
     assert result.diagnostics["refinement"]["enabled"] is True
 
 
+def test_source_torch_path_participates_in_refinement_when_available() -> None:
+    pytest.importorskip("torch")
+    dataset = make_tabular_data(n_samples=36, n_features=6, seed=35)
+    graph = build_seed_graph()
+    document = MutationDocument(
+        add=(
+            MutationSpec(
+                kind="add_alternative",
+                target_node="output",
+                primitive="source",
+                alternative_id="scaled_source_feature",
+                parents=("base_features",),
+                source="lambda ctx, values: FeatureBlock(values['base_features'].values[:, :1] * ctx.globals.get('gate_scale')[0], ['scaled_raw_0'])",
+                global_refs=("gate_scale",),
+                node_kind="output",
+                output_contract={"type": "feature_block", "n_columns": 1},
+                torch_source="lambda ctx, values: values['base_features'][:, :1] * ctx.globals.get('gate_scale')[0]",
+            ),
+        )
+    )
+    graph = MutationEngine(allow_source=True).apply_document(graph, document).graph
+    source_alt = next(alternative for alternative in graph.nodes["output"].alternatives if alternative.id == "scaled_source_feature")
+    assert source_alt.torch_fn is not None
+
+    result = RidgeEvaluator(
+        n_splits=3,
+        seed=35,
+        max_configurations=4,
+        refine_globals=True,
+        refine_steps=1,
+        refine_backend="torch",
+    ).evaluate(graph, dataset.inputs(), dataset.y)
+
+    assert result.diagnostics["refinement"]["backend"] == "torch_l_bfgs"
+    assert "gate_scale" in result.diagnostics["refinement"]["trainable_globals"]
+
+
 def test_evolution_loop_writes_events_checkpoint_and_memorandum(tmp_path) -> None:
     dataset = make_structural_break_data(n_series=90, length=90, seed=21)
-    graph = build_seed_graph()
+    graph = build_structural_break_seed_graph()
     result = EvolutionLoop(graph, evaluator=RidgeEvaluator(n_splits=3, seed=21, max_configurations=12), seed=21).run(
         dataset.inputs(),
         dataset.y,
         steps=4,
         output_dir=tmp_path,
     )
-    assert result.auc > 0.75
+    assert result.score > 0.75
     events = (tmp_path / "events.jsonl").read_text(encoding="utf-8").strip().splitlines()
     assert len(events) == 4
     first_event = json.loads(events[0])
@@ -545,12 +696,12 @@ def test_evolution_loop_writes_events_checkpoint_and_memorandum(tmp_path) -> Non
     assert "## Tensor Inventory" in task_context
     assert "series: numeric_tensor" in task_context
     assert "## Scorer Mechanics" in task_context
-    assert "stratified 3-fold Ridge CV" in task_context
+    assert "random 3-fold Ridge CV" in task_context
 
 
 def test_llm_agents_write_prompt_artifacts_and_mutation_yaml(tmp_path) -> None:
     dataset = make_structural_break_data(n_series=50, length=70, seed=23)
-    graph = build_seed_graph()
+    graph = build_structural_break_seed_graph()
     llm_document = MutationDocument(
         hypotheses=("Add a nonduplicate spectral shape alternative to cover residual frequency structure.",),
         rationale="LLM engineer selected a shape_stats mutation grounded in diagnostics.",
@@ -590,7 +741,7 @@ def test_llm_agents_write_prompt_artifacts_and_mutation_yaml(tmp_path) -> None:
         steps=1,
         output_dir=tmp_path,
     )
-    assert result.auc > 0.7
+    assert result.score > 0.4
     events = [json.loads(line) for line in (tmp_path / "events.jsonl").read_text(encoding="utf-8").strip().splitlines()]
     assert events[0]["mutation"]["add"][0]["alternative_id"] == "spectral_llm"
     prompt_files = sorted((tmp_path / "prompts").glob("step_0001_*.md"))
@@ -608,7 +759,7 @@ def test_llm_agents_write_prompt_artifacts_and_mutation_yaml(tmp_path) -> None:
 
 def test_llm_scientist_failure_aborts_without_deterministic_fallback(tmp_path) -> None:
     dataset = make_structural_break_data(n_series=40, length=70, seed=27)
-    graph = build_seed_graph()
+    graph = build_structural_break_seed_graph()
     client = StaticLLMClient(())
 
     with pytest.raises(RuntimeError, match="no remaining responses"):
@@ -630,7 +781,7 @@ def test_llm_scientist_failure_aborts_without_deterministic_fallback(tmp_path) -
 
 def test_llm_engineer_failure_aborts_without_deterministic_fallback() -> None:
     dataset = make_structural_break_data(n_series=35, length=70, seed=32)
-    graph = build_seed_graph()
+    graph = build_structural_break_seed_graph()
     result = RidgeEvaluator(n_splits=3, seed=32, max_configurations=4).evaluate(graph, dataset.inputs(), dataset.y)
     hypotheses = (
         ScientistAgent().generate(graph, result, max_hypotheses=1)[0],
@@ -643,7 +794,7 @@ def test_llm_engineer_failure_aborts_without_deterministic_fallback() -> None:
 
 def test_llm_memorandum_agent_requires_paper_sections() -> None:
     dataset = make_structural_break_data(n_series=35, length=70, seed=33)
-    graph = build_seed_graph()
+    graph = build_structural_break_seed_graph()
     result = RidgeEvaluator(n_splits=3, seed=33, max_configurations=4).evaluate(graph, dataset.inputs(), dataset.y)
     response = "\n".join(
         [
@@ -745,20 +896,23 @@ def test_missing_env_llm_provider_is_an_error_when_required(tmp_path, monkeypatc
 
 def test_prompt_builder_advertises_source_schema_only_when_enabled() -> None:
     dataset = make_structural_break_data(n_series=35, length=70, seed=24)
-    graph = build_seed_graph()
+    graph = build_structural_break_seed_graph()
     result = RidgeEvaluator(n_splits=3, seed=24, max_configurations=4).evaluate(graph, dataset.inputs(), dataset.y)
     hypothesis = ScientistAgent().generate(graph, result, max_hypotheses=1)
     _system, source_user = PromptBuilder(allow_source=True).engineer_prompts(graph, result, hypothesis)
     _system, primitive_user = PromptBuilder(allow_source=False).engineer_prompts(graph, result, hypothesis)
     assert '"source": "lambda ctx, values:' in source_user
     assert 'add:\n  output:\n    - "lambda ctx, values:' in source_user
+    assert '"output_contract": {"type": "feature_block"' in source_user
+    assert '"torch_source": "lambda ctx, values:' in source_user
+    assert "infer parents" in source_user
     assert '"source": "lambda ctx, values:' not in primitive_user
     assert 'add:\n  output:\n    - "lambda ctx, values:' not in primitive_user
 
 
 def test_failed_llm_source_mutation_is_logged_and_fed_back(tmp_path) -> None:
     dataset = make_structural_break_data(n_series=45, length=70, seed=26)
-    graph = build_seed_graph()
+    graph = build_structural_break_seed_graph()
     bad_document = MutationDocument(
         hypotheses=("Try a source alternative that fails at runtime.",),
         rationale="Exercise execution-error feedback.",
@@ -804,7 +958,7 @@ def test_failed_llm_source_mutation_is_logged_and_fed_back(tmp_path) -> None:
         engineer=LLMEngineerAgent(client, allow_source=True),
         seed=26,
     ).run(dataset.inputs(), dataset.y, steps=1, output_dir=tmp_path)
-    assert result.auc > 0.7
+    assert result.score > 0.6
     events = [json.loads(line) for line in (tmp_path / "events.jsonl").read_text(encoding="utf-8").splitlines()]
     assert len(events) == 1
     assert "failed" not in events[0] or events[0]["failed"] is False
@@ -818,7 +972,7 @@ def test_failed_llm_source_mutation_is_logged_and_fed_back(tmp_path) -> None:
 
 def test_llm_island_mode_uses_scientist_temperature_schedule(tmp_path) -> None:
     dataset = make_structural_break_data(n_series=42, length=70, seed=30)
-    graph = build_seed_graph()
+    graph = build_structural_break_seed_graph()
     document = MutationDocument(
         hypotheses=("Add a spectral shape alternative from island diagnostics.",),
         rationale="Exercise island-specific LLM temperature scheduling.",
@@ -870,7 +1024,7 @@ def test_llm_island_mode_uses_scientist_temperature_schedule(tmp_path) -> None:
         output_dir=tmp_path,
     )
 
-    assert result.auc > 0.7
+    assert result.score > 0.6
     assert [request["temperature"] for request in client.requests] == [0.35, 0.0, 0.5, 0.0]
 
 
@@ -895,7 +1049,7 @@ def test_async_islands_record_failed_candidates_without_crashing(tmp_path) -> No
             )
 
     dataset = make_structural_break_data(n_series=42, length=70, seed=28)
-    graph = build_seed_graph()
+    graph = build_structural_break_seed_graph()
     result = EvolutionLoop(
         graph,
         evaluator=RidgeEvaluator(n_splits=3, seed=28, max_configurations=4),
@@ -910,7 +1064,7 @@ def test_async_islands_record_failed_candidates_without_crashing(tmp_path) -> No
         output_dir=tmp_path,
         max_workers=2,
     )
-    assert result.auc > 0.7
+    assert result.score > 0.7
     events = [json.loads(line) for line in (tmp_path / "events.jsonl").read_text(encoding="utf-8").splitlines()]
     assert len(events) == 2
     assert all(event["failed"] is True for event in events)
@@ -921,7 +1075,7 @@ def test_async_islands_record_failed_candidates_without_crashing(tmp_path) -> No
 
 def test_island_evolution_writes_global_and_island_artifacts(tmp_path) -> None:
     dataset = make_structural_break_data(n_series=60, length=80, seed=25)
-    graph = build_seed_graph()
+    graph = build_structural_break_seed_graph()
     result = EvolutionLoop(graph, evaluator=RidgeEvaluator(n_splits=3, seed=25, max_configurations=8), seed=25).run_islands(
         dataset.inputs(),
         dataset.y,
@@ -930,7 +1084,7 @@ def test_island_evolution_writes_global_and_island_artifacts(tmp_path) -> None:
         output_dir=tmp_path,
         migration_interval=2,
     )
-    assert result.auc > 0.7
+    assert result.score > 0.7
     events = (tmp_path / "events.jsonl").read_text(encoding="utf-8").strip().splitlines()
     assert len(events) == 4
     assert json.loads(events[0])["island"] in {0, 1}
@@ -950,7 +1104,7 @@ def test_island_evolution_writes_global_and_island_artifacts(tmp_path) -> None:
 
 def test_async_island_evolution_writes_concurrent_artifacts(tmp_path) -> None:
     dataset = make_structural_break_data(n_series=50, length=70, seed=27)
-    graph = build_seed_graph()
+    graph = build_structural_break_seed_graph()
     result = EvolutionLoop(graph, evaluator=RidgeEvaluator(n_splits=3, seed=27, max_configurations=6), seed=27).run_async_islands(
         dataset.inputs(),
         dataset.y,
@@ -960,7 +1114,7 @@ def test_async_island_evolution_writes_concurrent_artifacts(tmp_path) -> None:
         migration_interval=2,
         max_workers=2,
     )
-    assert result.auc > 0.7
+    assert result.score > 0.7
     events = [json.loads(line) for line in (tmp_path / "events.jsonl").read_text(encoding="utf-8").strip().splitlines()]
     assert len(events) == 4
     assert {event["mode"] for event in events} == {"async_island"}
@@ -981,7 +1135,7 @@ def test_async_island_evolution_writes_concurrent_artifacts(tmp_path) -> None:
 
 def test_demo_predictions_are_deterministic() -> None:
     dataset = make_structural_break_data(n_series=60, length=70, seed=31)
-    graph = build_seed_graph()
+    graph = build_structural_break_seed_graph()
     config = graph.default_config()
     x1, names1, _ = graph.evaluate_features(dataset.inputs(), config)
     x2, names2, _ = graph.evaluate_features(dataset.inputs(), config)

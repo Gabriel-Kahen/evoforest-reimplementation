@@ -1,6 +1,17 @@
 {
+  "version": 1,
   "step": 1,
+  "mode": "single",
   "island": null,
+  "score": 0.7477819221905148,
+  "config": {
+    "activation": "clipped_linear",
+    "ridge_g": "huber",
+    "ridge_w": "uniform",
+    "segment_stats": "basic",
+    "shape_stats": "cusum",
+    "trend_stats": "linear"
+  },
   "graph": {
     "name": "evoforest_seed",
     "globals": {

@@ -11,7 +11,7 @@ from evoforest_arch.evolution import EvolutionLoop
 from evoforest_arch.llm import DEFAULT_ISLAND_TEMPERATURES, LLMEngineerAgent, LLMScientistAgent, PromptBuilder, StaticLLMClient
 from evoforest_arch.maintenance import GraphMaintenance
 from evoforest_arch.mutations import MutationDocument, MutationEngine, MutationSpec
-from evoforest_arch.seed import build_seed_graph
+from evoforest_arch.seed import build_structural_break_seed_graph
 from evoforest_arch.synthetic import make_structural_break_data
 
 from benchmarks.common import (
@@ -33,7 +33,7 @@ def build_report(output_dir: Path, seed: int = 17, quick: bool = False) -> dict[
     length = 64 if quick else 80
     max_configurations = 8 if quick else 16
 
-    graph = build_seed_graph()
+    graph = build_structural_break_seed_graph()
     graph.validate_acyclic()
     dataset = make_structural_break_data(n_series=n_series, length=length, seed=seed)
     evaluator = RidgeEvaluator(n_splits=3, seed=seed, max_configurations=max_configurations, irls_steps=2)
@@ -46,13 +46,13 @@ def build_report(output_dir: Path, seed: int = 17, quick: bool = False) -> dict[
         refine_globals=True,
         refine_steps=1,
         refine_backend="auto",
-    ).evaluate(build_seed_graph(), dataset.inputs(), dataset.y)
+    ).evaluate(build_structural_break_seed_graph(), dataset.inputs(), dataset.y)
 
     run_dir = output_dir / "artifacts" / "conformance_evolution"
     if run_dir.exists():
         shutil.rmtree(run_dir)
     evolution_result = EvolutionLoop(
-        build_seed_graph(),
+        build_structural_break_seed_graph(),
         evaluator=RidgeEvaluator(n_splits=3, seed=seed, max_configurations=4),
         seed=seed,
     ).run(dataset.inputs(), dataset.y, steps=1, output_dir=run_dir)
@@ -111,9 +111,9 @@ def build_report(output_dir: Path, seed: int = 17, quick: bool = False) -> dict[
         ),
         requirement(
             "configuration_search",
-            "Evaluator scores capped graph configurations and reports best-config ROC-AUC.",
-            bool(search["capped"]) and int(search["evaluated"]) == max_configurations and float(search["best_config_auc"]) == result.auc,
-            {"evaluated": search["evaluated"], "total": search["total"], "capped": search["capped"], "auc": result.auc},
+            "Evaluator scores capped graph configurations and reports the best configured task score.",
+            bool(search["capped"]) and int(search["evaluated"]) == max_configurations and float(search["best_config_score"]) == result.score,
+            {"evaluated": search["evaluated"], "total": search["total"], "capped": search["capped"], "score": result.score},
         ),
         requirement(
             "ancestor_cache",
@@ -142,7 +142,7 @@ def build_report(output_dir: Path, seed: int = 17, quick: bool = False) -> dict[
         requirement(
             "ridge_diagnostics",
             "Evaluator emits diagnostic global Ridge and exact linear contribution reconstruction metrics.",
-            "global_ridge_auc" in scoring and float(linear_shap["global_reconstruction_error"]) < 1e-8,
+            "global_ridge_score" in scoring and float(linear_shap["global_reconstruction_error"]) < 1e-8,
             {"scoring_context": scoring, "linear_shap": linear_shap},
         ),
         requirement(

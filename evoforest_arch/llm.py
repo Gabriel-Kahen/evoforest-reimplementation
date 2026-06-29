@@ -250,9 +250,9 @@ class GeminiLLMClient:
 @dataclass
 class PromptBuilder:
     task_context: str = (
-        "Clean-room EvoForest reimplementation for supervised time-series "
-        "experiments. The executable mutation layer accepts registry-backed primitives, "
-        "optional trusted source-backed alternatives, and structured mutation documents."
+        "Clean-room EvoForest reimplementation for supervised tasks. "
+        "The executable mutation layer accepts registry-backed primitives, "
+        "sandboxed source-backed alternatives, and structured mutation documents."
     )
     max_graph_chars: int = 18000
     registry: PrimitiveRegistry | None = None
@@ -336,6 +336,7 @@ class PromptBuilder:
                     "add:",
                     "  output:",
                     "    - \"lambda ctx, values: <expression>\"",
+                    "    - {\"source\": \"lambda ctx, values: <expression>\", \"parents\": [\"parent_node\"], \"node_kind\": \"output\", \"output_contract\": {\"type\": \"feature_block\", \"min_columns\": 1, \"differentiable\": true}, \"torch_source\": \"lambda ctx, values: <torch expression>\"}",
                     "",
                     "You may also use the extended machine schema below when a mutation needs explicit parents, nodes, or globals.",
                 ]
@@ -365,13 +366,17 @@ class PromptBuilder:
             schema_lines.extend(
                 [
                     "",
-                    "For trusted source-backed alternatives, use primitive \"source\" and include:",
+                    "For sandboxed source-backed alternatives, use primitive \"source\" and include:",
                     "  \"source\": \"lambda ctx, values: <expression>\"",
+                    "  \"parents\": [\"explicit_parent_node\"]",
                     "  \"global_refs\": [\"optional_existing_or_new_global\"]",
+                    "  \"node_kind\": \"intermediate|callable|output|fitting\"",
+                    "  \"output_contract\": {\"type\": \"feature_block\", \"n_columns\": 1, \"differentiable\": true}",
+                    "  \"torch_source\": \"lambda ctx, values: <optional differentiable torch expression>\"",
                     "The lambda receives ctx and values, where values maps parent node names to evaluated parent outputs.",
                     "Available lambda symbols: np, math, FeatureBlock, CallableFamily, ResidualWeightRule.",
-                    "Use ctx.read_input('series'), ctx.read_input('boundary'), or declared parent values as needed.",
-                    "Paper-style nested lambda entries are treated as source-backed alternatives with no explicit parents; use ctx.read_input(...) in those lambdas.",
+                    "Use task inputs from ctx.read_input(...) only when they are part of the current task schema.",
+                    "Paper-style shorthand lambdas infer parents from values['parent'] and global_refs from ctx.globals.get('name'); use the object form when shape contracts or torch_source matter.",
                 ]
             )
         user = "\n".join(
@@ -406,7 +411,7 @@ class PromptBuilder:
                 "Intermediate and callable nodes contain competing alternatives; a configuration selects one alternative per reachable such node.",
                 "The output node is different: all output alternatives are evaluated as features for each configuration.",
                 "Fitting nodes are selected by configuration and may alter Ridge sample weights or iterative residual reweighting.",
-                "Score is the best configuration's stratified Ridge cross-validation ROC-AUC.",
+                "Score is the best configuration's cross-validated task score from the configured evaluator scorer.",
                 "Evaluation caches deterministic alternatives by selected ancestor subpath, so shared intermediates can be reused across configurations.",
                 "The @globals store contains persistent trainable parameters. New globals are append-only at mutation time; unused globals may be pruned by maintenance.",
                 "TOON diagnostics include exact additive Ridge contribution fields: shap is the normalized global linear contribution, and cv_shap is the out-of-fold contribution magnitude.",

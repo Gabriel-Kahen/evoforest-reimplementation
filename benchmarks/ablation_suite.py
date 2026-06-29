@@ -6,7 +6,7 @@ from typing import Any
 
 from evoforest_arch.evaluator import RidgeEvaluator
 from evoforest_arch.graph import Graph
-from evoforest_arch.seed import build_seed_graph
+from evoforest_arch.seed import build_structural_break_seed_graph
 from evoforest_arch.synthetic import make_structural_break_data
 
 from benchmarks.common import (
@@ -32,14 +32,14 @@ def build_report(output_dir: Path, seed: int = 29, quick: bool = False) -> dict[
     dataset = make_structural_break_data(n_series=n_series, length=length, seed=seed)
     evaluator = RidgeEvaluator(n_splits=3, seed=seed, max_configurations=max_configurations, irls_steps=2)
 
-    full_graph = build_seed_graph()
+    full_graph = build_structural_break_seed_graph()
     full_result = evaluator.evaluate(full_graph, dataset.inputs(), dataset.y)
     full_eval = evaluation_summary(full_result)
     full_graph_summary = graph_summary(full_graph)
 
     ablations = [
-        ("full", "No ablation; capped configuration search over the full seed graph.", build_seed_graph(), None),
-        ("default_path_only", "Disable configuration search by scoring only the default selected path.", build_seed_graph(), build_seed_graph().default_config()),
+        ("full", "No ablation; capped configuration search over the full seed graph.", build_structural_break_seed_graph(), None),
+        ("default_path_only", "Disable configuration search by scoring only the default selected path.", build_structural_break_seed_graph(), build_structural_break_seed_graph().default_config()),
         ("raw_output_only", "Remove output ensemble diversity by keeping only raw concatenated outputs.", output_raw_only(), None),
         ("no_callable_choice", "Collapse callable family search to the identity callable.", only_alternatives("activation", ("identity",)), None),
         ("no_fitting_choice", "Collapse fitting-rule search to uniform sample weights and identity residual weights.", no_fitting_choice(), None),
@@ -55,8 +55,8 @@ def build_report(output_dir: Path, seed: int = 29, quick: bool = False) -> dict[
             "name": name,
             "description": description,
             "passed": ablation_surface_changed(name, eval_summary, graph_summary(graph), full_eval, full_graph_summary),
-            "auc": float(result.auc),
-            "delta_auc_vs_full": float(result.auc - full_result.auc),
+            "score": float(result.score),
+            "delta_score_vs_full": float(result.score - full_result.score),
             "evaluation": eval_summary,
             "graph": graph_summary(graph),
         }
@@ -71,31 +71,31 @@ def build_report(output_dir: Path, seed: int = 29, quick: bool = False) -> dict[
             "passed": sum(1 for row in rows if row["passed"]),
             "total": len(rows),
             "all_passed": all(row["passed"] for row in rows),
-            "full_auc": float(full_result.auc),
+            "full_score": float(full_result.score),
         },
         "ablations": rows,
     }
 
 
 def output_raw_only() -> Graph:
-    graph = build_seed_graph()
+    graph = build_structural_break_seed_graph()
     return only_alternatives_in_graph(graph, "output", ("raw_concat",))
 
 
 def no_fitting_choice() -> Graph:
-    graph = build_seed_graph()
+    graph = build_structural_break_seed_graph()
     only_alternatives_in_graph(graph, "ridge_w", ("uniform",))
     only_alternatives_in_graph(graph, "ridge_g", ("identity",))
     return graph
 
 
 def only_alternatives(node_name: str, alternative_ids: tuple[str, ...]) -> Graph:
-    graph = build_seed_graph()
+    graph = build_structural_break_seed_graph()
     return only_alternatives_in_graph(graph, node_name, alternative_ids)
 
 
 def without_alternatives(node_name: str, alternative_ids: tuple[str, ...]) -> Graph:
-    graph = build_seed_graph()
+    graph = build_structural_break_seed_graph()
     remove = set(alternative_ids)
     graph.nodes[node_name].alternatives = [alt for alt in graph.nodes[node_name].alternatives if alt.id not in remove]
     return graph
@@ -132,8 +132,8 @@ def markdown_report(payload: dict[str, Any]) -> str:
         [
             row["name"],
             status_mark(bool(row["passed"])),
-            fmt_float(row["auc"]),
-            fmt_float(row["delta_auc_vs_full"]),
+            fmt_float(row["score"]),
+            fmt_float(row["delta_score_vs_full"]),
             row["evaluation"]["n_configs_evaluated"],
             row["evaluation"]["n_configs_total"],
             row["evaluation"]["n_features"],
@@ -145,9 +145,9 @@ def markdown_report(payload: dict[str, Any]) -> str:
             "# Ablation Benchmark",
             str(payload["scope"]),
             f"Seed: `{payload['seed']}`",
-            f"Full graph AUC: `{fmt_float(payload['summary']['full_auc'])}`",
+            f"Full graph score: `{fmt_float(payload['summary']['full_score'])}`",
             f"Passed: `{payload['summary']['passed']}/{payload['summary']['total']}`",
-            markdown_table(["Ablation", "Status", "AUC", "Delta", "Configs Eval", "Configs Total", "Features"], rows),
+            markdown_table(["Ablation", "Status", "Score", "Delta", "Configs Eval", "Configs Total", "Features"], rows),
         ]
     )
 

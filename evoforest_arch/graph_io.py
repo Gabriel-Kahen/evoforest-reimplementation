@@ -32,7 +32,8 @@ def graph_from_dict(
     graph_payload = payload.get("graph", payload)
     if not isinstance(graph_payload, dict):
         raise TypeError("Graph payload must be a mapping.")
-    graph = Graph(name=str(graph_payload.get("name", "evoforest")))
+    task_schema = graph_payload.get("task_schema")
+    graph = Graph(name=str(graph_payload.get("name", "evoforest")), task_schema=task_schema if isinstance(task_schema, dict) else None)
 
     node_rows = graph_payload.get("nodes", [])
     if not isinstance(node_rows, list):
@@ -76,6 +77,8 @@ def graph_from_dict(
             alt_id = str(alt_row["id"])
             parents = tuple(str(parent) for parent in alt_row.get("parents", []))
             global_refs = tuple(str(name) for name in alt_row.get("global_refs", []))
+            output_contract = dict(alt_row.get("output_contract", {})) if isinstance(alt_row.get("output_contract", {}), dict) else {}
+            torch_source = str(alt_row.get("torch_source", "") or "")
             if source or primitive == "source":
                 if not allow_source:
                     raise ValueError("Deserializing source-backed alternatives requires allow_source=True.")
@@ -86,6 +89,9 @@ def graph_from_dict(
                     description=str(alt_row.get("description", "")),
                     global_refs=global_refs,
                     tags=tuple(str(tag) for tag in alt_row.get("tags", [])),
+                    node_kind=str(row["kind"]),
+                    output_contract=output_contract,
+                    torch_source=torch_source,
                 )
             elif primitive:
                 alternative = registry.build(str(primitive), alt_id, parents)
@@ -105,9 +111,9 @@ def graph_from_dict(
     return graph
 
 
-def graph_from_path(path: str | pathlib.Path, *, allow_source: bool = False) -> Graph:
+def graph_from_path(path: str | pathlib.Path, *, registry: PrimitiveRegistry | None = None, allow_source: bool = False) -> Graph:
     payload = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
-    return graph_from_dict(payload, allow_source=allow_source)
+    return graph_from_dict(payload, registry=registry, allow_source=allow_source)
 
 
 def write_graph(path: str | pathlib.Path, graph: Graph, *, metadata: dict[str, Any] | None = None) -> pathlib.Path:

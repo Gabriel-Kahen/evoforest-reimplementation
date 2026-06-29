@@ -19,8 +19,9 @@ from evoforest_arch.llm import (
     load_env_file,
 )
 from evoforest_arch.mutations import MutationEngine
+from evoforest_arch.primitives import PrimitiveRegistry
 from evoforest_arch.production import (
-    CV_AUC_PROMOTION_POLICY,
+    CV_SCORE_PROMOTION_POLICY,
     PAPER_PROFILE,
     PRODUCTION_PROFILE,
     ProductionConfig,
@@ -31,8 +32,9 @@ from evoforest_arch.production import (
     paper_profile_defaults,
     recheck_run,
 )
-from evoforest_arch.seed import build_seed_graph
+from evoforest_arch.seed import build_structural_break_seed_graph
 from evoforest_arch.synthetic import make_structural_break_data
+from evoforest_arch.task import TaskSchema, task_schema_for_dataset
 
 
 def parse_temperature_schedule(value: str) -> tuple[float, ...]:
@@ -150,8 +152,10 @@ def main(argv: list[str] | None = None) -> int:
     evolve = sub.add_parser("evolve", help="Run resume-safe production evolution with fixed split manifests.")
     evolve.add_argument("--profile", choices=(PRODUCTION_PROFILE, PAPER_PROFILE), default=PRODUCTION_PROFILE)
     evolve.add_argument("--steps", type=int, default=None, help="New steps to run. With --resume, this is additional steps.")
-    evolve.add_argument("--dataset", choices=("synthetic-structural-break",), default="synthetic-structural-break")
+    evolve.add_argument("--dataset", choices=("synthetic-structural-break", "synthetic-tabular"), default="synthetic-structural-break")
     evolve.add_argument("--n-series", type=int, default=240)
+    evolve.add_argument("--n-samples", type=int, default=None, help="Alias for --n-series on generic row-aligned tasks.")
+    evolve.add_argument("--n-features", type=int, default=12)
     evolve.add_argument("--length", type=int, default=160)
     evolve.add_argument("--boundary", type=int, default=None)
     evolve.add_argument("--seed", type=int, default=17)
@@ -165,7 +169,7 @@ def main(argv: list[str] | None = None) -> int:
     evolve.add_argument("--no-refine-globals", dest="refine_globals", action="store_false")
     evolve.add_argument("--refine-steps", type=int, default=None)
     evolve.add_argument("--refine-backend", choices=("auto", "numpy", "torch"), default=None)
-    evolve.add_argument("--promotion-policy", choices=(VALIDATION_PROMOTION_POLICY, CV_AUC_PROMOTION_POLICY), default=None)
+    evolve.add_argument("--promotion-policy", choices=(VALIDATION_PROMOTION_POLICY, CV_SCORE_PROMOTION_POLICY), default=None)
     evolve.add_argument("--min-train-improvement", type=float, default=None)
     evolve.add_argument("--min-validation-improvement", type=float, default=None)
     evolve.add_argument("--allow-source-mutations", action="store_true")
@@ -224,7 +228,7 @@ def main(argv: list[str] | None = None) -> int:
 
 def run_demo(args: argparse.Namespace) -> int:
     dataset = make_structural_break_data(n_series=args.n_series, length=args.length, seed=args.seed)
-    graph = build_seed_graph()
+    graph = build_structural_break_seed_graph()
     evaluator = RidgeEvaluator(
         n_splits=args.folds,
         seed=args.seed,
@@ -236,9 +240,10 @@ def run_demo(args: argparse.Namespace) -> int:
     )
     task_context = args.task_context_file.read_text(encoding="utf-8") if args.task_context_file is not None else ""
     task_sources = read_task_sources(args.task_source_file)
-    scientist, engineer, memorandum_agent = build_llm_agents(args, task_context=task_context)
+    registry = PrimitiveRegistry.for_task(TaskSchema.structural_break())
+    scientist, engineer, memorandum_agent = build_llm_agents(args, task_context=task_context, registry=registry)
     source_allowed = args.allow_source_mutations or scientist is not None or engineer is not None
-    mutation_engine = MutationEngine(allow_source=source_allowed)
+    mutation_engine = MutationEngine(registry=registry, allow_source=source_allowed)
     loop = EvolutionLoop(
         graph,
         evaluator=evaluator,
@@ -264,7 +269,7 @@ def run_demo(args: argparse.Namespace) -> int:
     else:
         result = loop.run(dataset.inputs(), dataset.y, steps=args.steps, output_dir=args.output)
     summary = {
-        "auc": result.auc,
+        "score": result.score,
         "config": result.config,
         "output": str(args.output),
     }
@@ -276,14 +281,16 @@ def run_evolve(args: argparse.Namespace) -> int:
     args = apply_evolve_profile(args)
     task_context = args.task_context_file.read_text(encoding="utf-8") if args.task_context_file is not None else ""
     task_sources = read_task_sources(args.task_source_file)
-    scientist, engineer, memorandum_agent = build_llm_agents(args, task_context=task_context)
+    registry = PrimitiveRegistry.for_task(task_schema_for_dataset(args.dataset))
+    scientist, engineer, memorandum_agent = build_llm_agents(args, task_context=task_context, registry=registry)
     config = ProductionConfig(
         output_dir=args.output,
         profile=args.profile,
         steps=args.steps,
         seed=args.seed,
         dataset_name=args.dataset,
-        n_series=args.n_series,
+        n_series=args.n_samples if args.n_samples is not None else args.n_series,
+        n_features=args.n_features,
         length=args.length,
         boundary=args.boundary,
         validation_fraction=args.validation_fraction,
@@ -321,13 +328,14 @@ def build_llm_agents(
     args: argparse.Namespace,
     *,
     task_context: str = "",
+    registry: PrimitiveRegistry | None = None,
 ) -> tuple[LLMScientistAgent | None, LLMEngineerAgent | None, LLMMemorandumAgent | None]:
     provider = resolve_llm_provider(args.llm_provider, args.env_file)
     if provider is None:
         return None, None, None
     client = llm_client_from_env(args.env_file)
     source_allowed = args.allow_source_mutations or provider is not None
-    prompt_builder = PromptBuilder(task_context=task_context or PromptBuilder().task_context, allow_source=source_allowed)
+    prompt_builder = PromptBuilder(task_context=task_context or PromptBuilder().task_context, registry=registry, allow_source=source_allowed)
     return (
         LLMScientistAgent(
             client,
@@ -338,6 +346,7 @@ def build_llm_agents(
         LLMEngineerAgent(
             client,
             prompt_builder=prompt_builder,
+            registry=registry,
             temperature=args.llm_engineer_temperature,
             allow_source=source_allowed,
         ),

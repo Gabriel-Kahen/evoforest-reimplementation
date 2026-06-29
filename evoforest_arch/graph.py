@@ -54,6 +54,8 @@ class NodeAlternative:
     global_refs: tuple[str, ...] = ()
     torch_fn: AlternativeFn | None = None
     source: str = ""
+    torch_source: str = ""
+    output_contract: dict[str, object] = field(default_factory=dict)
     stats: dict[str, object] = field(default_factory=dict)
     age: int = 0
 
@@ -67,6 +69,8 @@ class NodeAlternative:
             "global_refs": list(self.global_refs),
             "has_torch": self.torch_fn is not None,
             "source": self.source,
+            "torch_source": self.torch_source,
+            "output_contract": copy.deepcopy(self.output_contract),
             "age": int(self.age),
             "stats": copy.deepcopy(self.stats),
         }
@@ -113,8 +117,9 @@ class EvalContext:
 
 
 class Graph:
-    def __init__(self, name: str = "evoforest") -> None:
+    def __init__(self, name: str = "evoforest", task_schema: dict[str, object] | None = None) -> None:
         self.name = name
+        self.task_schema = copy.deepcopy(task_schema) if task_schema is not None else None
         self.nodes: dict[str, GraphNode] = {}
         self.globals = GlobalStore()
 
@@ -138,6 +143,8 @@ class Graph:
         global_refs: tuple[str, ...] = (),
         torch_fn: AlternativeFn | None = None,
         source: str = "",
+        torch_source: str = "",
+        output_contract: dict[str, object] | None = None,
     ) -> None:
         if node_name not in self.nodes:
             raise KeyError(f"Unknown node {node_name!r}.")
@@ -155,6 +162,8 @@ class Graph:
                 global_refs=global_refs,
                 torch_fn=torch_fn,
                 source=source,
+                torch_source=torch_source,
+                output_contract=copy.deepcopy(output_contract or {}),
             )
         )
 
@@ -280,11 +289,11 @@ class Graph:
             importance = _as_float(row.get("importance", 0.0))
             shap_importance = _as_float(row.get("shap_importance", 0.0))
             mean_abs_shap = _as_float(row.get("mean_abs_shap", 0.0))
-            feature_auc = _as_float(row.get("max_feature_auc", 0.0))
+            target_alignment_value = _as_float(row.get("max_target_alignment", 0.0))
             residual_corr = _as_float(row.get("mean_abs_residual_corr", 0.0))
             redundancy = _as_float(row.get("mean_redundancy", 0.0))
             weight_stability = _as_float(row.get("mean_weight_stability", 0.0))
-            config_auc = _as_float(row.get("config_auc", 0.0))
+            config_score = _as_float(row.get("config_score", 0.0))
 
             stats["last_feature_count"] = int(feature_count)
             stats["mean_feature_count"] = _running_mean(stats.get("mean_feature_count", 0.0), count, feature_count)
@@ -294,16 +303,16 @@ class Graph:
             stats["mean_shap_importance"] = _running_mean(stats.get("mean_shap_importance", 0.0), count, shap_importance)
             stats["last_mean_abs_shap"] = mean_abs_shap
             stats["mean_abs_shap"] = _running_mean(stats.get("mean_abs_shap", 0.0), count, mean_abs_shap)
-            stats["max_feature_auc"] = max(_as_float(stats.get("max_feature_auc", 0.0)), feature_auc)
+            stats["max_target_alignment"] = max(_as_float(stats.get("max_target_alignment", 0.0)), target_alignment_value)
             stats["last_abs_residual_corr"] = residual_corr
             stats["mean_abs_residual_corr"] = _running_mean(stats.get("mean_abs_residual_corr", 0.0), count, residual_corr)
             stats["last_redundancy"] = redundancy
             stats["mean_redundancy"] = _running_mean(stats.get("mean_redundancy", 0.0), count, redundancy)
             stats["last_weight_stability"] = weight_stability
             stats["mean_weight_stability"] = _running_mean(stats.get("mean_weight_stability", 0.0), count, weight_stability)
-            stats["last_config_auc"] = config_auc
-            stats["mean_config_auc"] = _running_mean(stats.get("mean_config_auc", 0.0), count, config_auc)
-            stats["best_config_auc"] = max(_as_float(stats.get("best_config_auc", 0.0)), config_auc)
+            stats["last_config_score"] = config_score
+            stats["mean_config_score"] = _running_mean(stats.get("mean_config_score", 0.0), count, config_score)
+            stats["best_config_score"] = max(_as_float(stats.get("best_config_score", 0.0)), config_score)
 
     def alternative_statistics_snapshot(self) -> list[dict[str, object]]:
         rows: list[dict[str, object]] = []
@@ -322,7 +331,7 @@ class Graph:
             rows,
             key=lambda row: (
                 -_as_float(row.get("mean_importance", row.get("last_importance", 0.0))),
-                -_as_float(row.get("max_feature_auc", 0.0)),
+                -_as_float(row.get("max_target_alignment", 0.0)),
                 str(row.get("name", "")),
             ),
         )
@@ -420,6 +429,7 @@ class Graph:
     def to_dict(self) -> dict[str, object]:
         return {
             "name": self.name,
+            "task_schema": copy.deepcopy(self.task_schema),
             "globals": self.globals.to_dict(),
             "nodes": [node.to_dict() for node in self.nodes.values()],
         }

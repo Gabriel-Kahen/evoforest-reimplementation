@@ -12,12 +12,17 @@ the following modules.
     history plus ancestor-conditioned cache keys.
 - `evoforest_arch.globals`
   - Persistent global parameters that alternatives can read and refine.
+- `evoforest_arch.task`
+  - Task schemas for row-aligned inputs, targets, default input names, and
+    dataset-to-task selection.
 - `evoforest_arch.primitives`
-  - A compact primitive library for time-series change statistics, callable gates,
-    activations, output compositions, and Ridge fitting rules.
+  - A compact primitive library with task-selected tabular or structural-break
+    feature primitives plus common callable gates, activations, output
+    compositions, and Ridge fitting rules.
 - `evoforest_arch.source`
-  - Trusted source-backed lambda alternatives that mirror the paper's YAML
-    mutation representation.
+  - Sandboxed source-backed lambda alternatives that mirror the paper's YAML
+    mutation representation, with timeout/resource controls, deterministic
+    validation, output contracts, and optional torch-source evaluators.
 - `evoforest_arch.evaluator`
   - Capped configuration enumeration, default paper-mode global refinement, Ridge
     cross-validation, fitting-node execution, diagnostic global Ridge fitting,
@@ -43,8 +48,9 @@ the following modules.
     only when explicitly requested.
 - `evoforest_arch.mutations`
   - YAML-style mutation documents, paper-style node-keyed lambda additions,
-    mutation specs, removals, appended globals, source-backed alternatives, and
-    a registry-driven deterministic compatibility mutation engine.
+    mutation specs, removals, appended globals, source-backed alternatives,
+    explicit parent/global/node-kind/output-contract metadata, and a
+    registry-driven deterministic compatibility mutation engine.
 - `evoforest_arch.maintenance`
   - Graph cleanup for duplicate alternatives, unreachable nodes, empty nodes,
     unused globals, and DAG validity.
@@ -53,12 +59,16 @@ the following modules.
     memoranda, sequential and asynchronous island execution, failed-candidate
     feedback, plus rejected-candidate salvage.
 - `evoforest_arch.seed`
-  - A small seed graph that demonstrates intermediate alternatives, callable nodes,
-    output alternatives, fitting nodes, and global parameters.
+  - Task-selected seed graphs. The default is a generic tabular graph; the
+    structural-break graph is an explicit specialization with the same
+    intermediate/callable/output/fitting/global architecture.
 
 ## Paper-Specific Semantics
 
 - `input` nodes read data supplied by the task.
+- A `TaskSchema` defines the task's inputs and default input. The seed builder and
+  primitive registry are selected from that schema, so structural-break inputs are
+  no longer assumed by the architecture.
 - `intermediate` nodes contain competing tensor-producing alternatives.
 - `callable` nodes contain competing alternatives that return reusable functions.
 - `output` alternatives are not selected by configuration. Every output alternative
@@ -67,15 +77,15 @@ the following modules.
   weights, and `ridge_g` returns a residual-to-weight rule used in iterative
   reweighted least squares.
 - The evaluator enumerates reachable intermediate, callable, and fitting alternatives
-  up to `max_configurations`; graph fitness is the best configuration ROC-AUC.
+  up to `max_configurations`; graph fitness is the best configured task score.
 - Configuration search shares a cache across evaluated candidates. Cache keys encode
   the selected ancestor subpath for each alternative, so a reused intermediate is
   computed once when all of its ancestors agree, but recomputed when a parent
   alternative changes.
 - The Ridge readout standardizes features, selects alpha from a log-scale grid using
   a leave-one-out leverage criterion inside each fold, scores each configuration by
-  mean fold ROC-AUC, records fold AUC dispersion, and summarizes the evaluated
-  configuration AUC range.
+  mean fold task score, records fold score dispersion, and summarizes the evaluated
+  configuration score range.
 - `ridge_g` residual rules are applied through an explicit IRLS loop: after the
   initial Ridge fit, residuals are converted to weights and Ridge is refit for the
   configured number of `irls_steps`, with per-fold iteration diagnostics recorded.
@@ -89,8 +99,8 @@ the following modules.
 - For stateful evaluations, the best configuration updates persistent
   alternative-level statistics. Each alternative ages once per stateful evaluation,
   and participating alternatives accumulate rolling summaries of feature count,
-  importance, standalone AUC, residual coverage, redundancy, fold-weight stability,
-  and configuration AUC. These summaries are serialized in the graph and surfaced
+  importance, standalone score, residual coverage, redundancy, fold-weight stability,
+  and configuration score. These summaries are serialized in the graph and surfaced
   in feedback/TOON artifacts.
 - Paper-mode global refinement runs before configuration scoring when trainable
   globals are active, then globals are frozen for Ridge evaluation. When PyTorch is
@@ -100,12 +110,15 @@ the following modules.
 - Mutation proposals follow a two-role pipeline: a scientist agent turns feature and
   subnode diagnostics into hypotheses, and an engineer agent emits structured
   YAML-style documents with rationale, new nodes, removals, appended globals, and
-  additions. Additions can reference built-in primitives or, when trusted source
-  mutations are explicitly enabled, source-backed `lambda ctx, values: ...`
-  alternatives. LLM-backed engineer prompts are lambda-first and also accept the
-  paper's node-keyed YAML form. The default agents are deterministic, while
-  optional LLM-backed agents use the same document contract and persist their
-  prompts and responses.
+  additions. Additions can reference built-in primitives or, when source
+  mutations are enabled, sandboxed `lambda ctx, values: ...` alternatives.
+  Paper-style shorthand lambdas infer parents from `values["parent"]` and global
+  references from `ctx.globals.get("name")`; the extended schema preserves
+  explicit parents, global refs, output contracts, node kind, and optional
+  `torch_source` for differentiable refinement. LLM-backed engineer prompts are
+  lambda-first and also accept the paper's node-keyed YAML form. The default
+  agents are deterministic, while optional LLM-backed agents use the same
+  document contract and persist their prompts and responses.
   LLM-backed agents are fail-fast: request failures, unparseable hypotheses, invalid
   mutation documents, malformed memorandum updates, and missing provider
   configuration raise errors instead of falling back to deterministic agents.
@@ -114,7 +127,7 @@ the following modules.
   zero temperature for mutation synthesis.
 - At run startup, a task-context summary is written to `task_context.md` and injected
   into default LLM prompt builders. It records optional task-source excerpts,
-  runtime tensor inventory, target balance, scorer mechanics, and implementation
+  runtime tensor inventory, target summary, scorer mechanics, and implementation
   constraints so mutations are grounded in the actual task interface.
 - After each mutation, maintenance validates the DAG, collapses exact duplicate
   alternatives, prunes unreachable structure, and removes unused globals.
@@ -158,10 +171,10 @@ faithful software substrate for the paper's architectural pattern.
 Known approximations:
 
 - The paper's private implementation is PyTorch-first. This repo now treats the
-  PyTorch L-BFGS path as paper mode. Arbitrary clean-room primitives need a
-  `torch_fn` to participate in that path; otherwise refinement records a skipped
-  torch reason. The deterministic NumPy coordinate refiner is explicit
-  compatibility behavior.
+  PyTorch L-BFGS path as paper mode. Registry primitives need a `torch_fn`, and
+  source-backed alternatives need `torch_source`, to participate in that path;
+  otherwise refinement records a skipped torch reason. The deterministic NumPy
+  coordinate refiner is explicit compatibility behavior.
 - The paper's long run used four asynchronous GPU islands; production `evolve`
   now defaults to four durable island-native process actors mapped to
   `cuda:0,cuda:1,cuda:2,cuda:3`, with the paper-style scientist temperature
@@ -171,27 +184,29 @@ Known approximations:
   commits, island memoranda, and migration target state changes are
   process-isolated per dedicated device.
 - The default production profile remains stricter than the paper's reported
-  global-best CV-AUC frontier: a production candidate must improve both train CV
+  global-best CV score frontier: a production candidate must improve both train CV
   score and a held-out validation recheck before it can become an island or
-  global best. Use `--profile paper` to switch to the paper-style CV ROC-AUC
+  global best. Use `--profile paper` to switch to the paper-style CV task score
   frontier without the validation gate.
 - Cross-configuration caching assumes alternatives are deterministic over their
-  parents, inputs, and fixed globals during one evaluator pass. Trusted source-backed
-  alternatives that deliberately perform side effects are outside that assumption.
+  parents, inputs, and fixed globals during one evaluator pass. Source-backed
+  alternatives are rerun for deterministic validation inside the sandbox, but this
+  is still a local execution boundary rather than a hardened container for hostile
+  code.
 - The LLM scientist/engineer/memorandum loop is represented by deterministic local
   agents by default, plus optional OpenAI, Claude, or Gemini LLM-backed agents
   configured from environment variables or a `.env` file. Source-backed
-  alternatives recreate the paper's lambda-style graph edits for trusted local
-  use, but this does not include the authors' private model stack, exact prompt
-  corpus, production sandbox, or distributed GPU scheduler. Task-context summaries
-  are deterministic runtime/source summaries rather than private LLM-authored
-  domain briefs.
+  alternatives recreate the paper's lambda-style graph edits with subprocess
+  timeout/resource validation, but this does not include the authors' private
+  model stack, exact prompt corpus, production sandbox, or distributed GPU
+  scheduler. Task-context summaries are deterministic runtime/source summaries
+  rather than private LLM-authored domain briefs.
 - The diagnostic table is TOON-like and includes feature dependencies, subnode
-  aggregates, importance, standalone AUC, max correlation, high-correlation counts,
+  aggregates, importance, standalone score, max correlation, high-correlation counts,
   residual correlations, class effect size, exact additive Ridge contribution
-  summaries, diagnostic global Ridge AUC, valid-feature-pool Ridge AUC,
-  fold-weight stability, fold AUC dispersion, effective rank, and evaluated
-  configuration AUC range. It is not the full private
+  summaries, diagnostic global Ridge score, valid-feature-pool Ridge score,
+  fold-weight stability, fold score dispersion, effective rank, and evaluated
+  configuration score range. It is not the full private
   diagnostic schema. Alternative-level history is a clean-room rolling aggregate over
   the best stateful evaluation path rather than the authors' private statistic table,
   the SHAP-style fields are exact for this repo's standardized linear Ridge basis

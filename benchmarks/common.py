@@ -73,7 +73,7 @@ def evaluation_summary(result: EvaluationResult) -> dict[str, object]:
     fitting = result.diagnostics.get("fitting", {})
     scoring = result.diagnostics.get("scoring_context", {})
     return {
-        "auc": float(result.auc),
+        "score": float(result.score),
         "config": result.config,
         "n_features": len(result.feature_names),
         "n_configs_evaluated": int(search.get("evaluated", 1)) if isinstance(search, dict) else 1,
@@ -82,7 +82,7 @@ def evaluation_summary(result: EvaluationResult) -> dict[str, object]:
         "cache": search.get("cache", {}) if isinstance(search, dict) else {},
         "ridge_w": fitting.get("ridge_w", {}) if isinstance(fitting, dict) else {},
         "ridge_g": fitting.get("ridge_g", {}) if isinstance(fitting, dict) else {},
-        "global_ridge_auc": scoring.get("global_ridge_auc", 0.0) if isinstance(scoring, dict) else 0.0,
+        "global_ridge_score": scoring.get("global_ridge_score", 0.0) if isinstance(scoring, dict) else 0.0,
         "shap_reconstruction_error": scoring.get("shap_reconstruction_error", 0.0) if isinstance(scoring, dict) else 0.0,
     }
 
@@ -115,7 +115,7 @@ def report_scope() -> str:
     return (
         "These benchmarks validate architecture-level behavior of this clean-room "
         "reimplementation. They do not claim to reproduce the authors' private evolved "
-        "graph, private code-generation stack, competition pipeline, or reported ROC-AUC."
+        "graph, private code-generation stack, competition pipeline, or reported task score."
     )
 
 

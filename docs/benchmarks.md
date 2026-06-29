@@ -6,7 +6,7 @@ faithfulness to the EvoForest paper:
 <https://arxiv.org/abs/2604.19761>
 
 The suite does not attempt to reproduce the authors' private evolved graph,
-private implementation, competition data path, LLM stack, or reported ROC-AUC. It
+private implementation, competition data path, LLM stack, or reported task score. It
 tests whether this reimplementation behaves like the software architecture
 described in the paper: multi-alternative graph semantics, configuration search,
 Ridge scoring, fitting hooks, trainable globals, diagnostics, mutation artifacts,

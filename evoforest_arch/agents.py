@@ -150,6 +150,9 @@ class EngineerAgent:
             description=selected.description,
             source=selected.source,
             global_refs=selected.global_refs,
+            node_kind=selected.node_kind,
+            output_contract=selected.output_contract,
+            torch_source=selected.torch_source,
         )
         removals = self._safe_redundancy_removals(graph)
         return MutationDocument(
@@ -172,9 +175,14 @@ class EngineerAgent:
             template
             for template in self.templates
             if template.target_node in graph.nodes and not self._template_already_present(graph, template)
+            and all(parent in graph.nodes for parent in template.parents)
         ]
         if not candidates:
-            candidates = [template for template in self.templates if template.target_node in graph.nodes]
+            candidates = [
+                template
+                for template in self.templates
+                if template.target_node in graph.nodes and all(parent in graph.nodes for parent in template.parents)
+            ]
         if not candidates:
             return self.templates[int(rng.integers(0, len(self.templates)))]
         candidates = sorted(

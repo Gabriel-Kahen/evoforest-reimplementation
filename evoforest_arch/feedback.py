@@ -13,7 +13,7 @@ def feedback_summary(result: EvaluationResult, max_features: int = 8) -> dict[st
         if float(row.get("redundancy", 0.0)) > 0.98 or float(row.get("weight_stability", 0.0)) < 0.25
     ]
     return {
-        "auc": float(result.auc),
+        "score": float(result.score),
         "config": result.config,
         "top_features": features[:max_features],
         "top_subnodes": subnodes[:max_features],
@@ -43,11 +43,11 @@ def toon_report(result: EvaluationResult, max_features: int = 12) -> str:
     scoring = result.diagnostics.get("scoring_context", {})
     rows = [
         "context:",
-        f"  scoring: {scoring.get('scoring', 'configuration-based (best config AUC = evoforest score)')}",
-        f"  best_config_auc: {float(scoring.get('best_config_auc', result.auc)):.6f}",
-        f"  global_ridge_auc: {float(scoring.get('global_ridge_auc', 0.0)):.6f}",
-        f"  config_auc_range: {scoring.get('config_auc_range', [result.auc, result.auc])}",
-        f"  fold_auc_std: {float(scoring.get('fold_auc_std', 0.0)):.6f}",
+        f"  scoring: {scoring.get('scoring', 'configuration-based (best config score = evoforest score)')}",
+        f"  best_config_score: {float(scoring.get('best_config_score', result.score)):.6f}",
+        f"  global_ridge_score: {float(scoring.get('global_ridge_score', 0.0)):.6f}",
+        f"  config_score_range: {scoring.get('config_score_range', [result.score, result.score])}",
+        f"  fold_score_std: {float(scoring.get('fold_score_std', 0.0)):.6f}",
         f"  effective_rank: {float(scoring.get('effective_rank', 0.0)):.4f}",
         f"  mean_max_corr: {float(scoring.get('mean_max_corr', 0.0)):.4f}",
         f"  shap_reconstruction_error: {float(scoring.get('shap_reconstruction_error', 0.0)):.8f}",
@@ -56,12 +56,12 @@ def toon_report(result: EvaluationResult, max_features: int = 12) -> str:
         f"  n_configs: {int(scoring.get('n_configs', 1))}",
         f"  n_configs_total: {int(scoring.get('n_configs_total', 1))}",
         "scoring:",
-        f"  auc: {result.auc:.6f}",
+        f"  score: {result.score:.6f}",
         f"  config: {result.config}",
         f"  search: {result.diagnostics.get('configuration_search', {})}",
         f"  fitting: {result.diagnostics.get('fitting', {})}",
         f"  global_ridge: {result.diagnostics.get('global_ridge', {})}",
-        "features[name,depth,imp,auc,sign,max_corr,n_hi_corr,most_corr,res,res2,rank,effect,stab,shap,cv_shap]:",
+        "features[name,depth,imp,align,sign,max_corr,n_hi_corr,most_corr,target,target2,res,res2,stab,shap,cv_shap]:",
     ]
     for feature in features:
         rows.append(
@@ -71,22 +71,22 @@ def toon_report(result: EvaluationResult, max_features: int = 12) -> str:
                     str(feature.get("name", "")),
                     str(feature.get("depth", 0)),
                     f"{float(feature.get('importance', 0.0)):.4f}",
-                    f"{float(feature.get('individual_auc', 0.0)):.4f}",
+                    f"{float(feature.get('target_alignment', 0.0)):.4f}",
                     str(feature.get("coef_sign", 0)),
                     f"{float(feature.get('max_corr', feature.get('redundancy', 0.0))):.4f}",
                     str(feature.get("n_high_corr", 0)),
                     str(feature.get("most_correlated", "")),
+                    f"{float(feature.get('target_corr', 0.0)):.4f}",
+                    f"{float(feature.get('target_quadratic_corr', 0.0)):.4f}",
                     f"{float(feature.get('residual_corr', 0.0)):.4f}",
                     f"{float(feature.get('residual_quadratic_corr', 0.0)):.4f}",
-                    f"{float(feature.get('rank_corr', 0.0)):.4f}",
-                    f"{float(feature.get('class_effect', 0.0)):.4f}",
                     f"{float(feature.get('weight_stability', 0.0)):.4f}",
                     f"{float(feature.get('shap_importance', 0.0)):.4f}",
                     f"{float(feature.get('cv_shap_mean_abs', 0.0)):.4f}",
                 ]
             )
         )
-    rows.append("subnodes[name,n,imp,shap,max_auc,abs_shap,res_abs,red,stab]:")
+    rows.append("subnodes[name,n,imp,shap,max_align,abs_shap,res_abs,red,stab]:")
     for subnode in subnodes:
         rows.append(
             "  "
@@ -96,7 +96,7 @@ def toon_report(result: EvaluationResult, max_features: int = 12) -> str:
                     str(subnode.get("feature_count", 0)),
                     f"{float(subnode.get('importance', 0.0)):.4f}",
                     f"{float(subnode.get('shap_importance', 0.0)):.4f}",
-                    f"{float(subnode.get('max_feature_auc', 0.0)):.4f}",
+                    f"{float(subnode.get('max_target_alignment', 0.0)):.4f}",
                     f"{float(subnode.get('mean_abs_shap', 0.0)):.4f}",
                     f"{float(subnode.get('mean_abs_residual_corr', 0.0)):.4f}",
                     f"{float(subnode.get('mean_redundancy', 0.0)):.4f}",
@@ -104,7 +104,7 @@ def toon_report(result: EvaluationResult, max_features: int = 12) -> str:
                 ]
             )
         )
-    rows.append("alternatives[name,age,evals,sel,n,imp,shap,max_auc,abs_shap,res_abs,red,stab,last_auc]:")
+    rows.append("alternatives[name,age,evals,sel,n,imp,shap,max_align,abs_shap,res_abs,red,stab,last_score]:")
     for alternative in alternatives:
         rows.append(
             "  "
@@ -117,12 +117,12 @@ def toon_report(result: EvaluationResult, max_features: int = 12) -> str:
                     str(alternative.get("last_feature_count", alternative.get("feature_count", 0))),
                     f"{float(alternative.get('mean_importance', alternative.get('importance', 0.0))):.4f}",
                     f"{float(alternative.get('mean_shap_importance', alternative.get('shap_importance', 0.0))):.4f}",
-                    f"{float(alternative.get('max_feature_auc', 0.0)):.4f}",
+                    f"{float(alternative.get('max_target_alignment', 0.0)):.4f}",
                     f"{float(alternative.get('mean_abs_shap', 0.0)):.4f}",
                     f"{float(alternative.get('mean_abs_residual_corr', 0.0)):.4f}",
                     f"{float(alternative.get('mean_redundancy', 0.0)):.4f}",
                     f"{float(alternative.get('mean_weight_stability', 0.0)):.4f}",
-                    f"{float(alternative.get('last_config_auc', alternative.get('config_auc', result.auc))):.6f}",
+                    f"{float(alternative.get('last_config_score', alternative.get('config_score', result.score))):.6f}",
                 ]
             )
         )

@@ -6,6 +6,7 @@ from typing import Callable
 import numpy as np
 
 from evoforest_arch.graph import CallableFamily, EvalContext, FeatureBlock, NodeAlternative, ResidualWeightRule
+from evoforest_arch.task import TaskSchema
 
 
 PrimitiveFactory = Callable[[str, tuple[str, ...]], NodeAlternative]
@@ -18,38 +19,66 @@ class PrimitiveRegistry:
     @classmethod
     def default(cls) -> "PrimitiveRegistry":
         registry = cls(factories={})
-        registry.register("segment_basic", segment_basic_factory)
-        registry.register("segment_robust", segment_robust_factory)
-        registry.register("trend_basic", trend_basic_factory)
-        registry.register("trend_late_window", trend_late_window_factory)
-        registry.register("cusum_basic", cusum_basic_factory)
-        registry.register("spectral_basic", spectral_basic_factory)
-        registry.register("segment_late_shift", segment_late_shift_factory)
-        registry.register("shape_drawdown", shape_drawdown_factory)
-        registry.register("shape_post_concentration", shape_post_concentration_factory)
-        registry.register("row_recent_change", row_recent_change_factory)
-        registry.register("row_volatility_burst", row_volatility_burst_factory)
-        registry.register("row_cusum_local", row_cusum_local_factory)
-        registry.register("row_context_outputs", row_context_outputs_factory)
-        registry.register("row_local_outputs", row_local_outputs_factory)
-        registry.register("row_time_basis_outputs", row_time_basis_outputs_factory)
-        registry.register("row_multiscale_tail_outputs", row_multiscale_tail_outputs_factory)
-        registry.register("row_baseline_outputs", row_baseline_outputs_factory)
-        registry.register("identity_callable", identity_callable_factory)
-        registry.register("sigmoid_gate_callable", sigmoid_gate_callable_factory)
-        registry.register("clipped_linear_callable", clipped_linear_callable_factory)
-        registry.register("pass_outputs", pass_outputs_factory)
-        registry.register("activated_outputs", activated_outputs_factory)
-        registry.register("projection_outputs", projection_outputs_factory)
-        registry.register("event_detection_outputs", event_detection_outputs_factory)
-        registry.register("structural_break_baseline_outputs", structural_break_baseline_outputs_factory)
-        registry.register("interaction_outputs", interaction_outputs_factory)
-        registry.register("uniform_sample_weight", uniform_sample_weight_factory)
-        registry.register("boundary_energy_weight", boundary_energy_weight_factory)
-        registry.register("late_energy_weight", late_energy_weight_factory)
-        registry.register("identity_residual_weight", identity_residual_weight_factory)
-        registry.register("huber_residual_weight", huber_residual_weight_factory)
+        registry._register_tabular()
+        registry._register_structural_break()
+        registry._register_common()
         return registry
+
+    @classmethod
+    def for_task(cls, task_schema: TaskSchema | None = None) -> "PrimitiveRegistry":
+        schema = task_schema or TaskSchema.tabular()
+        registry = cls(factories={})
+        if schema.kind == "time_series_boundary":
+            registry._register_structural_break()
+        elif schema.kind == "tabular":
+            registry._register_tabular()
+        else:
+            registry._register_tabular()
+        registry._register_common()
+        return registry
+
+    def _register_structural_break(self) -> None:
+        self.register("segment_basic", segment_basic_factory)
+        self.register("segment_robust", segment_robust_factory)
+        self.register("trend_basic", trend_basic_factory)
+        self.register("trend_late_window", trend_late_window_factory)
+        self.register("cusum_basic", cusum_basic_factory)
+        self.register("spectral_basic", spectral_basic_factory)
+        self.register("segment_late_shift", segment_late_shift_factory)
+        self.register("shape_drawdown", shape_drawdown_factory)
+        self.register("shape_post_concentration", shape_post_concentration_factory)
+        self.register("row_recent_change", row_recent_change_factory)
+        self.register("row_volatility_burst", row_volatility_burst_factory)
+        self.register("row_cusum_local", row_cusum_local_factory)
+        self.register("row_context_outputs", row_context_outputs_factory)
+        self.register("row_local_outputs", row_local_outputs_factory)
+        self.register("row_time_basis_outputs", row_time_basis_outputs_factory)
+        self.register("row_multiscale_tail_outputs", row_multiscale_tail_outputs_factory)
+        self.register("row_baseline_outputs", row_baseline_outputs_factory)
+        self.register("event_detection_outputs", event_detection_outputs_factory)
+        self.register("structural_break_baseline_outputs", structural_break_baseline_outputs_factory)
+        self.register("interaction_outputs", interaction_outputs_factory)
+        self.register("boundary_energy_weight", boundary_energy_weight_factory)
+        self.register("late_energy_weight", late_energy_weight_factory)
+
+    def _register_tabular(self) -> None:
+        self.register("tabular_raw", tabular_raw_factory)
+        self.register("tabular_centered", tabular_centered_factory)
+        self.register("tabular_abs", tabular_abs_factory)
+        self.register("tabular_square", tabular_square_factory)
+        self.register("tabular_summary", tabular_summary_factory)
+        self.register("tabular_low_rank_interactions", tabular_low_rank_interactions_factory)
+
+    def _register_common(self) -> None:
+        self.register("uniform_sample_weight", uniform_sample_weight_factory)
+        self.register("identity_residual_weight", identity_residual_weight_factory)
+        self.register("huber_residual_weight", huber_residual_weight_factory)
+        self.register("identity_callable", identity_callable_factory)
+        self.register("sigmoid_gate_callable", sigmoid_gate_callable_factory)
+        self.register("clipped_linear_callable", clipped_linear_callable_factory)
+        self.register("pass_outputs", pass_outputs_factory)
+        self.register("activated_outputs", activated_outputs_factory)
+        self.register("projection_outputs", projection_outputs_factory)
 
     def register(self, name: str, factory: PrimitiveFactory) -> None:
         self.factories[name] = factory
@@ -79,6 +108,137 @@ def safe_std_torch(x: object, axis: int = 1) -> object:
     import torch
 
     return torch.clamp(torch.std(x, dim=axis, unbiased=False), min=1e-8)
+
+
+def _feature_names(prefix: str, n_columns: int) -> list[str]:
+    return [f"{prefix}_{idx}" for idx in range(n_columns)]
+
+
+def _as_matrix(value: object) -> np.ndarray:
+    x = np.asarray(value, dtype=np.float64)
+    if x.ndim == 1:
+        x = x.reshape(-1, 1)
+    if x.ndim != 2:
+        raise ValueError(f"Expected a 1-D or 2-D task input, got shape {x.shape}.")
+    return np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
+
+
+def _center_columns(x: np.ndarray) -> np.ndarray:
+    return x - np.mean(x, axis=0, keepdims=True)
+
+
+def tabular_raw_factory(alternative_id: str, parents: tuple[str, ...]) -> NodeAlternative:
+    def fn(_ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
+        x = _as_matrix(values[parents[0]])
+        return FeatureBlock(x, _feature_names("raw", x.shape[1]))
+
+    def tfn(_ctx: EvalContext, values: dict[str, object]) -> object:
+        value = values[parents[0]]
+        if value.ndim == 1:
+            value = value.reshape(-1, 1)
+        return value
+
+    return NodeAlternative(alternative_id, parents, fn, "Pass through generic numeric matrix columns.", torch_fn=tfn)
+
+
+def tabular_centered_factory(alternative_id: str, parents: tuple[str, ...]) -> NodeAlternative:
+    def fn(_ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
+        x = _as_matrix(values[parents[0]])
+        centered = _center_columns(x)
+        return FeatureBlock(centered, _feature_names("centered", centered.shape[1]))
+
+    def tfn(_ctx: EvalContext, values: dict[str, object]) -> object:
+        import torch
+
+        value = values[parents[0]]
+        if value.ndim == 1:
+            value = value.reshape(-1, 1)
+        return value - torch.mean(value, dim=0, keepdim=True)
+
+    return NodeAlternative(alternative_id, parents, fn, "Column-centered generic numeric matrix columns.", torch_fn=tfn)
+
+
+def tabular_abs_factory(alternative_id: str, parents: tuple[str, ...]) -> NodeAlternative:
+    def fn(_ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
+        x = np.abs(_as_matrix(values[parents[0]]))
+        return FeatureBlock(x, _feature_names("abs", x.shape[1]))
+
+    def tfn(_ctx: EvalContext, values: dict[str, object]) -> object:
+        import torch
+
+        value = values[parents[0]]
+        if value.ndim == 1:
+            value = value.reshape(-1, 1)
+        return torch.abs(value)
+
+    return NodeAlternative(alternative_id, parents, fn, "Absolute-value transform of generic numeric columns.", torch_fn=tfn)
+
+
+def tabular_square_factory(alternative_id: str, parents: tuple[str, ...]) -> NodeAlternative:
+    def fn(_ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
+        x = _as_matrix(values[parents[0]])
+        return FeatureBlock(x * x, _feature_names("square", x.shape[1]))
+
+    def tfn(_ctx: EvalContext, values: dict[str, object]) -> object:
+        value = values[parents[0]]
+        if value.ndim == 1:
+            value = value.reshape(-1, 1)
+        return value * value
+
+    return NodeAlternative(alternative_id, parents, fn, "Squared generic numeric columns.", torch_fn=tfn)
+
+
+def tabular_summary_factory(alternative_id: str, parents: tuple[str, ...]) -> NodeAlternative:
+    def fn(_ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
+        x = _as_matrix(values[parents[0]])
+        block = np.column_stack([np.mean(x, axis=1), np.std(x, axis=1), np.min(x, axis=1), np.max(x, axis=1)])
+        return FeatureBlock(block, ["row_mean", "row_std", "row_min", "row_max"])
+
+    def tfn(_ctx: EvalContext, values: dict[str, object]) -> object:
+        import torch
+
+        value = values[parents[0]]
+        if value.ndim == 1:
+            value = value.reshape(-1, 1)
+        return torch.column_stack(
+            [
+                torch.mean(value, dim=1),
+                torch.std(value, dim=1, unbiased=False),
+                torch.min(value, dim=1).values,
+                torch.max(value, dim=1).values,
+            ]
+        )
+
+    return NodeAlternative(alternative_id, parents, fn, "Row-level summary statistics for generic numeric matrices.", torch_fn=tfn)
+
+
+def tabular_low_rank_interactions_factory(alternative_id: str, parents: tuple[str, ...]) -> NodeAlternative:
+    def fn(_ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
+        x = _center_columns(_as_matrix(values[parents[0]]))
+        k = min(4, x.shape[1])
+        if k == 0:
+            return FeatureBlock(np.zeros((x.shape[0], 1), dtype=np.float64), ["empty_interaction"])
+        columns = [x[:, idx] * x[:, idx + 1] for idx in range(k - 1)]
+        if not columns:
+            columns = [x[:, 0] * x[:, 0]]
+            names = ["interaction_0_0"]
+        else:
+            names = [f"interaction_{idx}_{idx + 1}" for idx in range(k - 1)]
+        return FeatureBlock(np.column_stack(columns), names)
+
+    def tfn(_ctx: EvalContext, values: dict[str, object]) -> object:
+        import torch
+
+        value = values[parents[0]]
+        if value.ndim == 1:
+            value = value.reshape(-1, 1)
+        centered = value - torch.mean(value, dim=0, keepdim=True)
+        k = min(4, int(centered.shape[1]))
+        if k <= 1:
+            return (centered[:, :1] * centered[:, :1]).reshape(-1, 1)
+        return torch.column_stack([centered[:, idx] * centered[:, idx + 1] for idx in range(k - 1)])
+
+    return NodeAlternative(alternative_id, parents, fn, "Low-order generic column interaction features.", torch_fn=tfn)
 
 
 def slope(x: np.ndarray) -> np.ndarray:
@@ -896,10 +1056,17 @@ def interaction_outputs_factory(alternative_id: str, parents: tuple[str, ...]) -
 
 def uniform_sample_weight_factory(alternative_id: str, parents: tuple[str, ...]) -> NodeAlternative:
     def fn(ctx: EvalContext, _values: dict[str, object]) -> np.ndarray:
-        series = np.asarray(ctx.read_input("series"), dtype=np.float64)
-        return np.ones(series.shape[0], dtype=np.float64)
+        return np.ones(_first_input_rows(ctx), dtype=np.float64)
 
     return NodeAlternative(alternative_id, parents, fn, "Uniform Ridge sample weights.")
+
+
+def _first_input_rows(ctx: EvalContext) -> int:
+    for value in ctx.inputs.values():
+        array = np.asarray(value)
+        if array.ndim > 0:
+            return int(array.shape[0])
+    raise ValueError("Cannot infer sample count from scalar-only task inputs.")
 
 
 def boundary_energy_weight_factory(alternative_id: str, parents: tuple[str, ...]) -> NodeAlternative:

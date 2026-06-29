@@ -21,9 +21,11 @@ from evoforest_arch.graph import Graph
 from evoforest_arch.graph_io import graph_hash, graph_from_dict, graph_from_path, write_graph
 from evoforest_arch.llm import DEFAULT_ISLAND_TEMPERATURES, LLMEngineerAgent, LLMMemorandumAgent, LLMScientistAgent
 from evoforest_arch.mutations import MutationDocument, MutationEngine
+from evoforest_arch.primitives import PrimitiveRegistry
 from evoforest_arch.seed import build_seed_graph
 from evoforest_arch.splits import SplitManifest, make_split_manifest, read_split_manifest, split_dataset, write_split_manifest
-from evoforest_arch.synthetic import make_structural_break_data
+from evoforest_arch.synthetic import make_structural_break_data, make_tabular_data
+from evoforest_arch.task import TaskSchema, task_schema_for_dataset
 from evoforest_arch.task_context import build_task_context
 
 
@@ -36,7 +38,7 @@ SAFE_STAGED_EXECUTION_RULES = (
     "For async island runs, persist every island's state, graph, checkpoint, and memorandum before resuming work.",
     "Run production async islands as one OS process actor per dedicated device.",
     "Record global-best migrations separately and write the target island state immediately.",
-    "Keep source-backed mutations disabled unless a trusted sandbox policy is supplied outside this package.",
+    "Execute source-backed mutations only through the package sandbox and validation contract.",
 )
 
 PAPER_ISLAND_COUNT = 4
@@ -45,8 +47,8 @@ PRODUCTION_PROFILE = "production"
 PAPER_PROFILE = "paper"
 SUPPORTED_PRODUCTION_PROFILES = (PRODUCTION_PROFILE, PAPER_PROFILE)
 VALIDATION_PROMOTION_POLICY = "validation_gated"
-CV_AUC_PROMOTION_POLICY = "cv_auc"
-SUPPORTED_PROMOTION_POLICIES = (VALIDATION_PROMOTION_POLICY, CV_AUC_PROMOTION_POLICY)
+CV_SCORE_PROMOTION_POLICY = "cv_score"
+SUPPORTED_PROMOTION_POLICIES = (VALIDATION_PROMOTION_POLICY, CV_SCORE_PROMOTION_POLICY)
 PAPER_PROFILE_STEPS = 600
 
 
@@ -58,6 +60,7 @@ class ProductionConfig:
     seed: int = 17
     dataset_name: str = "synthetic-structural-break"
     n_series: int = 240
+    n_features: int = 12
     length: int = 160
     boundary: int | None = None
     validation_fraction: float = 0.2
@@ -85,6 +88,7 @@ class ProductionConfig:
             "name": self.dataset_name,
             "seed": int(self.seed),
             "n_series": int(self.n_series),
+            "n_features": int(self.n_features),
             "length": int(self.length),
             "boundary": self.boundary,
         }
@@ -120,7 +124,7 @@ def paper_profile_defaults() -> dict[str, Any]:
         "max_configurations": 64,
         "refine_globals": True,
         "refine_backend": "torch",
-        "promotion_policy": CV_AUC_PROMOTION_POLICY,
+        "promotion_policy": CV_SCORE_PROMOTION_POLICY,
         "min_train_improvement": 0.0,
         "min_validation_improvement": 0.0,
     }
@@ -131,8 +135,8 @@ class RunState:
     run_id: str
     step: int
     archive_version: int
-    best_train_auc: float
-    best_validation_auc: float
+    best_train_score: float
+    best_validation_score: float
     best_config: dict[str, str]
     current_graph_path: str
     best_graph_path: str
@@ -147,8 +151,8 @@ class RunState:
             "run_id": self.run_id,
             "step": int(self.step),
             "archive_version": int(self.archive_version),
-            "best_train_auc": float(self.best_train_auc),
-            "best_validation_auc": float(self.best_validation_auc),
+            "best_train_score": float(self.best_train_score),
+            "best_validation_score": float(self.best_validation_score),
             "best_config": dict(self.best_config),
             "current_graph_path": self.current_graph_path,
             "best_graph_path": self.best_graph_path,
@@ -165,8 +169,8 @@ class RunState:
             run_id=str(payload["run_id"]),
             step=int(payload["step"]),
             archive_version=int(payload["archive_version"]),
-            best_train_auc=float(payload["best_train_auc"]),
-            best_validation_auc=float(payload["best_validation_auc"]),
+            best_train_score=float(payload["best_train_score"]),
+            best_validation_score=float(payload["best_validation_score"]),
             best_config={str(key): str(value) for key, value in dict(payload.get("best_config", {})).items()},
             current_graph_path=str(payload["current_graph_path"]),
             best_graph_path=str(payload["best_graph_path"]),
@@ -267,10 +271,10 @@ class IslandCommitDecision:
     global_step: int
     accepted: bool
     global_best: bool
-    root_best_train_auc: float
-    root_best_validation_auc: float
-    previous_global_train_auc: float
-    previous_global_validation_auc: float
+    root_best_train_score: float
+    root_best_validation_score: float
+    previous_global_train_score: float
+    previous_global_validation_score: float
 
 
 @dataclass
@@ -516,8 +520,9 @@ class ProductionIslandWorker:
         state, _current_graph, _best_graph, _best_train_result, _best_validation_result = self._require_island_state()
         self._prepared_jobs.pop(prepared.job_id, None)
         outcome = result.outcome
+        registry = registry_from_manifest(self.manifest)
         candidate_graph = (
-            graph_from_dict(result.candidate_graph_payload, allow_source=self.allow_source_mutations)
+            graph_from_dict(result.candidate_graph_payload, registry=registry, allow_source=self.allow_source_mutations)
             if result.candidate_graph_payload is not None
             else None
         )
@@ -540,16 +545,16 @@ class ProductionIslandWorker:
 
         candidate_train = outcome.result
         candidate_validation = result.validation_result
-        previous_island_train_auc = float(self.best_train_result.auc) if self.best_train_result is not None else float(state.best_train_auc)
-        previous_island_validation_auc = float(self.best_validation_result.auc) if self.best_validation_result is not None else float(state.best_validation_auc)
+        previous_island_train_score = float(self.best_train_result.score) if self.best_train_result is not None else float(state.best_train_score)
+        previous_island_validation_score = float(self.best_validation_result.score) if self.best_validation_result is not None else float(state.best_validation_score)
         if decision.accepted:
             self.current_graph = candidate_graph
             self.best_graph = candidate_graph.clone()
             self.best_train_result = candidate_train
             self.best_validation_result = candidate_validation
             state.archive_version += 1
-            state.best_train_auc = float(candidate_train.auc)
-            state.best_validation_auc = float(candidate_validation.auc)
+            state.best_train_score = float(candidate_train.score)
+            state.best_validation_score = float(candidate_validation.score)
             state.best_config = dict(candidate_train.config)
             state.generation += 1
             metadata = {
@@ -572,8 +577,8 @@ class ProductionIslandWorker:
             train_result=candidate_train,
             validation_result=candidate_validation,
             maintenance=result.maintenance,
-            previous_island_train_auc=previous_island_train_auc,
-            previous_island_validation_auc=previous_island_validation_auc,
+            previous_island_train_score=previous_island_train_score,
+            previous_island_validation_score=previous_island_validation_score,
         )
         return self._finish_commit(prepared, event, terminal_status="completed")
 
@@ -592,16 +597,16 @@ class ProductionIslandWorker:
     ) -> IslandActorMigrationResult:
         state, _current_graph, _best_graph, best_train_result, best_validation_result = self._require_island_state()
         previous_score = self._frontier_score(best_train_result, best_validation_result)
-        previous_best_train_auc = float(best_train_result.auc)
-        previous_best_validation_auc = float(best_validation_result.auc)
-        migrated_graph = graph_from_dict(graph_payload, allow_source=self.allow_source_mutations)
+        previous_best_train_score = float(best_train_result.score)
+        previous_best_validation_score = float(best_validation_result.score)
+        migrated_graph = graph_from_dict(graph_payload, registry=registry_from_manifest(self.manifest), allow_source=self.allow_source_mutations)
         self.current_graph = migrated_graph
         self.best_graph = migrated_graph.clone()
         self.best_train_result = train_result
         self.best_validation_result = validation_result
         state.archive_version += 1
-        state.best_train_auc = float(train_result.auc)
-        state.best_validation_auc = float(validation_result.auc)
+        state.best_train_score = float(train_result.score)
+        state.best_validation_score = float(validation_result.score)
         state.best_config = dict(best_config)
         state.generation += 1
         event = {
@@ -618,10 +623,10 @@ class ProductionIslandWorker:
             "selection_metric": selection_metric,
             "previous_best_score": previous_score,
             "global_best_score": float(global_best_score),
-            "previous_best_train_auc": previous_best_train_auc,
-            "previous_best_validation_auc": previous_best_validation_auc,
-            "global_best_validation_auc": float(validation_result.auc),
-            "global_best_train_auc": float(train_result.auc),
+            "previous_best_train_score": previous_best_train_score,
+            "previous_best_validation_score": previous_best_validation_score,
+            "global_best_validation_score": float(validation_result.score),
+            "global_best_train_score": float(train_result.score),
             "graph_hash": graph_hash(migrated_graph),
         }
         self._write_island_migration_event(event)
@@ -650,10 +655,11 @@ class ProductionIslandWorker:
         return IslandActorMigrationResult(actor_pid=os.getpid(), snapshot=self.snapshot(), event=event)
 
     def _build_loop(self, graph: Graph, rng_state: dict[str, Any]) -> EvolutionLoop:
+        registry = registry_from_manifest(self.manifest)
         loop = EvolutionLoop(
             graph,
             evaluator=RidgeEvaluator(**self.evaluator_config),
-            mutation_engine=MutationEngine(allow_source=self.allow_source_mutations),
+            mutation_engine=MutationEngine(registry=registry, allow_source=self.allow_source_mutations),
             scientist=self.scientist,
             engineer=self.engineer,
             memorandum_agent=self.memorandum_agent,
@@ -693,9 +699,9 @@ class ProductionIslandWorker:
 
     def _frontier_score(self, train_result: EvaluationResult, validation_result: EvaluationResult) -> float:
         acceptance = dict(self.manifest.get("acceptance", {}))
-        if str(acceptance.get("policy", "")) == "paper_cv_auc_improvement":
-            return float(train_result.auc)
-        return float(validation_result.auc)
+        if str(acceptance.get("policy", "")) == "paper_cv_score_improvement":
+            return float(train_result.score)
+        return float(validation_result.score)
 
     def _candidate_event(
         self,
@@ -706,8 +712,8 @@ class ProductionIslandWorker:
         train_result: EvaluationResult,
         validation_result: EvaluationResult,
         maintenance: dict[str, object],
-        previous_island_train_auc: float,
-        previous_island_validation_auc: float,
+        previous_island_train_score: float,
+        previous_island_validation_score: float,
     ) -> dict[str, Any]:
         state, _current_graph, _best_graph, _best_train_result, _best_validation_result = self._require_island_state()
         return {
@@ -725,16 +731,16 @@ class ProductionIslandWorker:
             "generation": int(state.generation),
             "accepted": bool(decision.accepted),
             "global_best": bool(decision.global_best),
-            "train_auc": float(train_result.auc),
-            "validation_auc": float(validation_result.auc),
-            "best_train_auc": float(decision.root_best_train_auc),
-            "best_validation_auc": float(decision.root_best_validation_auc),
-            "island_best_train_auc": float(state.best_train_auc),
-            "island_best_validation_auc": float(state.best_validation_auc),
-            "train_delta": float(train_result.auc) - previous_island_train_auc,
-            "validation_delta": float(validation_result.auc) - previous_island_validation_auc,
-            "global_train_delta": float(train_result.auc) - float(decision.previous_global_train_auc),
-            "global_validation_delta": float(validation_result.auc) - float(decision.previous_global_validation_auc),
+            "train_score": float(train_result.score),
+            "validation_score": float(validation_result.score),
+            "best_train_score": float(decision.root_best_train_score),
+            "best_validation_score": float(decision.root_best_validation_score),
+            "island_best_train_score": float(state.best_train_score),
+            "island_best_validation_score": float(state.best_validation_score),
+            "train_delta": float(train_result.score) - previous_island_train_score,
+            "validation_delta": float(validation_result.score) - previous_island_validation_score,
+            "global_train_delta": float(train_result.score) - float(decision.previous_global_train_score),
+            "global_validation_delta": float(validation_result.score) - float(decision.previous_global_validation_score),
             "config": train_result.config,
             "mutation": mutation,
             "maintenance": maintenance,
@@ -765,12 +771,12 @@ class ProductionIslandWorker:
             "accepted": False,
             "failed": True,
             "error": error,
-            "train_auc": None,
-            "validation_auc": None,
-            "best_train_auc": float(decision.root_best_train_auc),
-            "best_validation_auc": float(decision.root_best_validation_auc),
-            "island_best_train_auc": float(state.best_train_auc),
-            "island_best_validation_auc": float(state.best_validation_auc),
+            "train_score": None,
+            "validation_score": None,
+            "best_train_score": float(decision.root_best_train_score),
+            "best_validation_score": float(decision.root_best_validation_score),
+            "island_best_train_score": float(state.best_train_score),
+            "island_best_validation_score": float(state.best_validation_score),
             "config": state.best_config,
             "mutation": document.to_dict(),
         }
@@ -798,12 +804,12 @@ class ProductionIslandWorker:
             "accepted": False,
             "stale": True,
             "stale_reason": "Island graph generation changed before candidate completion.",
-            "train_auc": None,
-            "validation_auc": None,
-            "best_train_auc": float(decision.root_best_train_auc),
-            "best_validation_auc": float(decision.root_best_validation_auc),
-            "island_best_train_auc": float(state.best_train_auc),
-            "island_best_validation_auc": float(state.best_validation_auc),
+            "train_score": None,
+            "validation_score": None,
+            "best_train_score": float(decision.root_best_train_score),
+            "best_validation_score": float(decision.root_best_validation_score),
+            "island_best_train_score": float(state.best_train_score),
+            "island_best_validation_score": float(state.best_validation_score),
             "config": state.best_config,
             "mutation": document.to_dict(),
         }
@@ -863,8 +869,8 @@ class ProductionIslandWorker:
         row = {
             "version": int(context.state.archive_version),
             "step": int(step),
-            "train_auc": float(context.best_train_result.auc),
-            "validation_auc": float(context.best_validation_result.auc),
+            "train_score": float(context.best_train_result.score),
+            "validation_score": float(context.best_validation_result.score),
             "config": context.best_train_result.config,
             "graph_hash": payload["graph_hash"],
             "path": filename,
@@ -898,8 +904,8 @@ class ProductionIslandWorker:
             raise RuntimeError("Production island worker has no run directory.")
         island_event = {
             **event,
-            "best_train_auc": event.get("island_best_train_auc", event["best_train_auc"]),
-            "best_validation_auc": event.get("island_best_validation_auc", event["best_validation_auc"]),
+            "best_train_score": event.get("island_best_train_score", event["best_train_score"]),
+            "best_validation_score": event.get("island_best_validation_score", event["best_validation_score"]),
         }
         with (self.run_dir / "events.jsonl").open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(island_event) + "\n")
@@ -973,6 +979,7 @@ def _initialize_process_island_worker(
     best_validation_result: EvaluationResult,
 ) -> None:
     global _PROCESS_ISLAND_WORKER
+    registry = registry_from_manifest(manifest)
     _PROCESS_ISLAND_WORKER = ProductionIslandWorker(
         island=island,
         device=device,
@@ -992,8 +999,8 @@ def _initialize_process_island_worker(
         manifest=manifest,
         split_manifest=split_manifest,
         state=state,
-        current_graph=graph_from_dict(current_graph_payload, allow_source=allow_source_mutations),
-        best_graph=graph_from_dict(best_graph_payload, allow_source=allow_source_mutations),
+        current_graph=graph_from_dict(current_graph_payload, registry=registry, allow_source=allow_source_mutations),
+        best_graph=graph_from_dict(best_graph_payload, registry=registry, allow_source=allow_source_mutations),
         best_train_result=best_train_result,
         best_validation_result=best_validation_result,
     )
@@ -1056,14 +1063,21 @@ def _process_island_apply_migration(
 
 def _process_island_write_memorandum(payload: dict[str, Any]) -> int:
     worker = _process_island_worker()
+    manifest = dict(payload["manifest"])
+    task_schema_payload = manifest.get("task_schema", {})
+    registry = (
+        PrimitiveRegistry.for_task(TaskSchema.from_dict(task_schema_payload))
+        if isinstance(task_schema_payload, dict) and task_schema_payload
+        else PrimitiveRegistry.default()
+    )
     context = ProductionContext(
         run_dir=pathlib.Path(payload["run_dir"]),
-        manifest=dict(payload["manifest"]),
+        manifest=manifest,
         split_manifest=payload["split_manifest"],
         splits={},
         state=payload["state"],
-        current_graph=graph_from_dict(payload["current_graph"], allow_source=worker.allow_source_mutations),
-        best_graph=graph_from_dict(payload["best_graph"], allow_source=worker.allow_source_mutations),
+        current_graph=graph_from_dict(payload["current_graph"], registry=registry, allow_source=worker.allow_source_mutations),
+        best_graph=graph_from_dict(payload["best_graph"], registry=registry, allow_source=worker.allow_source_mutations),
         best_train_result=payload["best_train_result"],
         best_validation_result=payload["best_validation_result"],
     )
@@ -1223,13 +1237,17 @@ class ProductionEvolutionRunner:
         task_sources: tuple[tuple[str, str], ...] = (),
     ) -> None:
         self.config = config
+        self.task_schema = task_schema_for_dataset(self.config.dataset_name)
         if self.config.profile not in SUPPORTED_PRODUCTION_PROFILES:
             raise ValueError(f"Unsupported production profile {self.config.profile!r}; expected one of {', '.join(SUPPORTED_PRODUCTION_PROFILES)}.")
         if self.config.promotion_policy not in SUPPORTED_PROMOTION_POLICIES:
             raise ValueError(f"Unsupported promotion policy {self.config.promotion_policy!r}; expected one of {', '.join(SUPPORTED_PROMOTION_POLICIES)}.")
-        self.graph = graph or build_seed_graph()
+        self.graph = graph or build_seed_graph(self.task_schema)
         self.evaluator = RidgeEvaluator(**config.evaluator_config())
-        self.mutation_engine = MutationEngine(allow_source=config.allow_source_mutations)
+        self.mutation_engine = MutationEngine(
+            registry=PrimitiveRegistry.for_task(self.task_schema),
+            allow_source=config.allow_source_mutations,
+        )
         self.scientist = scientist
         self.engineer = engineer
         self.memorandum_agent = memorandum_agent
@@ -1323,8 +1341,8 @@ class ProductionEvolutionRunner:
                     config=candidate_train.config,
                     update_graph=False,
                 )
-                previous_best_train_auc = float(context.best_train_result.auc)
-                previous_best_validation_auc = float(context.best_validation_result.auc)
+                previous_best_train_score = float(context.best_train_result.score)
+                previous_best_validation_score = float(context.best_validation_result.score)
                 accepted = self._promotes(candidate_train, candidate_validation, context)
                 if accepted:
                     context.current_graph = outcome.candidate_graph
@@ -1332,8 +1350,8 @@ class ProductionEvolutionRunner:
                     context.best_train_result = candidate_train
                     context.best_validation_result = candidate_validation
                     context.state.archive_version += 1
-                    context.state.best_train_auc = float(candidate_train.auc)
-                    context.state.best_validation_auc = float(candidate_validation.auc)
+                    context.state.best_train_score = float(candidate_train.score)
+                    context.state.best_validation_score = float(candidate_validation.score)
                     context.state.best_config = dict(candidate_train.config)
                     self._write_graph_artifacts(context, step)
                     self._write_archive_entry(context, step)
@@ -1349,8 +1367,8 @@ class ProductionEvolutionRunner:
                     train_result=candidate_train,
                     validation_result=candidate_validation,
                     maintenance=outcome.application.maintenance.to_dict(),
-                    previous_best_train_auc=previous_best_train_auc,
-                    previous_best_validation_auc=previous_best_validation_auc,
+                    previous_best_train_score=previous_best_train_score,
+                    previous_best_validation_score=previous_best_validation_score,
                 )
                 self._record_event(context.state, event)
                 events.write(json.dumps(event) + "\n")
@@ -1464,8 +1482,8 @@ class ProductionEvolutionRunner:
                 run_id=f"{context.state.run_id}_island_{island_id}",
                 step=0,
                 archive_version=0,
-                best_train_auc=float(train_result.auc),
-                best_validation_auc=float(validation_result.auc),
+                best_train_score=float(train_result.score),
+                best_validation_score=float(validation_result.score),
                 best_config=dict(train_result.config),
                 current_graph_path="current_graph.json",
                 best_graph_path="best_graph.json",
@@ -1496,13 +1514,14 @@ class ProductionEvolutionRunner:
         train_inputs, train_y = context.splits["train"]
         validation_inputs, validation_y = context.splits["validation"]
         devices = self._island_devices(context)
+        registry = registry_from_manifest(context.manifest)
         islands: list[ProductionIslandContext] = []
         for island_id in range(count):
             device = devices[island_id]
             island_dir = context.run_dir / "islands" / f"island_{island_id}"
             state = self._read_state(island_dir)
-            current_graph = graph_from_path(island_dir / state.current_graph_path, allow_source=allow_source)
-            best_graph = graph_from_path(island_dir / state.best_graph_path, allow_source=allow_source)
+            current_graph = graph_from_path(island_dir / state.current_graph_path, registry=registry, allow_source=allow_source)
+            best_graph = graph_from_path(island_dir / state.best_graph_path, registry=registry, allow_source=allow_source)
             island_evaluator = self._island_evaluator(device)
             train_result = island_evaluator.evaluate(best_graph, train_inputs, train_y, config=state.best_config, update_graph=False)
             validation_result = island_evaluator.evaluate(best_graph, validation_inputs, validation_y, config=state.best_config, update_graph=False)
@@ -1532,7 +1551,7 @@ class ProductionEvolutionRunner:
             islands,
             key=lambda item: (
                 self._frontier_score(context, item.best_train_result, item.best_validation_result),
-                float(item.best_train_result.auc),
+                float(item.best_train_result.score),
                 -item.island,
             ),
         )
@@ -1541,8 +1560,8 @@ class ProductionEvolutionRunner:
         context.best_train_result = best.best_train_result
         context.best_validation_result = best.best_validation_result
         context.state.archive_version = 0
-        context.state.best_train_auc = float(best.best_train_result.auc)
-        context.state.best_validation_auc = float(best.best_validation_result.auc)
+        context.state.best_train_score = float(best.best_train_result.score)
+        context.state.best_validation_score = float(best.best_validation_result.score)
         context.state.best_config = dict(best.best_train_result.config)
         context.state.current_graph_path = "current_graph.json"
         context.state.best_graph_path = "best_graph.json"
@@ -1619,8 +1638,8 @@ class ProductionEvolutionRunner:
         job.actor_pid = int(actor_result.actor_pid)
         result = actor_result.candidate
         outcome = result.outcome
-        previous_global_train_auc = float(context.best_train_result.auc)
-        previous_global_validation_auc = float(context.best_validation_result.auc)
+        previous_global_train_score = float(context.best_train_result.score)
+        previous_global_validation_score = float(context.best_validation_result.score)
         accepted = False
         global_best = False
         candidate_graph: Graph | None = None
@@ -1632,7 +1651,7 @@ class ProductionEvolutionRunner:
             and result.maintenance is not None
         ):
             allow_source = bool(dict(context.manifest.get("mutation", {})).get("allow_source_mutations", False)) or self.config.allow_source_mutations
-            candidate_graph = graph_from_dict(result.candidate_graph_payload, allow_source=allow_source)
+            candidate_graph = graph_from_dict(result.candidate_graph_payload, registry=registry_from_manifest(context.manifest), allow_source=allow_source)
             accepted = self._promotes(outcome.result, result.validation_result, self._island_context(context, island))
             global_best = accepted and self._promotes(outcome.result, result.validation_result, context)
         if global_best:
@@ -1643,8 +1662,8 @@ class ProductionEvolutionRunner:
             context.best_train_result = outcome.result
             context.best_validation_result = result.validation_result
             context.state.archive_version += 1
-            context.state.best_train_auc = float(outcome.result.auc)
-            context.state.best_validation_auc = float(result.validation_result.auc)
+            context.state.best_train_score = float(outcome.result.score)
+            context.state.best_validation_score = float(result.validation_result.score)
             context.state.best_config = dict(outcome.result.config)
             context.state.generation += 1
             global_metadata = {
@@ -1667,10 +1686,10 @@ class ProductionEvolutionRunner:
             global_step=int(context.state.step) + 1,
             accepted=accepted,
             global_best=global_best,
-            root_best_train_auc=float(context.state.best_train_auc),
-            root_best_validation_auc=float(context.state.best_validation_auc),
-            previous_global_train_auc=previous_global_train_auc,
-            previous_global_validation_auc=previous_global_validation_auc,
+            root_best_train_score=float(context.state.best_train_score),
+            root_best_validation_score=float(context.state.best_validation_score),
+            previous_global_train_score=previous_global_train_score,
+            previous_global_validation_score=previous_global_validation_score,
         )
         commit = actors[island.island].commit_candidate(job.prepared, result, decision)
         island = self._replace_island_snapshot(context, islands, commit.snapshot)
@@ -1757,8 +1776,8 @@ class ProductionEvolutionRunner:
             island=int(snapshot.island),
             run_dir=context.run_dir / "islands" / f"island_{int(snapshot.island)}",
             state=RunState.from_dict(snapshot.state.to_dict()),
-            current_graph=graph_from_dict(snapshot.current_graph_payload, allow_source=allow_source),
-            best_graph=graph_from_dict(snapshot.best_graph_payload, allow_source=allow_source),
+            current_graph=graph_from_dict(snapshot.current_graph_payload, registry=registry_from_manifest(context.manifest), allow_source=allow_source),
+            best_graph=graph_from_dict(snapshot.best_graph_payload, registry=registry_from_manifest(context.manifest), allow_source=allow_source),
             best_train_result=snapshot.best_train_result,
             best_validation_result=snapshot.best_validation_result,
             device=snapshot.device,
@@ -1785,7 +1804,10 @@ class ProductionEvolutionRunner:
         loop = EvolutionLoop(
             graph,
             evaluator=RidgeEvaluator(**evaluator_config),
-            mutation_engine=MutationEngine(allow_source=self.mutation_engine.allow_source),
+            mutation_engine=MutationEngine(
+                registry=self.mutation_engine.registry,
+                allow_source=self.mutation_engine.allow_source,
+            ),
             scientist=self.scientist,
             engineer=self.engineer,
             memorandum_agent=self.memorandum_agent,
@@ -2055,8 +2077,8 @@ class ProductionEvolutionRunner:
             run_id=_run_id(),
             step=0,
             archive_version=0,
-            best_train_auc=float(best_train.auc),
-            best_validation_auc=float(best_validation.auc),
+            best_train_score=float(best_train.score),
+            best_validation_score=float(best_validation.score),
             best_config=dict(best_train.config),
             current_graph_path="current_graph.json",
             best_graph_path="best_graph.json",
@@ -2087,13 +2109,19 @@ class ProductionEvolutionRunner:
         manifest = json.loads((run_dir / "run_manifest.json").read_text(encoding="utf-8"))
         self.evaluator = RidgeEvaluator(**manifest["evaluator"])
         allow_source = bool(dict(manifest.get("mutation", {})).get("allow_source_mutations", False)) or self.config.allow_source_mutations
-        self.mutation_engine = MutationEngine(allow_source=allow_source)
+        task_schema_payload = manifest.get("task_schema", {})
+        registry = (
+            PrimitiveRegistry.for_task(TaskSchema.from_dict(task_schema_payload))
+            if isinstance(task_schema_payload, dict) and task_schema_payload
+            else PrimitiveRegistry.for_task(task_schema_for_dataset(str(dict(manifest.get("dataset", {})).get("name", self.config.dataset_name))))
+        )
+        self.mutation_engine = MutationEngine(registry=registry, allow_source=allow_source)
         split_manifest = read_split_manifest(run_dir / "splits.json")
         inputs, y = load_dataset(dict(manifest["dataset"]))
         splits = split_dataset(inputs, y, split_manifest)
         state = self._read_state(run_dir)
-        current_graph = graph_from_path(run_dir / state.current_graph_path, allow_source=allow_source)
-        best_graph = graph_from_path(run_dir / state.best_graph_path, allow_source=allow_source)
+        current_graph = graph_from_path(run_dir / state.current_graph_path, registry=registry, allow_source=allow_source)
+        best_graph = graph_from_path(run_dir / state.best_graph_path, registry=registry, allow_source=allow_source)
         train_inputs, train_y = splits["train"]
         validation_inputs, validation_y = splits["validation"]
         best_train = self.evaluator.evaluate(best_graph, train_inputs, train_y, config=state.best_config, update_graph=False)
@@ -2116,13 +2144,13 @@ class ProductionEvolutionRunner:
         validation_result: EvaluationResult,
         context: ProductionContext,
     ) -> bool:
-        train_delta = float(train_result.auc) - float(context.best_train_result.auc)
-        validation_delta = float(validation_result.auc) - float(context.best_validation_result.auc)
+        train_delta = float(train_result.score) - float(context.best_train_result.score)
+        validation_delta = float(validation_result.score) - float(context.best_validation_result.score)
         acceptance = dict(context.manifest.get("acceptance", {}))
         policy = str(acceptance.get("policy", self._acceptance_policy_name()))
         min_train = float(acceptance.get("min_train_improvement", self.config.min_train_improvement))
         min_validation = float(acceptance.get("min_validation_improvement", self.config.min_validation_improvement))
-        if policy == "paper_cv_auc_improvement":
+        if policy == "paper_cv_score_improvement":
             return train_delta > min_train
         return train_delta > min_train and validation_delta > min_validation
 
@@ -2133,17 +2161,17 @@ class ProductionEvolutionRunner:
         validation_result: EvaluationResult,
     ) -> float:
         acceptance = dict(context.manifest.get("acceptance", {}))
-        if str(acceptance.get("policy", self._acceptance_policy_name())) == "paper_cv_auc_improvement":
-            return float(train_result.auc)
-        return float(validation_result.auc)
+        if str(acceptance.get("policy", self._acceptance_policy_name())) == "paper_cv_score_improvement":
+            return float(train_result.score)
+        return float(validation_result.score)
 
     def _frontier_metric(self, context: ProductionContext) -> str:
         acceptance = dict(context.manifest.get("acceptance", {}))
-        return str(acceptance.get("metric", "validation_roc_auc"))
+        return str(acceptance.get("metric", "validation_score"))
 
     def _acceptance_policy_name(self) -> str:
-        if self.config.promotion_policy == CV_AUC_PROMOTION_POLICY:
-            return "paper_cv_auc_improvement"
+        if self.config.promotion_policy == CV_SCORE_PROMOTION_POLICY:
+            return "paper_cv_score_improvement"
         if self.config.min_train_improvement < 0.0:
             return "validation_improvement_with_train_regression_floor"
         return "train_improvement_and_validation_improvement"
@@ -2160,12 +2188,12 @@ class ProductionEvolutionRunner:
                 "engineer_temperature": 0.0,
                 "max_configurations": 64,
                 "global_refinement": "pytorch_l_bfgs",
-                "promotion_metric": "train_cv_roc_auc",
+                "promotion_metric": "train_cv_score",
                 "validation_gate": False,
             }
         return {
             "name": PRODUCTION_PROFILE,
-            "promotion_metric": "validation_roc_auc",
+            "promotion_metric": "validation_score",
             "validation_gate": True,
         }
 
@@ -2185,10 +2213,12 @@ class ProductionEvolutionRunner:
             "profile_spec": self._profile_spec(),
             "git_commit": _git_commit(),
             "dataset": self.config.dataset_config(),
+            "task_schema": self.task_schema.to_dict(),
             "dataset_metadata": dataset_metadata or {},
             "dataset_fingerprint": split_manifest.dataset_fingerprint,
             "split_manifest_path": "splits.json",
             "evaluator": self.config.evaluator_config(),
+            "scorer": self.evaluator.scorer.to_dict(),
             "mutation": {"allow_source_mutations": bool(self.config.allow_source_mutations)},
             "islands": {
                 "mode": "async" if int(self.config.islands) > 1 and self.config.async_islands else "single",
@@ -2204,13 +2234,13 @@ class ProductionEvolutionRunner:
             },
             "acceptance": {
                 "policy": self._acceptance_policy_name(),
-                "metric": "train_cv_roc_auc" if self.config.promotion_policy == CV_AUC_PROMOTION_POLICY else "validation_roc_auc",
+                "metric": "train_cv_score" if self.config.promotion_policy == CV_SCORE_PROMOTION_POLICY else "validation_score",
                 "validation_gate": self.config.promotion_policy == VALIDATION_PROMOTION_POLICY,
                 "min_train_improvement": float(self.config.min_train_improvement),
                 "min_validation_improvement": float(self.config.min_validation_improvement),
                 "validation_config": (
                     "reported_with_candidate_train_best_config_not_used_for_promotion"
-                    if self.config.promotion_policy == CV_AUC_PROMOTION_POLICY
+                    if self.config.promotion_policy == CV_SCORE_PROMOTION_POLICY
                     else "candidate_train_best_config"
                 ),
             },
@@ -2245,8 +2275,8 @@ class ProductionEvolutionRunner:
         row = {
             "version": int(context.state.archive_version),
             "step": int(step),
-            "train_auc": float(context.best_train_result.auc),
-            "validation_auc": float(context.best_validation_result.auc),
+            "train_score": float(context.best_train_result.score),
+            "validation_score": float(context.best_validation_result.score),
             "config": context.best_train_result.config,
             "graph_hash": payload["graph_hash"],
             "path": filename,
@@ -2298,8 +2328,8 @@ class ProductionEvolutionRunner:
                 "[STATE]",
                 f"- Run id: {context.state.run_id}.",
                 f"- Step: {context.state.step}.",
-                f"- Best train AUC: {context.state.best_train_auc:.6f}.",
-                f"- Best validation AUC: {context.state.best_validation_auc:.6f}.",
+                f"- Best train score: {context.state.best_train_score:.6f}.",
+                f"- Best validation score: {context.state.best_validation_score:.6f}.",
                 f"- Test rechecks: {context.state.test_recheck_count}.",
             ]
         )
@@ -2333,19 +2363,19 @@ class ProductionEvolutionRunner:
         train_result: EvaluationResult,
         validation_result: EvaluationResult,
         maintenance: dict[str, object],
-        previous_best_train_auc: float,
-        previous_best_validation_auc: float,
+        previous_best_train_score: float,
+        previous_best_validation_score: float,
     ) -> dict[str, Any]:
         return {
             "step": int(step),
             "mode": "production_single",
             "accepted": bool(accepted),
-            "train_auc": float(train_result.auc),
-            "validation_auc": float(validation_result.auc),
-            "best_train_auc": float(context.state.best_train_auc),
-            "best_validation_auc": float(context.state.best_validation_auc),
-            "train_delta": float(train_result.auc) - float(previous_best_train_auc),
-            "validation_delta": float(validation_result.auc) - float(previous_best_validation_auc),
+            "train_score": float(train_result.score),
+            "validation_score": float(validation_result.score),
+            "best_train_score": float(context.state.best_train_score),
+            "best_validation_score": float(context.state.best_validation_score),
+            "train_delta": float(train_result.score) - float(previous_best_train_score),
+            "validation_delta": float(validation_result.score) - float(previous_best_validation_score),
             "config": train_result.config,
             "mutation": mutation,
             "maintenance": maintenance,
@@ -2359,10 +2389,10 @@ class ProductionEvolutionRunner:
             "accepted": False,
             "failed": True,
             "error": error,
-            "train_auc": None,
-            "validation_auc": None,
-            "best_train_auc": float(context.state.best_train_auc),
-            "best_validation_auc": float(context.state.best_validation_auc),
+            "train_score": None,
+            "validation_score": None,
+            "best_train_score": float(context.state.best_train_score),
+            "best_validation_score": float(context.state.best_validation_score),
             "config": context.state.best_config,
             "mutation": mutation,
         }
@@ -2370,13 +2400,13 @@ class ProductionEvolutionRunner:
     @staticmethod
     def _record_event(state: RunState, event: dict[str, Any]) -> None:
         status = "FAILED" if event.get("failed") else "ACCEPTED" if event.get("accepted") else "REJECTED"
-        train = event.get("train_auc")
-        validation = event.get("validation_auc")
+        train = event.get("train_score")
+        validation = event.get("validation_score")
         train_text = "n/a" if train is None else f"{float(train):.6f}"
         validation_text = "n/a" if validation is None else f"{float(validation):.6f}"
         state.history.append(
             f"- {status}: step={int(event['step'])} train={train_text} validation={validation_text} "
-            f"best_validation={float(event['best_validation_auc']):.6f}"
+            f"best_validation={float(event['best_validation_score']):.6f}"
         )
         del state.history[:-40]
         if event.get("failed"):
@@ -2400,6 +2430,15 @@ class ProductionEvolutionRunner:
 def load_dataset(dataset_config: dict[str, Any]) -> tuple[dict[str, object], np.ndarray]:
     inputs, y, _metadata = load_dataset_with_metadata(dataset_config)
     return inputs, y
+
+
+def registry_from_manifest(manifest: dict[str, Any]) -> PrimitiveRegistry:
+    task_schema_payload = manifest.get("task_schema", {})
+    if isinstance(task_schema_payload, dict) and task_schema_payload:
+        return PrimitiveRegistry.for_task(TaskSchema.from_dict(task_schema_payload))
+    dataset = manifest.get("dataset", {})
+    dataset_name = str(dataset.get("name", "synthetic-structural-break")) if isinstance(dataset, dict) else "synthetic-structural-break"
+    return PrimitiveRegistry.for_task(task_schema_for_dataset(dataset_name))
 
 
 def _clone_agent_for_island(agent: object | None) -> object | None:
@@ -2444,9 +2483,27 @@ def load_dataset_with_metadata(dataset_config: dict[str, Any]) -> tuple[dict[str
         return dataset.inputs(), dataset.y, {
             "name": name,
             "n_samples": int(dataset.y.shape[0]),
-            "positive_count": int(np.sum(dataset.y)),
-            "negative_count": int(dataset.y.shape[0] - np.sum(dataset.y)),
+            "target_mean": float(np.mean(dataset.y)),
+            "target_std": float(np.std(dataset.y)),
+            "target_min": float(np.min(dataset.y)),
+            "target_max": float(np.max(dataset.y)),
             "mapping": "synthetic structural break generator",
+        }
+    if name == "synthetic-tabular":
+        dataset = make_tabular_data(
+            n_samples=int(dataset_config.get("n_samples", dataset_config.get("n_series", 240))),
+            n_features=int(dataset_config.get("n_features", 12)),
+            seed=int(dataset_config.get("seed", 0)),
+        )
+        return dataset.inputs(), dataset.y, {
+            "name": name,
+            "n_samples": int(dataset.y.shape[0]),
+            "n_features": int(dataset.x.shape[1]),
+            "target_mean": float(np.mean(dataset.y)),
+            "target_std": float(np.std(dataset.y)),
+            "target_min": float(np.min(dataset.y)),
+            "target_max": float(np.max(dataset.y)),
+            "mapping": "synthetic generic tabular generator",
         }
     raise ValueError(f"Unsupported dataset {name!r}.")
 
@@ -2492,8 +2549,8 @@ def inspect_run(run_dir: str | pathlib.Path) -> dict[str, Any]:
         "dataset_fingerprint": manifest["dataset_fingerprint"],
         "step": int(state.step),
         "archive_version": int(state.archive_version),
-        "best_train_auc": float(state.best_train_auc),
-        "best_validation_auc": float(state.best_validation_auc),
+        "best_train_score": float(state.best_train_score),
+        "best_validation_score": float(state.best_validation_score),
         "best_config": state.best_config,
         "split_sizes": {
             "train": len(split_manifest.train_indices),
@@ -2532,8 +2589,8 @@ def inspect_run(run_dir: str | pathlib.Path) -> dict[str, Any]:
                     "step": int(island_state.step),
                     "generation": int(island_state.generation),
                     "archive_version": int(island_state.archive_version),
-                    "best_train_auc": float(island_state.best_train_auc),
-                    "best_validation_auc": float(island_state.best_validation_auc),
+                    "best_train_score": float(island_state.best_train_score),
+                    "best_validation_score": float(island_state.best_validation_score),
                     "event_count": island_events,
                     "state": str(island_dir / "state.json"),
                     "best_graph": str(island_dir / island_state.best_graph_path),
@@ -2564,8 +2621,9 @@ def inspect_run(run_dir: str | pathlib.Path) -> dict[str, Any]:
 
 def export_best_graph(run_dir: str | pathlib.Path, output_path: str | pathlib.Path, *, allow_source: bool = False) -> pathlib.Path:
     path = pathlib.Path(run_dir)
+    manifest = json.loads((path / "run_manifest.json").read_text(encoding="utf-8"))
     state = RunState.from_dict(json.loads((path / "state.json").read_text(encoding="utf-8")))
-    graph = graph_from_path(path / state.best_graph_path, allow_source=allow_source)
+    graph = graph_from_path(path / state.best_graph_path, registry=registry_from_manifest(manifest), allow_source=allow_source)
     return write_graph(output_path, graph, metadata={"source_run": state.run_id, "source_step": state.step, "role": "exported_best"})
 
 
@@ -2576,7 +2634,7 @@ def recheck_run(run_dir: str | pathlib.Path, *, include_test: bool = False, allo
     inputs, y = load_dataset(dict(manifest["dataset"]))
     splits = split_dataset(inputs, y, split_manifest)
     state = RunState.from_dict(json.loads((path / "state.json").read_text(encoding="utf-8")))
-    graph = graph_from_path(path / state.best_graph_path, allow_source=allow_source)
+    graph = graph_from_path(path / state.best_graph_path, registry=registry_from_manifest(manifest), allow_source=allow_source)
     evaluator = RidgeEvaluator(**manifest["evaluator"])
     result: dict[str, Any] = {
         "run_id": state.run_id,
@@ -2590,7 +2648,7 @@ def recheck_run(run_dir: str | pathlib.Path, *, include_test: bool = False, allo
         split_inputs, split_y = splits[split_name]
         split_result = evaluator.evaluate(graph, split_inputs, split_y, config=state.best_config, update_graph=False)
         result["splits"][split_name] = {
-            "auc": float(split_result.auc),
+            "score": float(split_result.score),
             "n_samples": int(split_y.shape[0]),
             "config": split_result.config,
         }
@@ -2598,7 +2656,7 @@ def recheck_run(run_dir: str | pathlib.Path, *, include_test: bool = False, allo
         test_inputs, test_y = splits["test"]
         test_result = evaluator.evaluate(graph, test_inputs, test_y, config=state.best_config, update_graph=False)
         result["splits"]["test"] = {
-            "auc": float(test_result.auc),
+            "score": float(test_result.score),
             "n_samples": int(test_y.shape[0]),
             "config": test_result.config,
         }
@@ -2607,7 +2665,7 @@ def recheck_run(run_dir: str | pathlib.Path, *, include_test: bool = False, allo
             reduced_inputs, reduced_y, reduced_metadata = reduced_test
             reduced_result = evaluator.evaluate(graph, reduced_inputs, reduced_y, config=state.best_config, update_graph=False)
             result["splits"]["reduced_test"] = {
-                "auc": float(reduced_result.auc),
+                "score": float(reduced_result.score),
                 "n_samples": int(reduced_y.shape[0]),
                 "config": reduced_result.config,
                 "metadata": reduced_metadata,

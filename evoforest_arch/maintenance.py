@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import json
 
 from evoforest_arch.graph import Graph, NodeAlternative
 
@@ -45,6 +46,8 @@ class GraphMaintenance:
                     alternative.primitive,
                     alternative.parents,
                     alternative.source,
+                    alternative.torch_source,
+                    json.dumps(alternative.output_contract, sort_keys=True, separators=(",", ":")),
                     alternative.description,
                     alternative.tags,
                     alternative.global_refs,

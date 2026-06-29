@@ -82,7 +82,7 @@ def make_split_manifest(
     seed: int,
     validation_fraction: float = 0.2,
     test_fraction: float = 0.2,
-    method: str = "stratified_random",
+    method: str = "random",
 ) -> SplitManifest:
     y_array = np.asarray(y)
     if y_array.ndim != 1:
@@ -97,9 +97,7 @@ def make_split_manifest(
     if n_samples < 6:
         raise ValueError("At least 6 samples are required for train/validation/test splits.")
     rng = np.random.default_rng(seed)
-    if method == "stratified_random":
-        train, validation, test = _stratified_indices(y_array, rng, validation_fraction, test_fraction)
-    elif method == "random":
+    if method == "random":
         shuffled = np.arange(n_samples)
         rng.shuffle(shuffled)
         test_count, validation_count = _split_counts(n_samples, validation_fraction, test_fraction)
@@ -107,7 +105,7 @@ def make_split_manifest(
         validation = shuffled[test_count : test_count + validation_count]
         train = shuffled[test_count + validation_count :]
     else:
-        raise ValueError("method must be 'stratified_random' or 'random'.")
+        raise ValueError("method must be 'random'.")
 
     for indices in (train, validation, test):
         rng.shuffle(indices)
@@ -135,7 +133,7 @@ def make_grouped_split_manifest(
     seed: int,
     validation_fraction: float = 0.2,
     test_fraction: float = 0.2,
-    method: str = "group_stratified_random",
+    method: str = "group_random",
 ) -> SplitManifest:
     y_array = np.asarray(y)
     group_array = np.asarray(groups)
@@ -152,24 +150,12 @@ def make_grouped_split_manifest(
     n_samples = int(y_array.shape[0])
     if n_samples < 6:
         raise ValueError("At least 6 samples are required for train/validation/test splits.")
-    unique_groups, inverse = np.unique(group_array, return_inverse=True)
+    unique_groups = np.unique(group_array)
     if unique_groups.shape[0] < 6:
         raise ValueError("At least 6 groups are required for grouped train/validation/test splits.")
 
-    group_labels = np.zeros(unique_groups.shape[0], dtype=np.float64)
-    for group_index in range(unique_groups.shape[0]):
-        group_y = y_array[inverse == group_index]
-        group_labels[group_index] = float(np.max(group_y))
-
     rng = np.random.default_rng(seed)
-    if method == "group_stratified_random":
-        train_group_idx, validation_group_idx, test_group_idx = _group_split_indices(
-            group_labels,
-            rng,
-            validation_fraction,
-            test_fraction,
-        )
-    elif method == "group_random":
+    if method == "group_random":
         shuffled = np.arange(unique_groups.shape[0])
         rng.shuffle(shuffled)
         test_count, validation_count = _split_counts(unique_groups.shape[0], validation_fraction, test_fraction)
@@ -177,7 +163,7 @@ def make_grouped_split_manifest(
         validation_group_idx = shuffled[test_count : test_count + validation_count]
         train_group_idx = shuffled[test_count + validation_count :]
     else:
-        raise ValueError("method must be 'group_stratified_random' or 'group_random'.")
+        raise ValueError("method must be 'group_random'.")
 
     train_groups = unique_groups[train_group_idx]
     validation_groups = unique_groups[validation_group_idx]
@@ -281,46 +267,9 @@ def read_split_manifest(path: str | pathlib.Path) -> SplitManifest:
     return SplitManifest.from_dict(json.loads(pathlib.Path(path).read_text(encoding="utf-8")))
 
 
-def _stratified_indices(
-    y: np.ndarray,
-    rng: np.random.Generator,
-    validation_fraction: float,
-    test_fraction: float,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    train_parts: list[np.ndarray] = []
-    validation_parts: list[np.ndarray] = []
-    test_parts: list[np.ndarray] = []
-    for label in sorted(np.unique(y).tolist()):
-        indices = np.flatnonzero(y == label)
-        rng.shuffle(indices)
-        test_count, validation_count = _split_counts(len(indices), validation_fraction, test_fraction)
-        test_parts.append(indices[:test_count])
-        validation_parts.append(indices[test_count : test_count + validation_count])
-        train_parts.append(indices[test_count + validation_count :])
-    return np.concatenate(train_parts), np.concatenate(validation_parts), np.concatenate(test_parts)
-
-
-def _group_split_indices(
-    group_labels: np.ndarray,
-    rng: np.random.Generator,
-    validation_fraction: float,
-    test_fraction: float,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    labels, counts = np.unique(group_labels, return_counts=True)
-    if labels.shape[0] > 1 and np.all(counts >= 3):
-        return _stratified_indices(group_labels, rng, validation_fraction, test_fraction)
-    shuffled = np.arange(group_labels.shape[0])
-    rng.shuffle(shuffled)
-    test_count, validation_count = _split_counts(group_labels.shape[0], validation_fraction, test_fraction)
-    test = shuffled[:test_count]
-    validation = shuffled[test_count : test_count + validation_count]
-    train = shuffled[test_count + validation_count :]
-    return train, validation, test
-
-
 def _split_counts(n_samples: int, validation_fraction: float, test_fraction: float) -> tuple[int, int]:
     if n_samples < 3:
-        raise ValueError("Each stratification group must contain at least 3 samples.")
+        raise ValueError("Each split population must contain at least 3 samples.")
     test_count = max(1, int(round(n_samples * test_fraction))) if test_fraction > 0.0 else 0
     validation_count = max(1, int(round(n_samples * validation_fraction))) if validation_fraction > 0.0 else 0
     while n_samples - test_count - validation_count < 1:

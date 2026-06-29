@@ -1,11 +1,9 @@
 {
   "ablations": [
     {
-      "auc": 0.9969135802469136,
-      "delta_auc_vs_full": 0.0,
+      "delta_score_vs_full": 0.0,
       "description": "No ablation; capped configuration search over the full seed graph.",
       "evaluation": {
-        "auc": 0.9969135802469136,
         "cache": {
           "entries": 31,
           "hits": 157,
@@ -15,56 +13,114 @@
         },
         "config": {
           "activation": "identity",
-          "ridge_g": "identity",
-          "ridge_w": "uniform",
+          "ridge_g": "huber",
+          "ridge_w": "boundary_energy",
           "segment_stats": "basic",
-          "shape_stats": "spectral",
+          "shape_stats": "cusum",
           "trend_stats": "linear"
         },
         "configuration_search_capped": true,
-        "global_ridge_auc": 0.9986282578875172,
+        "global_ridge_score": 0.7935852547948834,
         "n_configs_evaluated": 24,
         "n_configs_total": 48,
         "n_features": 21,
         "ridge_g": {
-          "alternative": "identity",
-          "description": "No residual reweighting.",
+          "alternative": "huber",
+          "description": "Huber-style residual downweighting.",
           "irls": [
             {
               "final_alpha": 10.0,
               "fold": 0,
-              "iterations": [],
-              "steps_used": 0
+              "iterations": [
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.23172073548117872,
+                  "step": 1,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                },
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.23172073548117872,
+                  "step": 2,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                }
+              ],
+              "steps_used": 2
             },
             {
               "final_alpha": 10.0,
               "fold": 1,
-              "iterations": [],
-              "steps_used": 0
+              "iterations": [
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.20920251702116127,
+                  "step": 1,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                },
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.20920251702116127,
+                  "step": 2,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                }
+              ],
+              "steps_used": 2
             },
             {
               "final_alpha": 10.0,
               "fold": 2,
-              "iterations": [],
-              "steps_used": 0
+              "iterations": [
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.23005290379751364,
+                  "step": 1,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                },
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.23005290379751364,
+                  "step": 2,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                }
+              ],
+              "steps_used": 2
             }
           ],
           "irls_steps_requested": 2,
           "irls_steps_used_per_fold": [
-            0,
-            0,
-            0
+            2,
+            2,
+            2
           ],
-          "rule": "identity"
+          "rule": "huber"
         },
         "ridge_w": {
-          "alternative": "uniform",
-          "max": 1.0,
-          "mean": 1.0,
-          "min": 1.0,
-          "std": 0.0
+          "alternative": "boundary_energy",
+          "max": 1.4407076648976425,
+          "mean": 0.9999999999999999,
+          "min": 0.48761906175530484,
+          "std": 0.3149532335606659
         },
-        "shap_reconstruction_error": 4.440892098500626e-16
+        "score": 0.7666926485485711,
+        "shap_reconstruction_error": 2.220446049250313e-16
       },
       "graph": {
         "alternatives": 15,
@@ -131,7 +187,7 @@
             "shape": [
               1
             ],
-            "trainable": true,
+            "trainable": false,
             "value": [
               1.0
             ]
@@ -152,14 +208,13 @@
         "total_configurations": 48
       },
       "name": "full",
-      "passed": true
+      "passed": true,
+      "score": 0.7666926485485711
     },
     {
-      "auc": 0.9962277091906722,
-      "delta_auc_vs_full": -0.000685871056241405,
+      "delta_score_vs_full": -0.008415738017729879,
       "description": "Disable configuration search by scoring only the default selected path.",
       "evaluation": {
-        "auc": 0.9962277091906722,
         "cache": {
           "entries": 9,
           "hits": 6,
@@ -176,7 +231,7 @@
           "trend_stats": "linear"
         },
         "configuration_search_capped": false,
-        "global_ridge_auc": 0.9969135802469136,
+        "global_ridge_score": 0.7945992523886922,
         "n_configs_evaluated": 1,
         "n_configs_total": 1,
         "n_features": 21,
@@ -185,7 +240,7 @@
           "description": "No residual reweighting.",
           "irls": [
             {
-              "final_alpha": 31.622776601683793,
+              "final_alpha": 10.0,
               "fold": 0,
               "iterations": [],
               "steps_used": 0
@@ -197,7 +252,7 @@
               "steps_used": 0
             },
             {
-              "final_alpha": 10.0,
+              "final_alpha": 31.622776601683793,
               "fold": 2,
               "iterations": [],
               "steps_used": 0
@@ -218,6 +273,7 @@
           "min": 1.0,
           "std": 0.0
         },
+        "score": 0.7582769105308412,
         "shap_reconstruction_error": 2.220446049250313e-16
       },
       "graph": {
@@ -285,7 +341,7 @@
             "shape": [
               1
             ],
-            "trainable": true,
+            "trainable": false,
             "value": [
               1.0
             ]
@@ -306,14 +362,13 @@
         "total_configurations": 48
       },
       "name": "default_path_only",
-      "passed": true
+      "passed": true,
+      "score": 0.7582769105308412
     },
     {
-      "auc": 0.997599451303155,
-      "delta_auc_vs_full": 0.000685871056241405,
+      "delta_score_vs_full": -0.0031285026182052977,
       "description": "Remove output ensemble diversity by keeping only raw concatenated outputs.",
       "evaluation": {
-        "auc": 0.997599451303155,
         "cache": {
           "entries": 13,
           "hits": 47,
@@ -323,13 +378,13 @@
         },
         "config": {
           "ridge_g": "identity",
-          "ridge_w": "uniform",
+          "ridge_w": "boundary_energy",
           "segment_stats": "basic",
-          "shape_stats": "spectral",
+          "shape_stats": "cusum",
           "trend_stats": "linear"
         },
         "configuration_search_capped": false,
-        "global_ridge_auc": 0.9982853223593965,
+        "global_ridge_score": 0.7897676309107835,
         "n_configs_evaluated": 16,
         "n_configs_total": 16,
         "n_features": 10,
@@ -338,19 +393,19 @@
           "description": "No residual reweighting.",
           "irls": [
             {
-              "final_alpha": 10.0,
+              "final_alpha": 3.1622776601683795,
               "fold": 0,
               "iterations": [],
               "steps_used": 0
             },
             {
-              "final_alpha": 10.0,
+              "final_alpha": 3.1622776601683795,
               "fold": 1,
               "iterations": [],
               "steps_used": 0
             },
             {
-              "final_alpha": 3.1622776601683795,
+              "final_alpha": 10.0,
               "fold": 2,
               "iterations": [],
               "steps_used": 0
@@ -365,13 +420,14 @@
           "rule": "identity"
         },
         "ridge_w": {
-          "alternative": "uniform",
-          "max": 1.0,
-          "mean": 1.0,
-          "min": 1.0,
-          "std": 0.0
+          "alternative": "boundary_energy",
+          "max": 1.4407076648976425,
+          "mean": 0.9999999999999999,
+          "min": 0.48761906175530484,
+          "std": 0.3149532335606659
         },
-        "shap_reconstruction_error": 2.220446049250313e-16
+        "score": 0.7635641459303658,
+        "shap_reconstruction_error": 4.440892098500626e-16
       },
       "graph": {
         "alternatives": 13,
@@ -437,7 +493,7 @@
             "shape": [
               1
             ],
-            "trainable": true,
+            "trainable": false,
             "value": [
               1.0
             ]
@@ -458,14 +514,13 @@
         "total_configurations": 16
       },
       "name": "raw_output_only",
-      "passed": true
+      "passed": true,
+      "score": 0.7635641459303658
     },
     {
-      "auc": 0.9969135802469136,
-      "delta_auc_vs_full": 0.0,
+      "delta_score_vs_full": 0.0,
       "description": "Collapse callable family search to the identity callable.",
       "evaluation": {
-        "auc": 0.9969135802469136,
         "cache": {
           "entries": 22,
           "hits": 98,
@@ -476,13 +531,13 @@
         "config": {
           "activation": "identity",
           "ridge_g": "identity",
-          "ridge_w": "uniform",
+          "ridge_w": "boundary_energy",
           "segment_stats": "basic",
-          "shape_stats": "spectral",
+          "shape_stats": "cusum",
           "trend_stats": "linear"
         },
         "configuration_search_capped": false,
-        "global_ridge_auc": 0.9986282578875172,
+        "global_ridge_score": 0.7935852547948834,
         "n_configs_evaluated": 16,
         "n_configs_total": 16,
         "n_features": 21,
@@ -518,13 +573,14 @@
           "rule": "identity"
         },
         "ridge_w": {
-          "alternative": "uniform",
-          "max": 1.0,
-          "mean": 1.0,
-          "min": 1.0,
-          "std": 0.0
+          "alternative": "boundary_energy",
+          "max": 1.4407076648976425,
+          "mean": 0.9999999999999999,
+          "min": 0.48761906175530484,
+          "std": 0.3149532335606659
         },
-        "shap_reconstruction_error": 4.440892098500626e-16
+        "score": 0.7666926485485711,
+        "shap_reconstruction_error": 2.220446049250313e-16
       },
       "graph": {
         "alternatives": 13,
@@ -591,7 +647,7 @@
             "shape": [
               1
             ],
-            "trainable": true,
+            "trainable": false,
             "value": [
               1.0
             ]
@@ -612,14 +668,13 @@
         "total_configurations": 16
       },
       "name": "no_callable_choice",
-      "passed": true
+      "passed": true,
+      "score": 0.7666926485485711
     },
     {
-      "auc": 0.9969135802469136,
-      "delta_auc_vs_full": 0.0,
+      "delta_score_vs_full": -0.008415738017729879,
       "description": "Collapse fitting-rule search to uniform sample weights and identity residual weights.",
       "evaluation": {
-        "auc": 0.9969135802469136,
         "cache": {
           "entries": 30,
           "hits": 102,
@@ -632,11 +687,11 @@
           "ridge_g": "identity",
           "ridge_w": "uniform",
           "segment_stats": "basic",
-          "shape_stats": "spectral",
+          "shape_stats": "cusum",
           "trend_stats": "linear"
         },
         "configuration_search_capped": false,
-        "global_ridge_auc": 0.9986282578875172,
+        "global_ridge_score": 0.7945992523886922,
         "n_configs_evaluated": 12,
         "n_configs_total": 12,
         "n_features": 21,
@@ -657,7 +712,7 @@
               "steps_used": 0
             },
             {
-              "final_alpha": 10.0,
+              "final_alpha": 31.622776601683793,
               "fold": 2,
               "iterations": [],
               "steps_used": 0
@@ -678,7 +733,8 @@
           "min": 1.0,
           "std": 0.0
         },
-        "shap_reconstruction_error": 4.440892098500626e-16
+        "score": 0.7582769105308412,
+        "shap_reconstruction_error": 2.220446049250313e-16
       },
       "graph": {
         "alternatives": 13,
@@ -745,7 +801,7 @@
             "shape": [
               1
             ],
-            "trainable": true,
+            "trainable": false,
             "value": [
               1.0
             ]
@@ -766,14 +822,13 @@
         "total_configurations": 12
       },
       "name": "no_fitting_choice",
-      "passed": true
+      "passed": true,
+      "score": 0.7582769105308412
     },
     {
-      "auc": 0.9972565157750343,
-      "delta_auc_vs_full": 0.0003429355281207025,
+      "delta_score_vs_full": -9.135968301476893e-05,
       "description": "Remove the output alternative that uses persistent global projection parameters.",
       "evaluation": {
-        "auc": 0.9972565157750343,
         "cache": {
           "entries": 27,
           "hits": 125,
@@ -783,55 +838,113 @@
         },
         "config": {
           "activation": "identity",
-          "ridge_g": "identity",
-          "ridge_w": "uniform",
+          "ridge_g": "huber",
+          "ridge_w": "boundary_energy",
           "segment_stats": "basic",
-          "shape_stats": "spectral",
+          "shape_stats": "cusum",
           "trend_stats": "linear"
         },
         "configuration_search_capped": true,
-        "global_ridge_auc": 0.9986282578875172,
+        "global_ridge_score": 0.792640284962741,
         "n_configs_evaluated": 24,
         "n_configs_total": 48,
         "n_features": 20,
         "ridge_g": {
-          "alternative": "identity",
-          "description": "No residual reweighting.",
+          "alternative": "huber",
+          "description": "Huber-style residual downweighting.",
           "irls": [
             {
               "final_alpha": 10.0,
               "fold": 0,
-              "iterations": [],
-              "steps_used": 0
+              "iterations": [
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.23328829920108118,
+                  "step": 1,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                },
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.23328829920108118,
+                  "step": 2,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                }
+              ],
+              "steps_used": 2
             },
             {
               "final_alpha": 10.0,
               "fold": 1,
-              "iterations": [],
-              "steps_used": 0
+              "iterations": [
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.20941548486790185,
+                  "step": 1,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                },
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.20941548486790185,
+                  "step": 2,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                }
+              ],
+              "steps_used": 2
             },
             {
               "final_alpha": 10.0,
               "fold": 2,
-              "iterations": [],
-              "steps_used": 0
+              "iterations": [
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.2307466171470881,
+                  "step": 1,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                },
+                {
+                  "alpha": 10.0,
+                  "residual_std": 0.2307466171470881,
+                  "step": 2,
+                  "weight_max": 1.0,
+                  "weight_mean": 1.0,
+                  "weight_min": 1.0,
+                  "weight_std": 0.0
+                }
+              ],
+              "steps_used": 2
             }
           ],
           "irls_steps_requested": 2,
           "irls_steps_used_per_fold": [
-            0,
-            0,
-            0
+            2,
+            2,
+            2
           ],
-          "rule": "identity"
+          "rule": "huber"
         },
         "ridge_w": {
-          "alternative": "uniform",
-          "max": 1.0,
-          "mean": 1.0,
-          "min": 1.0,
-          "std": 0.0
+          "alternative": "boundary_energy",
+          "max": 1.4407076648976425,
+          "mean": 0.9999999999999999,
+          "min": 0.48761906175530484,
+          "std": 0.3149532335606659
         },
+        "score": 0.7666012888655563,
         "shap_reconstruction_error": 4.440892098500626e-16
       },
       "graph": {
@@ -899,7 +1012,7 @@
             "shape": [
               1
             ],
-            "trainable": true,
+            "trainable": false,
             "value": [
               1.0
             ]
@@ -920,14 +1033,13 @@
         "total_configurations": 48
       },
       "name": "no_global_projection",
-      "passed": true
+      "passed": true,
+      "score": 0.7666012888655563
     },
     {
-      "auc": 0.9962277091906722,
-      "delta_auc_vs_full": -0.000685871056241405,
+      "delta_score_vs_full": 0.0,
       "description": "Remove spectral shape alternatives from the intermediate search space.",
       "evaluation": {
-        "auc": 0.9962277091906722,
         "cache": {
           "entries": 21,
           "hits": 135,
@@ -938,13 +1050,13 @@
         "config": {
           "activation": "identity",
           "ridge_g": "identity",
-          "ridge_w": "uniform",
+          "ridge_w": "boundary_energy",
           "segment_stats": "basic",
           "shape_stats": "cusum",
           "trend_stats": "linear"
         },
         "configuration_search_capped": false,
-        "global_ridge_auc": 0.9969135802469136,
+        "global_ridge_score": 0.7935852547948834,
         "n_configs_evaluated": 24,
         "n_configs_total": 24,
         "n_features": 21,
@@ -953,7 +1065,7 @@
           "description": "No residual reweighting.",
           "irls": [
             {
-              "final_alpha": 31.622776601683793,
+              "final_alpha": 10.0,
               "fold": 0,
               "iterations": [],
               "steps_used": 0
@@ -980,12 +1092,13 @@
           "rule": "identity"
         },
         "ridge_w": {
-          "alternative": "uniform",
-          "max": 1.0,
-          "mean": 1.0,
-          "min": 1.0,
-          "std": 0.0
+          "alternative": "boundary_energy",
+          "max": 1.4407076648976425,
+          "mean": 0.9999999999999999,
+          "min": 0.48761906175530484,
+          "std": 0.3149532335606659
         },
+        "score": 0.7666926485485711,
         "shap_reconstruction_error": 2.220446049250313e-16
       },
       "graph": {
@@ -1053,7 +1166,7 @@
             "shape": [
               1
             ],
-            "trainable": true,
+            "trainable": false,
             "value": [
               1.0
             ]
@@ -1074,16 +1187,17 @@
         "total_configurations": 24
       },
       "name": "no_spectral_shape",
-      "passed": true
+      "passed": true,
+      "score": 0.7666926485485711
     }
   ],
   "benchmark": "ablation_suite",
   "quick": false,
-  "scope": "These benchmarks validate architecture-level behavior of this clean-room reimplementation. They do not claim to reproduce the authors' private evolved graph, private code-generation stack, competition pipeline, or reported ROC-AUC.",
+  "scope": "These benchmarks validate architecture-level behavior of this clean-room reimplementation. They do not claim to reproduce the authors' private evolved graph, private code-generation stack, competition pipeline, or reported task score.",
   "seed": 29,
   "summary": {
     "all_passed": true,
-    "full_auc": 0.9969135802469136,
+    "full_score": 0.7666926485485711,
     "passed": 7,
     "total": 7
   }

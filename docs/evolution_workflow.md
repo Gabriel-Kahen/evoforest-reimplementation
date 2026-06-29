@@ -50,19 +50,27 @@ validation split. The candidate's graph configuration is selected on train, then
 validation is rechecked with that config fixed.
 
 The paper profile intentionally changes that contract. `--profile paper` promotes
-island and global bests by train-split cross-validated ROC-AUC, records validation
+island and global bests by train-split cross-validated task score, records validation
 scores for reporting, and does not use validation as a promotion gate.
 
 ## Dataset Requirement
 
-The current production CLI is wired to the synthetic structural-break dataset:
+The production CLI includes two built-in smoke datasets. The structural-break
+dataset exercises the original time-series specialization:
 
 ```bash
 evoforest-arch evolve --steps 4 --seed 17 --n-series 240 --length 160 --output runs/production-smoke
 ```
 
-That is enough to test the workflow. It is not enough to claim a strong evolved
-model on a real benchmark.
+The generic tabular dataset exercises the task-independent seed graph and
+primitive registry:
+
+```bash
+evoforest-arch evolve --dataset synthetic-tabular --steps 4 --seed 17 --n-samples 240 --n-features 12 --output runs/production-tabular-smoke
+```
+
+These are enough to test the workflow. They are not enough to claim a strong
+evolved model on a real benchmark.
 
 LLM-backed production evolution is opt-in and can be configured through `.env`:
 
@@ -98,7 +106,7 @@ evoforest-arch evolve --profile paper --llm-provider env --env-file .env --outpu
 `--profile paper` resolves to 600 target steps, four async islands, four workers,
 dedicated `cuda:0,cuda:1,cuda:2,cuda:3` devices, 64 configurations, PyTorch
 L-BFGS refinement, the fixed scientist temperature schedule
-`0.35,0.5,0.6,0.75`, engineer temperature `0`, and CV ROC-AUC promotion. For a
+`0.35,0.5,0.6,0.75`, engineer temperature `0`, and CV task score promotion. For a
 non-CUDA smoke test, override the device slots and disable refinement:
 
 ```bash
@@ -122,14 +130,16 @@ For a real claim, add a loader that returns:
 
 - `inputs`: a dictionary of graph input tensors and scalar metadata.
 - `y`: a 1-D target array aligned with the sample axis of the tensors.
-- a stable dataset fingerprint derived from the exact input arrays and labels.
+- a `TaskSchema` or dataset-name mapping that selects the seed graph and
+  primitive registry for those inputs.
+- a stable dataset fingerprint derived from the exact input arrays and targets.
 
 Then create one split manifest and reuse it for every run. Do not tune on test.
 
 ## External Dataset Loaders
 
 External dataset loaders are deliberately not bundled with this public
-reimplementation. Keep domain-specific data adapters, private labels, and contest
+reimplementation. Keep domain-specific data adapters, private targets, and contest
 submission code in a separate workspace. If you add a loader for a public dataset,
 make it return the same three values described above and commit the split manifest
 used for every comparable run.

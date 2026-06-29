@@ -8,7 +8,7 @@ from typing import Any
 
 from evoforest_arch.evaluator import RidgeEvaluator
 from evoforest_arch.evolution import EvolutionLoop
-from evoforest_arch.seed import build_seed_graph
+from evoforest_arch.seed import build_structural_break_seed_graph
 from evoforest_arch.synthetic import make_structural_break_data
 
 from benchmarks.common import (
@@ -36,7 +36,7 @@ def build_report(output_dir: Path, seed: int = 31, quick: bool = False) -> dict[
 
     dataset = make_structural_break_data(n_series=n_series, length=length, seed=seed)
     result = EvolutionLoop(
-        build_seed_graph(),
+        build_structural_break_seed_graph(),
         evaluator=RidgeEvaluator(n_splits=3, seed=seed, max_configurations=max_configurations, irls_steps=2),
         seed=seed,
     ).run(dataset.inputs(), dataset.y, steps=steps, output_dir=run_dir)
@@ -47,8 +47,8 @@ def build_report(output_dir: Path, seed: int = 31, quick: bool = False) -> dict[
     final_graph = checkpoint["graph"]
     final_result = checkpoint["result"]
     event_rows = [event_summary(event) for event in events]
-    initial_auc = float(archive_rows[0]["auc"]) if archive_rows else float(result.auc)
-    final_auc = float(final_result["auc"])
+    initial_score = float(archive_rows[0]["score"]) if archive_rows else float(result.score)
+    final_score = float(final_result["score"])
     accepted_count = sum(1 for event in events if bool(event.get("accepted", False)))
     failed_count = sum(1 for event in events if bool(event.get("failed", False)))
     salvaged_count = sum(len(event.get("salvaged", []) or []) for event in events)
@@ -63,9 +63,9 @@ def build_report(output_dir: Path, seed: int = 31, quick: bool = False) -> dict[
         "summary": {
             "passed": passed,
             "steps": steps,
-            "initial_auc": initial_auc,
-            "final_auc": final_auc,
-            "delta_auc": final_auc - initial_auc,
+            "initial_score": initial_score,
+            "final_score": final_score,
+            "delta_score": final_score - initial_score,
             "accepted_mutations": accepted_count,
             "failed_mutations": failed_count,
             "salvaged_alternatives": salvaged_count,
@@ -137,7 +137,7 @@ def markdown_report(payload: dict[str, Any]) -> str:
             str(payload["scope"]),
             f"Seed: `{payload['seed']}`",
             (
-                f"Initial AUC: `{fmt_float(summary['initial_auc'])}`; final AUC: `{fmt_float(summary['final_auc'])}`; "
+                f"Initial score: `{fmt_float(summary['initial_score'])}`; final score: `{fmt_float(summary['final_score'])}`; "
                 f"global-best versions: `{summary['global_best_versions']}`; run artifacts: `{summary['run_dir']}`"
             ),
             (

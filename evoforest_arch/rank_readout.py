@@ -5,7 +5,7 @@ from typing import Any
 
 import numpy as np
 
-from evoforest_arch.metrics import roc_auc_score, stratified_group_folds
+from evoforest_arch.metrics import ScoreFunction, TaskScorer, coerce_scorer, group_folds, safe_corr, target_alignment
 from evoforest_arch.readout import Standardizer
 
 
@@ -69,13 +69,13 @@ class RankEnsembleModel:
 class RankSelectionResult:
     model: RankEnsembleModel
     oof_predictions: np.ndarray
-    oof_auc: float
+    oof_score: float
     config: dict[str, Any]
     candidates: tuple[dict[str, Any], ...]
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "oof_auc": float(self.oof_auc),
+            "oof_score": float(self.oof_score),
             "config": dict(self.config),
             "model": self.model.to_dict(),
             "candidates": [dict(row) for row in self.candidates],
@@ -93,7 +93,7 @@ def fit_rank_feature_expansion(
     y_train = np.asarray(y_train, dtype=np.float64)
     standardizer = Standardizer.fit(x_train)
     z = np.clip(standardizer.transform(x_train), -8.0, 8.0)
-    edges = np.asarray([abs(roc_auc_score(y_train, z[:, idx]) - 0.5) for idx in range(z.shape[1])], dtype=np.float64)
+    edges = np.asarray([target_alignment(z[:, idx], y_train) for idx in range(z.shape[1])], dtype=np.float64)
     selected = tuple(int(index) for index in np.argsort(edges)[::-1][: max(0, min(int(max_interaction_base), z.shape[1]))])
     names = list(feature_names)
     names.extend(f"abs::{feature_names[idx]}" for idx in selected)
@@ -110,11 +110,13 @@ def select_rank_ensemble(
     seed: int = 0,
     max_features_options: tuple[int, ...] = (8, 16, 32, 64, 128),
     power_options: tuple[float, ...] = (1.0, 1.5, 2.0),
+    scorer: TaskScorer | ScoreFunction | None = None,
 ) -> RankSelectionResult:
     x_train = np.asarray(x_train, dtype=np.float64)
     y_train = np.asarray(y_train, dtype=np.float64)
     groups = np.asarray(groups)
-    folds = stratified_group_folds(y_train, groups, n_splits, seed)
+    task_scorer = coerce_scorer(scorer)
+    folds = group_folds(y_train, groups, n_splits, seed)
     best: dict[str, Any] | None = None
     candidate_rows: list[dict[str, Any]] = []
     for max_features in max_features_options:
@@ -123,20 +125,20 @@ def select_rank_ensemble(
             for train_idx, validation_idx in folds:
                 model = fit_rank_ensemble(x_train[train_idx], y_train[train_idx], max_features=max_features, power=power)
                 oof[validation_idx] = model.predict(x_train[validation_idx])
-            auc = roc_auc_score(y_train, oof)
-            row = {"max_features": int(max_features), "power": float(power), "oof_auc": float(auc)}
+            score = task_scorer.score(y_train, oof)
+            row = {"max_features": int(max_features), "power": float(power), "oof_score": float(score)}
             candidate_rows.append(row)
-            if best is None or auc > float(best["oof_auc"]):
+            if best is None or score > float(best["oof_score"]):
                 best = {**row, "oof_predictions": oof}
     if best is None:
         model = fit_rank_ensemble(x_train, y_train, max_features=1, power=1.0)
         oof = model.predict(x_train)
-        best = {"max_features": 1, "power": 1.0, "oof_auc": roc_auc_score(y_train, oof), "oof_predictions": oof}
+        best = {"max_features": 1, "power": 1.0, "oof_score": task_scorer.score(y_train, oof), "oof_predictions": oof}
     model = fit_rank_ensemble(x_train, y_train, max_features=int(best["max_features"]), power=float(best["power"]))
     return RankSelectionResult(
         model=model,
         oof_predictions=np.asarray(best["oof_predictions"], dtype=np.float64),
-        oof_auc=float(best["oof_auc"]),
+        oof_score=float(best["oof_score"]),
         config={"max_features": int(best["max_features"]), "power": float(best["power"])},
         candidates=tuple(candidate_rows),
     )
@@ -153,9 +155,9 @@ def fit_rank_ensemble(
     y_train = np.asarray(y_train, dtype=np.float64)
     if x_train.ndim != 2 or x_train.shape[1] == 0:
         return RankEnsembleModel(np.asarray([], dtype=np.int64), np.asarray([], dtype=np.float64), np.asarray([], dtype=np.float64), int(max_features), float(power))
-    aucs = np.asarray([roc_auc_score(y_train, x_train[:, idx]) for idx in range(x_train.shape[1])], dtype=np.float64)
-    directions = np.where(aucs >= 0.5, 1.0, -1.0)
-    edges = np.abs(aucs - 0.5)
+    correlations = np.asarray([safe_corr(x_train[:, idx], y_train) for idx in range(x_train.shape[1])], dtype=np.float64)
+    directions = np.where(correlations >= 0.0, 1.0, -1.0)
+    edges = np.abs(correlations)
     order = np.argsort(edges)[::-1]
     selected = order[: max(1, min(int(max_features), x_train.shape[1]))]
     raw_weights = np.maximum(edges[selected], 1e-8) ** float(power)

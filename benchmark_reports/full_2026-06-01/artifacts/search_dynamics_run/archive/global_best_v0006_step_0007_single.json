@@ -1,6 +1,17 @@
 {
+  "version": 6,
   "step": 7,
+  "mode": "single",
   "island": null,
+  "score": 0.7472831737857067,
+  "config": {
+    "activation": "identity",
+    "ridge_g": "identity",
+    "ridge_w": "uniform",
+    "segment_stats": "row_recent_change_mutation_1",
+    "shape_stats": "spectral",
+    "trend_stats": "linear"
+  },
   "graph": {
     "name": "evoforest_seed",
     "globals": {
