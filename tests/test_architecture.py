@@ -1087,6 +1087,66 @@ def test_llm_agents_write_prompt_artifacts_and_mutation_yaml(tmp_path) -> None:
     assert len(client.requests) == 2
 
 
+def test_llm_scientist_retries_unparseable_hypotheses(monkeypatch) -> None:
+    monkeypatch.setenv("EVOFOREST_LLM_PARSE_MAX_RETRIES", "1")
+    dataset = make_structural_break_data(n_series=35, length=70, seed=24)
+    graph = build_structural_break_seed_graph()
+    result = RidgeEvaluator(n_splits=3, seed=24, max_configurations=4).evaluate(graph, dataset.inputs(), dataset.y)
+    valid_response = "\n".join(
+        [
+            "Hypothesis: Add a spectral shape_stats alternative.",
+            "Rationale: shape_stats appears in the selected output dependencies.",
+            "Expected Improvement: more complementary residual frequency coverage.",
+            "Risk Mode: Balanced.",
+        ]
+    )
+    client = StaticLLMClient(("", valid_response))
+
+    hypotheses = LLMScientistAgent(client).generate(graph, result, max_hypotheses=1, step=1)
+
+    assert len(hypotheses) == 1
+    assert len(client.requests) == 2
+    assert "RETRY REQUIRED: INVALID STRUCTURED OUTPUT" in str(client.requests[1]["user_prompt"])
+    assert "(empty response)" in str(client.requests[1]["user_prompt"])
+
+
+def test_llm_engineer_retries_empty_mutation_document(monkeypatch) -> None:
+    monkeypatch.setenv("EVOFOREST_LLM_PARSE_MAX_RETRIES", "1")
+    dataset = make_structural_break_data(n_series=35, length=70, seed=25)
+    graph = build_structural_break_seed_graph()
+    result = RidgeEvaluator(n_splits=3, seed=25, max_configurations=4).evaluate(graph, dataset.inputs(), dataset.y)
+    hypotheses = (ScientistAgent().generate(graph, result, max_hypotheses=1)[0],)
+    empty_document = "rationale: \"empty\"\nhypotheses:\n  []\nnodes:\n  []\nremove:\n  []\nglobals:\n  []\nadd:\n  []\n"
+    valid_document = MutationDocument(
+        hypotheses=("Add a nonduplicate spectral shape alternative.",),
+        rationale="LLM engineer selected a shape_stats mutation grounded in diagnostics.",
+        add=(
+            MutationSpec(
+                kind="add_alternative",
+                target_node="shape_stats",
+                primitive="spectral_basic",
+                alternative_id="spectral_retry",
+                parents=("series",),
+                description="Retry-produced frequency-band ratio change statistics.",
+            ),
+        ),
+    )
+    client = StaticLLMClient((empty_document, valid_document.to_yaml()))
+
+    document = LLMEngineerAgent(client).synthesize(
+        graph,
+        result,
+        hypotheses,
+        step=1,
+        island=None,
+        rng=np.random.default_rng(25),
+    )
+
+    assert document.add[0].alternative_id == "spectral_retry"
+    assert len(client.requests) == 2
+    assert "empty mutation document" in str(client.requests[1]["user_prompt"])
+
+
 def test_llm_scientist_failure_aborts_without_deterministic_fallback(tmp_path) -> None:
     dataset = make_structural_break_data(n_series=40, length=70, seed=27)
     graph = build_structural_break_seed_graph()
@@ -1109,7 +1169,8 @@ def test_llm_scientist_failure_aborts_without_deterministic_fallback(tmp_path) -
     assert not (tmp_path / "mutations" / "step_0001.yaml").exists()
 
 
-def test_llm_engineer_failure_aborts_without_deterministic_fallback() -> None:
+def test_llm_engineer_failure_aborts_without_deterministic_fallback(monkeypatch) -> None:
+    monkeypatch.setenv("EVOFOREST_LLM_PARSE_MAX_RETRIES", "0")
     dataset = make_structural_break_data(n_series=35, length=70, seed=32)
     graph = build_structural_break_seed_graph()
     result = RidgeEvaluator(n_splits=3, seed=32, max_configurations=4).evaluate(graph, dataset.inputs(), dataset.y)
@@ -1120,6 +1181,34 @@ def test_llm_engineer_failure_aborts_without_deterministic_fallback() -> None:
 
     with pytest.raises(ValueError, match="empty mutation document"):
         LLMEngineerAgent(client).synthesize(graph, result, hypotheses, step=1, island=None, rng=np.random.default_rng(32))
+
+
+def test_llm_memorandum_agent_retries_missing_sections(monkeypatch) -> None:
+    monkeypatch.setenv("EVOFOREST_LLM_PARSE_MAX_RETRIES", "1")
+    dataset = make_structural_break_data(n_series=35, length=70, seed=31)
+    graph = build_structural_break_seed_graph()
+    result = RidgeEvaluator(n_splits=3, seed=31, max_configurations=4).evaluate(graph, dataset.inputs(), dataset.y)
+    response = "\n".join(
+        [
+            "[OUTCOME HISTORY]",
+            "- ACCEPTED: seed state.",
+            "[STATE]",
+            "- Effective rank is tracked.",
+            "[WHAT WORKS]",
+            "- Compact source-backed changes.",
+            "[WHAT FAILED]",
+            "- No failures yet.",
+            "[ERROR LOG]",
+            "- No runtime errors.",
+        ]
+    )
+    client = StaticLLMClient(("missing sections", response))
+
+    memorandum = LLMMemorandumAgent(client).update(result, history=["- ACCEPTED: seed state."], step=1)
+
+    assert "[STATE]" in memorandum
+    assert len(client.requests) == 2
+    assert "missing required sections" in str(client.requests[1]["user_prompt"])
 
 
 def test_llm_memorandum_agent_requires_paper_sections() -> None:
