@@ -5,8 +5,8 @@ from dataclasses import dataclass
 import math
 import multiprocessing as mp
 import pathlib
-import queue
 import sys
+import time
 from typing import Any
 
 import numpy as np
@@ -237,35 +237,53 @@ def _execute_source_in_subprocess(
 ) -> Any:
     try:
         context = mp.get_context(_sandbox_start_method())
-        result_queue: mp.Queue[Any] = context.Queue(maxsize=1)
+        result_receiver, result_sender = context.Pipe(duplex=False)
         process = context.Process(
             target=_source_worker,
-            args=(result_queue, source, inputs, globals_store, values, int(policy.memory_mb), int(policy.cpu_seconds)),
+            args=(result_sender, source, inputs, globals_store, values, int(policy.memory_mb), int(policy.cpu_seconds)),
         )
         process.start()
+        result_sender.close()
     except Exception as exc:
         raise SourceExecutionError(f"Could not start source sandbox process: {exc}") from exc
 
-    process.join(max(0.01, float(policy.timeout_seconds)))
-    if process.is_alive():
-        process.terminate()
-        process.join(0.2)
-        if process.is_alive():
-            process.kill()
-            process.join(0.2)
-        raise SourceTimeoutError(f"Source alternative exceeded {policy.timeout_seconds:.3f}s timeout.")
-
+    deadline = time.monotonic() + max(0.01, float(policy.timeout_seconds))
+    status_payload: tuple[str, Any] | None = None
     try:
-        status, payload = result_queue.get_nowait()
-    except queue.Empty as exc:
-        raise SourceExecutionError(f"Source sandbox exited without returning a result (exitcode={process.exitcode}).") from exc
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            if result_receiver.poll(min(0.05, max(0.0, remaining))):
+                status_payload = result_receiver.recv()
+                break
+            if not process.is_alive():
+                process.join(0.1)
+                if result_receiver.poll():
+                    status_payload = result_receiver.recv()
+                break
+    finally:
+        result_receiver.close()
+
+    if status_payload is None:
+        if process.is_alive():
+            process.terminate()
+            process.join(0.2)
+            if process.is_alive():
+                process.kill()
+                process.join(0.2)
+            raise SourceTimeoutError(f"Source alternative exceeded {policy.timeout_seconds:.3f}s timeout.")
+        process.join(0.1)
+        raise SourceExecutionError(f"Source sandbox exited without returning a result (exitcode={process.exitcode}).")
+    process.join(0.2)
+    status, payload = status_payload
     if status == "ok":
         return payload
     raise SourceExecutionError(str(payload))
 
 
 def _source_worker(
-    result_queue: Any,
+    result_sender: Any,
     source: str,
     inputs: dict[str, Any],
     globals_store: GlobalStore,
@@ -277,9 +295,11 @@ def _source_worker(
         _apply_resource_limits(memory_mb, cpu_seconds)
         callable_obj = compile_lambda_source(source)
         ctx = EvalContext(inputs=inputs, globals=globals_store)
-        result_queue.put(("ok", callable_obj(ctx, values)))
+        result_sender.send(("ok", callable_obj(ctx, values)))
     except BaseException as exc:  # noqa: BLE001 - worker must report every failure to parent.
-        result_queue.put(("error", f"{type(exc).__name__}: {exc}"))
+        result_sender.send(("error", f"{type(exc).__name__}: {exc}"))
+    finally:
+        result_sender.close()
 
 
 def _apply_resource_limits(memory_mb: int, cpu_seconds: int) -> None:
