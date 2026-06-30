@@ -87,6 +87,9 @@ class ProductionConfig:
     refine_globals: bool = True
     refine_steps: int = 20
     refine_backend: str = "auto"
+    diagnostics_mode: str = "full"
+    feature_pool_diagnostics: bool = True
+    retain_feature_matrix: bool = True
     promotion_policy: str = VALIDATION_PROMOTION_POLICY
     min_train_improvement: float = 1e-6
     min_validation_improvement: float = 1e-6
@@ -146,6 +149,9 @@ class ProductionConfig:
             "refine_globals": bool(self.refine_globals),
             "refine_steps": int(self.refine_steps),
             "refine_backend": self.refine_backend,
+            "diagnostics_mode": self.diagnostics_mode,
+            "feature_pool_diagnostics": bool(self.feature_pool_diagnostics),
+            "retain_feature_matrix": bool(self.retain_feature_matrix),
             "group_key": self.group_key,
             "fold_strategy": self.fold_strategy,
             "time_key": self.time_key,
@@ -2158,8 +2164,27 @@ class ProductionEvolutionRunner:
         train_inputs, train_y = splits["train"]
         validation_inputs, validation_y = splits["validation"]
         current_graph = self.graph.clone()
+        self._write_initialization_status(
+            run_dir,
+            "seed_train_evaluation_started",
+            split_sizes={name: int(split_y.shape[0]) for name, (_split_inputs, split_y) in splits.items()},
+            evaluator=self._active_evaluator_config(),
+        )
         best_train = self.evaluator.evaluate(current_graph, train_inputs, train_y, update_graph=True)
+        self._write_initialization_status(
+            run_dir,
+            "seed_validation_evaluation_started",
+            best_train_score=float(best_train.score),
+            best_train_config=dict(best_train.config),
+        )
         best_validation = self.evaluator.evaluate(current_graph, validation_inputs, validation_y, config=best_train.config, update_graph=False)
+        self._write_initialization_status(
+            run_dir,
+            "seed_evaluation_finished",
+            best_train_score=float(best_train.score),
+            best_validation_score=float(best_validation.score),
+            best_train_config=dict(best_train.config),
+        )
         rng = np.random.default_rng(self.config.seed)
         state = RunState(
             run_id=_run_id(),
@@ -2510,6 +2535,15 @@ class ProductionEvolutionRunner:
     @staticmethod
     def _write_state(run_dir: pathlib.Path, state: RunState) -> None:
         (run_dir / "state.json").write_text(json.dumps(state.to_dict(), indent=2), encoding="utf-8")
+
+    @staticmethod
+    def _write_initialization_status(run_dir: pathlib.Path, stage: str, **metadata: Any) -> None:
+        payload = {
+            "stage": stage,
+            "created_at_utc": datetime.now(timezone.utc).isoformat(),
+            **metadata,
+        }
+        (run_dir / "initialization.json").write_text(json.dumps(_json_ready(payload), indent=2), encoding="utf-8")
 
     @staticmethod
     def _read_memorandum(run_dir: pathlib.Path) -> str:

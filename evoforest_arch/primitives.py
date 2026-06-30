@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Callable
 
 import numpy as np
@@ -241,12 +242,18 @@ def tabular_low_rank_interactions_factory(alternative_id: str, parents: tuple[st
     return NodeAlternative(alternative_id, parents, fn, "Low-order generic column interaction features.", torch_fn=tfn)
 
 
-def slope(x: np.ndarray) -> np.ndarray:
-    t = np.linspace(-1.0, 1.0, x.shape[1])
+@lru_cache(maxsize=128)
+def _slope_basis(width: int) -> tuple[np.ndarray, float]:
+    t = np.linspace(-1.0, 1.0, int(width))
     centered_t = t - np.mean(t)
+    denom = max(float(np.sum(centered_t**2)), 1e-8)
+    return centered_t, denom
+
+
+def slope(x: np.ndarray) -> np.ndarray:
+    centered_t, denom = _slope_basis(int(x.shape[1]))
     centered_x = x - np.mean(x, axis=1, keepdims=True)
-    denom = np.sum(centered_t**2)
-    return (centered_x @ centered_t) / max(float(denom), 1e-8)
+    return (centered_x @ centered_t) / denom
 
 
 def slope_torch(x: object) -> object:
@@ -268,12 +275,14 @@ def segment_basic_factory(alternative_id: str, parents: tuple[str, ...]) -> Node
         post_mean = np.mean(post, axis=1)
         pre_std = safe_std(pre)
         post_std = safe_std(post)
+        mean_delta = post_mean - pre_mean
+        std_log_ratio = np.log(post_std / pre_std)
         block = np.column_stack(
             [
-                post_mean - pre_mean,
-                np.abs(post_mean - pre_mean),
-                np.log(post_std / pre_std),
-                np.abs(np.log(post_std / pre_std)),
+                mean_delta,
+                np.abs(mean_delta),
+                std_log_ratio,
+                np.abs(std_log_ratio),
             ]
         )
         return FeatureBlock(block, ["mean_delta", "mean_delta_abs", "std_log_ratio", "std_log_ratio_abs"])
@@ -675,30 +684,43 @@ def row_baseline_outputs_factory(alternative_id: str, parents: tuple[str, ...]) 
         recent_std = safe_std(recent)
         older_diff = np.diff(older, axis=1)
         recent_diff = np.diff(recent, axis=1)
+        older_absdiff_mean = np.mean(np.abs(older_diff), axis=1)
+        recent_absdiff_mean = np.mean(np.abs(recent_diff), axis=1)
         recent_drawdown, recent_drawup = _drawdown_drawup(recent)
         centered = series - np.mean(series, axis=1, keepdims=True)
         cumulative = np.cumsum(centered, axis=1)
-        peak_abs = np.maximum(np.max(np.abs(cumulative), axis=1), 1e-8)
+        abs_cumulative = np.abs(cumulative)
+        peak_abs = np.maximum(np.max(abs_cumulative, axis=1), 1e-8)
+        last = series[:, -1]
+        recent_head_mean = np.mean(recent_head, axis=1)
+        recent_tail_mean = np.mean(recent_tail, axis=1)
+        older_tail_mean = np.mean(older_tail, axis=1)
+        recent_std_log_ratio = np.log(recent_std / older_std)
+        full_window_slope = slope(series)
+        older_slope = slope(older)
+        recent_slope = slope(recent)
+        recent_tail_slope = slope(recent_tail)
+        series_std = safe_std(series)
         context_block, context_names = _row_context_features(ctx, series.shape[0], series.shape[1])
         features = np.column_stack(
             [
-                series[:, -1],
-                series[:, -1] - older_mean,
-                series[:, -1] - recent_mean,
+                last,
+                last - older_mean,
+                last - recent_mean,
                 recent_mean - older_mean,
-                np.mean(recent_head, axis=1) - np.mean(older_tail, axis=1),
-                np.mean(recent_tail, axis=1) - np.mean(recent_head, axis=1),
-                np.log(recent_std / older_std),
-                np.mean(np.abs(recent_diff), axis=1) - np.mean(np.abs(older_diff), axis=1),
-                np.log((np.mean(np.abs(recent_diff), axis=1) + 1e-8) / (np.mean(np.abs(older_diff), axis=1) + 1e-8)),
-                slope(series),
-                slope(recent) - slope(older),
-                slope(recent_tail),
+                recent_head_mean - older_tail_mean,
+                recent_tail_mean - recent_head_mean,
+                recent_std_log_ratio,
+                recent_absdiff_mean - older_absdiff_mean,
+                np.log((recent_absdiff_mean + 1e-8) / (older_absdiff_mean + 1e-8)),
+                full_window_slope,
+                recent_slope - older_slope,
+                recent_tail_slope,
                 recent_drawdown,
                 recent_drawup,
-                peak_abs / np.maximum(safe_std(series), 1e-8),
-                np.argmax(np.abs(cumulative), axis=1).astype(np.float64) / max(series.shape[1] - 1, 1),
-                np.max(np.abs(cumulative[:, boundary:]), axis=1) / peak_abs,
+                peak_abs / np.maximum(series_std, 1e-8),
+                np.argmax(abs_cumulative, axis=1).astype(np.float64) / max(series.shape[1] - 1, 1),
+                np.max(abs_cumulative[:, boundary:], axis=1) / peak_abs,
                 context_block,
             ]
         )
