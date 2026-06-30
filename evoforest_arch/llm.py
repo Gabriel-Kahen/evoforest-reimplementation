@@ -6,6 +6,8 @@ import json
 import os
 import pathlib
 import re
+import sys
+import time
 from typing import Protocol, Sequence
 import urllib.error
 import urllib.parse
@@ -24,6 +26,14 @@ from evoforest_arch.primitives import PrimitiveRegistry
 DEFAULT_ISLAND_TEMPERATURES = (0.35, 0.5, 0.6, 0.75)
 DEFAULT_ENV_FILE = pathlib.Path(".env")
 SUPPORTED_LLM_PROVIDERS = ("openai", "claude", "gemini")
+RETRYABLE_LLM_HTTP_STATUSES = frozenset({408, 409, 425, 429, 500, 502, 503, 504})
+
+
+@dataclass(frozen=True)
+class LLMRetryConfig:
+    max_retries: int = 5
+    initial_delay_seconds: float = 5.0
+    max_delay_seconds: float = 120.0
 
 
 class LLMClient(Protocol):
@@ -800,24 +810,83 @@ def _post_json(
     timeout_seconds: float,
 ) -> dict[str, object]:
     request_headers = {"Content-Type": "application/json", **(headers or {})}
-    request = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers=request_headers,
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
-            body = response.read().decode("utf-8")
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"LLM HTTP request failed with status {exc.code}: {detail[:500]}") from exc
-    except urllib.error.URLError as exc:
-        raise RuntimeError(f"LLM HTTP request failed: {exc}") from exc
+    request_body = json.dumps(payload).encode("utf-8")
+    retry_config = _llm_retry_config()
+    for attempt_index in range(retry_config.max_retries + 1):
+        request = urllib.request.Request(
+            url,
+            data=request_body,
+            headers=request_headers,
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+                body = response.read().decode("utf-8")
+            break
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            if exc.code not in RETRYABLE_LLM_HTTP_STATUSES or attempt_index >= retry_config.max_retries:
+                raise RuntimeError(f"LLM HTTP request failed with status {exc.code}: {detail[:500]}") from exc
+            _sleep_before_llm_retry(f"HTTP {exc.code}", attempt_index, retry_config, exc)
+        except urllib.error.URLError as exc:
+            if attempt_index >= retry_config.max_retries:
+                raise RuntimeError(f"LLM HTTP request failed: {exc}") from exc
+            _sleep_before_llm_retry(str(exc), attempt_index, retry_config, None)
+    else:  # pragma: no cover - loop always breaks or raises.
+        raise RuntimeError("LLM HTTP request failed after retry loop exhausted.")
     data = json.loads(body)
     if not isinstance(data, dict):
         raise ValueError("LLM response JSON must be an object.")
     return data
+
+
+def _llm_retry_config() -> LLMRetryConfig:
+    max_retries = _env_int("EVOFOREST_LLM_MAX_RETRIES", 5)
+    initial_delay_seconds = _env_float("EVOFOREST_LLM_RETRY_INITIAL_SECONDS", 5.0)
+    max_delay_seconds = _env_float("EVOFOREST_LLM_RETRY_MAX_SECONDS", 120.0)
+    if max_retries < 0:
+        raise ValueError("EVOFOREST_LLM_MAX_RETRIES must be non-negative.")
+    if initial_delay_seconds < 0.0:
+        raise ValueError("EVOFOREST_LLM_RETRY_INITIAL_SECONDS must be non-negative.")
+    if max_delay_seconds < 0.0:
+        raise ValueError("EVOFOREST_LLM_RETRY_MAX_SECONDS must be non-negative.")
+    return LLMRetryConfig(
+        max_retries=max_retries,
+        initial_delay_seconds=initial_delay_seconds,
+        max_delay_seconds=max_delay_seconds,
+    )
+
+
+def _sleep_before_llm_retry(
+    reason: str,
+    attempt_index: int,
+    retry_config: LLMRetryConfig,
+    exc: urllib.error.HTTPError | None,
+) -> None:
+    retry_after = _retry_after_seconds(exc)
+    exponential_delay = retry_config.initial_delay_seconds * (2**attempt_index)
+    delay = retry_after if retry_after is not None else exponential_delay
+    delay = min(delay, retry_config.max_delay_seconds) if retry_config.max_delay_seconds > 0.0 else 0.0
+    retry_number = attempt_index + 1
+    print(
+        f"LLM request failed transiently ({reason}); retrying {retry_number}/{retry_config.max_retries} in {delay:.1f}s.",
+        file=sys.stderr,
+        flush=True,
+    )
+    if delay > 0.0:
+        time.sleep(delay)
+
+
+def _retry_after_seconds(exc: urllib.error.HTTPError | None) -> float | None:
+    if exc is None:
+        return None
+    value = exc.headers.get("Retry-After") if exc.headers is not None else None
+    if not value:
+        return None
+    try:
+        return max(0.0, float(value))
+    except ValueError:
+        return None
 
 
 def _extract_openai_content(data: object) -> str:
