@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import io
 import json
+import urllib.error
 
 import numpy as np
 import pytest
 
+from evoforest_arch import llm as llm_module
 from evoforest_arch.agents import EngineerAgent, ScientistAgent
 from evoforest_arch.evaluator import RidgeEvaluator, abs_feature_correlation, effective_rank, feature_correlation_summary, max_correlation_scores, most_correlated_names, safe_corr_columns
 from evoforest_arch.evolution import EvolutionLoop
@@ -1210,6 +1213,74 @@ def test_claude_and_gemini_clients_load_from_env_files(tmp_path, monkeypatch) ->
     assert isinstance(gemini, GeminiLLMClient)
     assert gemini.api_key == "gemini-secret"
     assert gemini.model == "gemini-test"
+
+
+def test_llm_post_json_retries_transient_http_errors(monkeypatch) -> None:
+    monkeypatch.setenv("EVOFOREST_LLM_MAX_RETRIES", "2")
+    monkeypatch.setenv("EVOFOREST_LLM_RETRY_INITIAL_SECONDS", "0.25")
+    monkeypatch.setenv("EVOFOREST_LLM_RETRY_MAX_SECONDS", "1.0")
+    sleeps: list[float] = []
+    responses: list[object] = [
+        urllib.error.HTTPError(
+            "https://example.test/llm",
+            503,
+            "unavailable",
+            {},
+            io.BytesIO(b'{"error": {"message": "temporary"}}'),
+        ),
+        _FakeHTTPResponse(b'{"ok": true}'),
+    ]
+
+    def fake_urlopen(_request: object, *, timeout: float) -> object:
+        assert timeout == 7.0
+        response = responses.pop(0)
+        if isinstance(response, BaseException):
+            raise response
+        return response
+
+    monkeypatch.setattr(llm_module.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(llm_module.time, "sleep", sleeps.append)
+
+    result = llm_module._post_json("https://example.test/llm", {"prompt": "x"}, timeout_seconds=7.0)
+
+    assert result == {"ok": True}
+    assert sleeps == [0.25]
+    assert responses == []
+
+
+def test_llm_post_json_does_not_retry_non_transient_http_errors(monkeypatch) -> None:
+    monkeypatch.setenv("EVOFOREST_LLM_MAX_RETRIES", "2")
+    sleeps: list[float] = []
+
+    def fake_urlopen(_request: object, *, timeout: float) -> object:
+        raise urllib.error.HTTPError(
+            "https://example.test/llm",
+            400,
+            "bad request",
+            {},
+            io.BytesIO(b'{"error": {"message": "invalid"}}'),
+        )
+
+    monkeypatch.setattr(llm_module.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(llm_module.time, "sleep", sleeps.append)
+
+    with pytest.raises(RuntimeError, match="status 400"):
+        llm_module._post_json("https://example.test/llm", {"prompt": "x"}, timeout_seconds=7.0)
+    assert sleeps == []
+
+
+class _FakeHTTPResponse:
+    def __init__(self, body: bytes) -> None:
+        self.body = body
+
+    def __enter__(self) -> "_FakeHTTPResponse":
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return self.body
 
 
 def test_missing_env_llm_provider_is_an_error_when_required(tmp_path, monkeypatch) -> None:
