@@ -109,6 +109,8 @@ class EvalContext:
     cache: dict[object, Any] = field(default_factory=dict)
     cache_hits: int = 0
     cache_misses: int = 0
+    key_cache: dict[tuple[str, str], tuple[object, ...]] = field(default_factory=dict)
+    alternative_lookup: dict[str, dict[str, NodeAlternative]] | None = None
 
     def read_input(self, name: str) -> Any:
         if name not in self.inputs:
@@ -379,20 +381,31 @@ class Graph:
 
     def evaluate_alternative(self, name: str, alternative_id: str, config: dict[str, str], ctx: EvalContext) -> Any:
         node = self.nodes[name]
-        key = self.alternative_cache_key(name, alternative_id, config)
+        key = self.alternative_cache_key(name, alternative_id, config, memo=ctx.key_cache, alternative_lookup=ctx.alternative_lookup)
         if key in ctx.cache:
             ctx.cache_hits += 1
             return ctx.cache[key]
-        alternative = self._alternative(node, alternative_id)
+        alternative = self._lookup_alternative(name, alternative_id, ctx.alternative_lookup, node=node)
         parent_values = {parent: self.evaluate_node(parent, config, ctx) for parent in alternative.parents}
         ctx.cache_misses += 1
         value = alternative.fn(ctx, parent_values)
         ctx.cache[key] = value
         return value
 
-    def alternative_cache_key(self, node_name: str, alternative_id: str, config: dict[str, str]) -> tuple[object, ...]:
+    def alternative_cache_key(
+        self,
+        node_name: str,
+        alternative_id: str,
+        config: dict[str, str],
+        *,
+        memo: dict[tuple[str, str], tuple[object, ...]] | None = None,
+        alternative_lookup: dict[str, dict[str, NodeAlternative]] | None = None,
+    ) -> tuple[object, ...]:
+        memo_key = (node_name, alternative_id)
+        if memo is not None and memo_key in memo:
+            return memo[memo_key]
         node = self.nodes[node_name]
-        alternative = self._alternative(node, alternative_id)
+        alternative = self._lookup_alternative(node_name, alternative_id, alternative_lookup, node=node)
         parent_keys: list[object] = []
         for parent in alternative.parents:
             parent_node = self.nodes[parent]
@@ -400,8 +413,11 @@ class Graph:
                 parent_keys.append(("input", parent))
                 continue
             parent_alt_id = config.get(parent, parent_node.default_alternative_id())
-            parent_keys.append(self.alternative_cache_key(parent, parent_alt_id, config))
-        return (node_name, alternative_id, tuple(parent_keys))
+            parent_keys.append(self.alternative_cache_key(parent, parent_alt_id, config, memo=memo, alternative_lookup=alternative_lookup))
+        key = (node_name, alternative_id, tuple(parent_keys))
+        if memo is not None:
+            memo[memo_key] = key
+        return key
 
     def evaluate_features(
         self,
@@ -410,7 +426,12 @@ class Graph:
         cache: dict[object, Any] | None = None,
     ) -> tuple[np.ndarray, list[str], EvalContext]:
         selected = self.selected_config(config)
-        ctx = EvalContext(inputs=inputs, globals=self.globals.clone(), cache=cache if cache is not None else {})
+        ctx = EvalContext(
+            inputs=inputs,
+            globals=self.globals.clone(),
+            cache=cache if cache is not None else {},
+            alternative_lookup=self._alternative_lookup(),
+        )
         blocks: list[FeatureBlock] = []
         for node_name in self.output_nodes():
             output = self.nodes[node_name]
@@ -419,7 +440,7 @@ class Graph:
                 blocks.append(as_feature_block(value, prefix=f"{node_name}.{alternative.id}"))
         if not blocks:
             raise ValueError("Graph has no output nodes.")
-        values = np.column_stack([block.values for block in blocks])
+        values = blocks[0].values if len(blocks) == 1 else np.column_stack([block.values for block in blocks])
         names = [name for block in blocks for name in block.names]
         return values, names, ctx
 
@@ -445,6 +466,24 @@ class Graph:
             if alternative.id == alternative_id:
                 return alternative
         raise KeyError(f"Node {node.name!r} has no alternative {alternative_id!r}.")
+
+    def _alternative_lookup(self) -> dict[str, dict[str, NodeAlternative]]:
+        return {name: {alternative.id: alternative for alternative in node.alternatives} for name, node in self.nodes.items()}
+
+    def _lookup_alternative(
+        self,
+        node_name: str,
+        alternative_id: str,
+        alternative_lookup: dict[str, dict[str, NodeAlternative]] | None,
+        *,
+        node: GraphNode | None = None,
+    ) -> NodeAlternative:
+        if alternative_lookup is not None:
+            try:
+                return alternative_lookup[node_name][alternative_id]
+            except KeyError:
+                pass
+        return self._alternative(node or self.nodes[node_name], alternative_id)
 
 
 def as_feature_block(value: Any, prefix: str) -> FeatureBlock:

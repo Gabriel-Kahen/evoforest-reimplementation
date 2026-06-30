@@ -67,6 +67,9 @@ PRODUCTION_CLI_DEFAULTS = {
     "refine_globals": True,
     "refine_steps": 20,
     "refine_backend": "auto",
+    "diagnostics_mode": "full",
+    "feature_pool_diagnostics": True,
+    "retain_feature_matrix": True,
     "promotion_policy": VALIDATION_PROMOTION_POLICY,
     "min_train_improvement": 1e-6,
     "min_validation_improvement": 1e-6,
@@ -189,6 +192,11 @@ def main(argv: list[str] | None = None) -> int:
     evolve.add_argument("--no-refine-globals", dest="refine_globals", action="store_false")
     evolve.add_argument("--refine-steps", type=int, default=None)
     evolve.add_argument("--refine-backend", choices=("auto", "numpy", "torch"), default=None)
+    evolve.add_argument("--diagnostics-mode", choices=("full", "basic"), default=None)
+    evolve.add_argument("--feature-pool-diagnostics", dest="feature_pool_diagnostics", action="store_true", default=None)
+    evolve.add_argument("--no-feature-pool-diagnostics", dest="feature_pool_diagnostics", action="store_false")
+    evolve.add_argument("--retain-feature-matrix", dest="retain_feature_matrix", action="store_true", default=None)
+    evolve.add_argument("--no-retain-feature-matrix", dest="retain_feature_matrix", action="store_false")
     evolve.add_argument("--promotion-policy", choices=(VALIDATION_PROMOTION_POLICY, CV_SCORE_PROMOTION_POLICY), default=None)
     evolve.add_argument("--min-train-improvement", type=float, default=None)
     evolve.add_argument("--min-validation-improvement", type=float, default=None)
@@ -334,6 +342,9 @@ def run_evolve(args: argparse.Namespace) -> int:
         refine_globals=args.refine_globals,
         refine_steps=args.refine_steps,
         refine_backend=args.refine_backend,
+        diagnostics_mode=args.diagnostics_mode,
+        feature_pool_diagnostics=args.feature_pool_diagnostics,
+        retain_feature_matrix=args.retain_feature_matrix,
         promotion_policy=args.promotion_policy,
         min_train_improvement=args.min_train_improvement,
         min_validation_improvement=args.min_validation_improvement,

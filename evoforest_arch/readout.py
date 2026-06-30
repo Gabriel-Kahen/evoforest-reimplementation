@@ -35,6 +35,19 @@ class RidgeModel:
         return x @ self.coef + self.intercept
 
 
+@dataclass(frozen=True)
+class _WeightedSVD:
+    u: np.ndarray
+    s: np.ndarray
+    vt: np.ndarray
+    uy: np.ndarray
+    x_mean: np.ndarray
+    y_mean: float
+    weights: np.ndarray
+    sqrt_w: np.ndarray
+    n_features: int
+
+
 def normalize_sample_weight(sample_weight: np.ndarray | None, n_rows: int) -> np.ndarray:
     if sample_weight is None:
         return np.ones(n_rows, dtype=np.float64)
@@ -61,23 +74,70 @@ def combine_sample_weights(*weights: np.ndarray | None) -> np.ndarray | None:
     return normalize_sample_weight(combined, combined.shape[0])
 
 
-def _weighted_center(x: np.ndarray, y: np.ndarray, sample_weight: np.ndarray | None) -> tuple[np.ndarray, np.ndarray, np.ndarray, float]:
+def _weighted_center(x: np.ndarray, y: np.ndarray, sample_weight: np.ndarray | None) -> tuple[np.ndarray, np.ndarray, np.ndarray, float, np.ndarray]:
     weights = normalize_sample_weight(sample_weight, x.shape[0])
     x_mean = np.average(x, axis=0, weights=weights)
     y_mean = float(np.average(y, weights=weights))
-    return x - x_mean, y - y_mean, x_mean, y_mean
+    return x - x_mean, y - y_mean, x_mean, y_mean, weights
 
 
-def fit_ridge(x: np.ndarray, y: np.ndarray, alpha: float, sample_weight: np.ndarray | None = None) -> RidgeModel:
-    xc, yc, x_mean, y_mean = _weighted_center(x, y, sample_weight)
-    weights = normalize_sample_weight(sample_weight, x.shape[0])
+def _empty_ridge_model(x: np.ndarray, y: np.ndarray, alpha: float, sample_weight: np.ndarray | None = None) -> RidgeModel:
+    weights = normalize_sample_weight(sample_weight, y.shape[0])
+    y_mean = float(np.average(y, weights=weights)) if y.size else 0.0
+    return RidgeModel(coef=np.zeros(x.shape[1], dtype=np.float64), intercept=y_mean, alpha=float(alpha))
+
+
+def _weighted_svd(x: np.ndarray, y: np.ndarray, sample_weight: np.ndarray | None) -> _WeightedSVD:
+    xc, yc, x_mean, y_mean, weights = _weighted_center(x, y, sample_weight)
     sqrt_w = np.sqrt(weights)
     xw = xc * sqrt_w[:, None]
     yw = yc * sqrt_w
     u, s, vt = np.linalg.svd(xw, full_matrices=False)
-    coef = vt.T @ ((s / (s * s + alpha)) * (u.T @ yw))
-    intercept = y_mean - float(x_mean @ coef)
+    return _WeightedSVD(
+        u=u,
+        s=s,
+        vt=vt,
+        uy=u.T @ yw,
+        x_mean=x_mean,
+        y_mean=y_mean,
+        weights=weights,
+        sqrt_w=sqrt_w,
+        n_features=x.shape[1],
+    )
+
+
+def _model_from_svd(decomp: _WeightedSVD, alpha: float) -> RidgeModel:
+    coef = decomp.vt.T @ ((decomp.s / (decomp.s * decomp.s + alpha)) * decomp.uy)
+    intercept = decomp.y_mean - float(decomp.x_mean @ coef)
     return RidgeModel(coef=coef, intercept=float(intercept), alpha=float(alpha))
+
+
+def _select_alpha_from_svd(
+    decomp: _WeightedSVD,
+    y: np.ndarray,
+    alphas: np.ndarray,
+) -> float:
+    best_alpha = float(alphas[0])
+    best_mse = float("inf")
+    spectral_power = decomp.s * decomp.s
+    u_squared = decomp.u * decomp.u
+    for alpha in alphas:
+        shrinkage = spectral_power / (spectral_power + alpha)
+        centered_pred = decomp.u @ (shrinkage * decomp.uy)
+        pred = decomp.y_mean + centered_pred / np.maximum(decomp.sqrt_w, EPS)
+        leverage = u_squared @ shrinkage
+        residual = (y - pred) / np.maximum(1.0 - leverage, EPS)
+        mse = float(np.average(residual**2, weights=decomp.weights))
+        if mse < best_mse:
+            best_mse = mse
+            best_alpha = float(alpha)
+    return best_alpha
+
+
+def fit_ridge(x: np.ndarray, y: np.ndarray, alpha: float, sample_weight: np.ndarray | None = None) -> RidgeModel:
+    if x.size == 0:
+        return _empty_ridge_model(x, y, alpha, sample_weight=sample_weight)
+    return _model_from_svd(_weighted_svd(x, y, sample_weight), float(alpha))
 
 
 def select_alpha(
@@ -88,22 +148,18 @@ def select_alpha(
 ) -> float:
     if x.size == 0:
         return float(alphas[0])
-    xc, yc, x_mean, y_mean = _weighted_center(x, y, sample_weight)
-    weights = normalize_sample_weight(sample_weight, x.shape[0])
-    sqrt_w = np.sqrt(weights)
-    xw = xc * sqrt_w[:, None]
-    yw = yc * sqrt_w
-    u, s, vt = np.linalg.svd(xw, full_matrices=False)
-    best_alpha = float(alphas[0])
-    best_mse = float("inf")
-    for alpha in alphas:
-        coef = vt.T @ ((s / (s * s + alpha)) * (u.T @ yw))
-        intercept = y_mean - float(x_mean @ coef)
-        pred = x @ coef + intercept
-        leverage = np.sum((u**2) * ((s * s) / (s * s + alpha)), axis=1)
-        residual = (y - pred) / np.maximum(1.0 - leverage, EPS)
-        mse = float(np.average(residual**2, weights=weights))
-        if mse < best_mse:
-            best_mse = mse
-            best_alpha = float(alpha)
-    return best_alpha
+    return _select_alpha_from_svd(_weighted_svd(x, y, sample_weight), y, alphas)
+
+
+def select_alpha_and_fit_ridge(
+    x: np.ndarray,
+    y: np.ndarray,
+    alphas: np.ndarray = DEFAULT_ALPHAS,
+    sample_weight: np.ndarray | None = None,
+) -> tuple[float, RidgeModel]:
+    if x.size == 0:
+        alpha = float(alphas[0])
+        return alpha, _empty_ridge_model(x, y, alpha, sample_weight=sample_weight)
+    decomp = _weighted_svd(x, y, sample_weight)
+    alpha = _select_alpha_from_svd(decomp, y, alphas)
+    return alpha, _model_from_svd(decomp, alpha)

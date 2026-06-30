@@ -6,15 +6,16 @@ import numpy as np
 import pytest
 
 from evoforest_arch.agents import EngineerAgent, ScientistAgent
-from evoforest_arch.evaluator import RidgeEvaluator
+from evoforest_arch.evaluator import RidgeEvaluator, abs_feature_correlation, effective_rank, feature_correlation_summary, max_correlation_scores, most_correlated_names, safe_corr_columns
 from evoforest_arch.evolution import EvolutionLoop
 from evoforest_arch.feedback import toon_report
 from evoforest_arch.graph import CallableFamily, EvalContext, FeatureBlock, Graph, ResidualWeightRule
 from evoforest_arch.llm import ClaudeLLMClient, GeminiLLMClient, LLMEngineerAgent, LLMMemorandumAgent, LLMScientistAgent, OpenAILLMClient, PromptBuilder, StaticLLMClient, llm_client_from_env, llm_provider_from_env
 from evoforest_arch.maintenance import GraphMaintenance
-from evoforest_arch.metrics import FoldStrategy, RMSE_SCORER
+from evoforest_arch.metrics import FoldStrategy, RMSE_SCORER, safe_corr
 from evoforest_arch.mutations import GlobalSpec, MutationDocument, MutationEngine, MutationSpec, NodeSpec, RemoveSpec
 from evoforest_arch.rank_readout import fit_rank_feature_expansion, select_rank_ensemble
+from evoforest_arch.readout import fit_ridge, select_alpha, select_alpha_and_fit_ridge
 from evoforest_arch.seed import build_seed_graph, build_structural_break_seed_graph
 from evoforest_arch.source import SourceExecutionError
 from evoforest_arch.synthetic import make_structural_break_data, make_tabular_data
@@ -72,6 +73,28 @@ def test_graph_evaluates_alternatives_callables_and_globals() -> None:
     assert isinstance(residual_rule, ResidualWeightRule)
     assert ctx.cache_hits >= 0
     assert ctx.cache_misses > 0
+
+
+def test_alternative_cache_key_memo_preserves_key_format() -> None:
+    graph = build_structural_break_seed_graph()
+    config = graph.default_config()
+    config["activation"] = "sigmoid_gate"
+    selected = graph.selected_config(config)
+    memo: dict[tuple[str, str], tuple[object, ...]] = {}
+
+    uncached = [
+        graph.alternative_cache_key(node_name, alternative.id, selected)
+        for node_name in graph.output_nodes()
+        for alternative in graph.nodes[node_name].alternatives
+    ]
+    cached = [
+        graph.alternative_cache_key(node_name, alternative.id, selected, memo=memo)
+        for node_name in graph.output_nodes()
+        for alternative in graph.nodes[node_name].alternatives
+    ]
+
+    assert cached == uncached
+    assert memo
 
 
 def test_configuration_search_uses_ancestor_conditioned_shared_cache() -> None:
@@ -216,6 +239,131 @@ def test_lower_is_better_scorer_preserves_raw_metric_direction() -> None:
     assert result.diagnostics["folds"]["raw_higher_is_better"] is False
     assert result.diagnostics["folds"]["raw_score_mean"] >= 0.0
     assert result.diagnostics["scoring_context"]["scorer"]["optimization_score"] == "negative_raw"
+
+
+def test_feature_pool_diagnostics_can_be_disabled() -> None:
+    dataset = make_tabular_data(n_samples=60, n_features=5, seed=39)
+    result = RidgeEvaluator(
+        n_splits=3,
+        seed=39,
+        max_configurations=4,
+        diagnostics_mode="basic",
+        feature_pool_diagnostics=False,
+    ).evaluate(build_seed_graph(), dataset.inputs(), dataset.y)
+
+    assert result.diagnostics["valid_feature_pool"]["enabled"] is False
+    assert result.diagnostics["valid_feature_pool"]["reason"] == "feature_pool_diagnostics=false"
+    assert result.diagnostics["configuration_search"]["evaluated"] == 4
+
+
+def test_feature_matrix_retention_can_be_disabled() -> None:
+    dataset = make_tabular_data(n_samples=60, n_features=5, seed=47)
+    retained = RidgeEvaluator(
+        n_splits=2,
+        seed=47,
+        max_configurations=2,
+        diagnostics_mode="basic",
+        feature_pool_diagnostics=False,
+    ).evaluate(build_seed_graph(), dataset.inputs(), dataset.y)
+    released = RidgeEvaluator(
+        n_splits=2,
+        seed=47,
+        max_configurations=2,
+        diagnostics_mode="basic",
+        feature_pool_diagnostics=False,
+        retain_feature_matrix=False,
+    ).evaluate(build_seed_graph(), dataset.inputs(), dataset.y)
+
+    assert retained.feature_matrix is not None
+    assert released.feature_matrix is None
+    assert released.diagnostics["configuration_search"]["evaluated"] == 2
+
+
+def test_combined_alpha_selection_matches_public_ridge_helpers() -> None:
+    rng = np.random.default_rng(44)
+    x = rng.normal(size=(80, 12))
+    y = rng.normal(size=80)
+    weights = np.linspace(0.5, 2.0, y.shape[0])
+    for sample_weight in (None, weights):
+        alpha = select_alpha(x, y, sample_weight=sample_weight)
+        model = fit_ridge(x, y, alpha, sample_weight=sample_weight)
+        combined_alpha, combined_model = select_alpha_and_fit_ridge(x, y, sample_weight=sample_weight)
+
+        assert combined_alpha == alpha
+        np.testing.assert_allclose(combined_model.coef, model.coef)
+        np.testing.assert_allclose(combined_model.predict(x), model.predict(x))
+
+
+def test_configuration_search_reuses_adjacent_identical_feature_matrices() -> None:
+    dataset = make_tabular_data(n_samples=64, n_features=5, seed=45)
+    result = RidgeEvaluator(
+        n_splits=2,
+        seed=45,
+        max_configurations=64,
+        diagnostics_mode="basic",
+        feature_pool_diagnostics=False,
+    ).evaluate(build_seed_graph(), dataset.inputs(), dataset.y)
+
+    cache = result.diagnostics["configuration_search"]["cache"]
+    assert cache["feature_matrix_reuse_hits"] > 0
+    assert result.diagnostics["configuration_search"]["evaluated"] > cache["feature_matrix_reuse_hits"]
+
+
+def test_configuration_search_reuses_fold_assignments() -> None:
+    class CountingFoldStrategy(FoldStrategy):
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def split(self, inputs: dict[str, object], y: np.ndarray, n_splits: int, seed: int):
+            self.calls += 1
+            return super().split(inputs, y, n_splits, seed)
+
+    dataset = make_tabular_data(n_samples=64, n_features=5, seed=46)
+    fold_strategy = CountingFoldStrategy()
+    result = RidgeEvaluator(
+        n_splits=2,
+        seed=46,
+        max_configurations=4,
+        fold_strategy=fold_strategy,
+        diagnostics_mode="basic",
+        feature_pool_diagnostics=False,
+    ).evaluate(build_seed_graph(), dataset.inputs(), dataset.y)
+
+    assert result.diagnostics["configuration_search"]["evaluated"] == 4
+    assert fold_strategy.calls == 1
+
+
+def test_blockwise_correlation_summary_matches_full_matrix_helper() -> None:
+    rng = np.random.default_rng(48)
+    x = rng.normal(size=(80, 11))
+    x[:, 4] = x[:, 3] * 0.98 + rng.normal(scale=0.01, size=80)
+    x[:, 7] = 1.0
+    names = [f"feature_{idx}" for idx in range(x.shape[1])]
+
+    corr = abs_feature_correlation(x)
+    summary = feature_correlation_summary(x, names, block_size=3)
+
+    np.testing.assert_allclose(summary.max_corr, max_correlation_scores(corr))
+    np.testing.assert_array_equal(summary.high_corr_counts, np.sum(corr > 0.9, axis=1))
+    assert summary.most_correlated == most_correlated_names(corr, names)
+    np.testing.assert_allclose(summary.effective_rank, effective_rank(x))
+
+
+def test_vectorized_column_correlations_match_scalar_safe_corr() -> None:
+    rng = np.random.default_rng(49)
+    x = rng.normal(size=(72, 9))
+    x[:, 2] = 3.0
+    x[0, 5] = np.nan
+    y = rng.normal(size=72)
+    y[1] = np.nan
+
+    corr = safe_corr_columns(x, y, block_size=2)
+    square_corr = safe_corr_columns(x, y, square=True, block_size=2)
+
+    expected = np.asarray([safe_corr(x[:, idx], y) for idx in range(x.shape[1])])
+    expected_square = np.asarray([safe_corr(x[:, idx] * x[:, idx], y) for idx in range(x.shape[1])])
+    np.testing.assert_allclose(corr, expected)
+    np.testing.assert_allclose(square_corr, expected_square)
 
 
 def test_task_aware_fold_strategies_report_group_and_time_diagnostics() -> None:

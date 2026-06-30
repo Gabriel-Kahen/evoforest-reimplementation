@@ -6,7 +6,7 @@ from typing import Any
 import numpy as np
 
 from evoforest_arch.graph import Graph, NodeAlternative
-from evoforest_arch.readout import Standardizer, fit_ridge, select_alpha
+from evoforest_arch.readout import Standardizer, select_alpha_and_fit_ridge
 
 
 @dataclass
@@ -118,8 +118,7 @@ class GlobalRefiner:
         y = np.asarray(y, dtype=np.float64)
         std = Standardizer.fit(x)
         xs = std.transform(x)
-        alpha = select_alpha(xs, y)
-        model = fit_ridge(xs, y, alpha)
+        alpha, model = select_alpha_and_fit_ridge(xs, y)
         residual = y - model.predict(xs)
         return float(np.mean(residual**2))
 
