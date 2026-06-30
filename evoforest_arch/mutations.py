@@ -125,31 +125,7 @@ class MutationDocument:
         text = extract_mutation_yaml(text)
         if _looks_like_paper_style_yaml(text):
             return _from_paper_style_yaml(text)
-        data: dict[str, object] = {"hypotheses": [], "nodes": [], "remove": [], "globals": [], "add": [], "rationale": ""}
-        section: str | None = None
-        for raw_line in text.splitlines():
-            line = raw_line.rstrip()
-            if not line or line.lstrip().startswith("#"):
-                continue
-            if not line.startswith(" "):
-                key, _, value = line.partition(":")
-                section = key.strip()
-                if value.strip():
-                    data[section] = json.loads(value.strip())
-                continue
-            if section is None:
-                raise ValueError(f"Indented YAML item without a section: {line!r}.")
-            item = line.strip()
-            if item == "[]":
-                data[section] = []
-                continue
-            if not item.startswith("- "):
-                raise ValueError(f"Only list items are supported in mutation YAML: {line!r}.")
-            payload = json.loads(item[2:].strip())
-            current = data.setdefault(section, [])
-            if not isinstance(current, list):
-                raise ValueError(f"Section {section!r} is not a list.")
-            current.append(payload)
+        data = _parse_machine_style_yaml(text)
 
         add = tuple(
             MutationSpec(
@@ -200,6 +176,74 @@ class MutationDocument:
             remove=remove,
             globals=globals_,
         )
+
+
+def _parse_machine_style_yaml(text: str) -> dict[str, object]:
+    data: dict[str, object] = {"hypotheses": [], "nodes": [], "remove": [], "globals": [], "add": [], "rationale": ""}
+    section: str | None = None
+    current_item: dict[str, object] | None = None
+    for raw_line in text.splitlines():
+        line = raw_line.rstrip()
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        if indent == 0:
+            key, separator, value = stripped.partition(":")
+            if not separator:
+                raise ValueError(f"Top-level mutation YAML line must be a key/value pair: {line!r}.")
+            section = key.strip()
+            current_item = None
+            data.setdefault(section, [])
+            if value.strip():
+                data[section] = _parse_machine_yaml_value(value.strip())
+            continue
+        if section is None:
+            raise ValueError(f"Indented YAML item without a section: {line!r}.")
+        if stripped == "[]":
+            data[section] = []
+            current_item = None
+            continue
+        if indent == 2 and stripped.startswith("- "):
+            payload_text = stripped[2:].strip()
+            current = data.setdefault(section, [])
+            if not isinstance(current, list):
+                raise ValueError(f"Section {section!r} is not a list.")
+            if not payload_text:
+                payload: object = {}
+            elif _looks_like_machine_yaml_mapping_item(payload_text):
+                key, _separator, value = payload_text.partition(":")
+                payload = {key.strip(): _parse_machine_yaml_value(value.strip())}
+            else:
+                payload = _parse_machine_yaml_value(payload_text)
+            current.append(payload)
+            current_item = payload if isinstance(payload, dict) else None
+            continue
+        if indent >= 4 and current_item is not None:
+            key, separator, value = stripped.partition(":")
+            if not separator:
+                raise ValueError(f"Nested mutation YAML line must be a key/value pair: {line!r}.")
+            current_item[key.strip()] = _parse_machine_yaml_value(value.strip())
+            continue
+        raise ValueError(f"Only list items and one-level mappings are supported in mutation YAML: {line!r}.")
+    return data
+
+
+def _looks_like_machine_yaml_mapping_item(text: str) -> bool:
+    if not text or text[0] in {"{", "[", "'", '"'}:
+        return False
+    key, separator, _value = text.partition(":")
+    return bool(separator) and bool(key.strip()) and all(character.isalnum() or character in {"_", "-"} for character in key.strip())
+
+
+def _parse_machine_yaml_value(value: str) -> object:
+    value = value.strip()
+    if not value:
+        return ""
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return _yaml_scalar(value)
 
 
 @dataclass

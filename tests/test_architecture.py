@@ -658,6 +658,55 @@ def test_sandboxed_source_mutation_adds_lambda_alternative() -> None:
     assert any(name.endswith("source_squared_delta.squared_delta") for name in names)
 
 
+def test_block_style_machine_mutation_yaml_is_supported() -> None:
+    document = MutationDocument.from_yaml(
+        "\n".join(
+            [
+                'rationale: "block-style YAML from an LLM"',
+                "hypotheses:",
+                '  - "Temporal context should improve RUL features."',
+                "globals:",
+                '  - name: "residual_huber_scale_retry"',
+                "    value: [1.35]",
+                "    trainable: true",
+                '    description: "Trainable Huber scale."',
+                "nodes:",
+                '  - name: "temporal_features_retry"',
+                '    kind: "intermediate"',
+                '    description: "Cycle-scaled features."',
+                "remove:",
+                "  []",
+                "add:",
+                '  - kind: "add_alternative"',
+                '    target_node: "temporal_features_retry"',
+                '    alternative_id: "cycle_scaling"',
+                '    parents: ["base_features"]',
+                '    primitive: "source"',
+                '    source: "lambda ctx, values: FeatureBlock(values[\'base_features\'].data, values[\'base_features\'].feature_names)"',
+                '    node_kind: "intermediate"',
+                '    output_contract: {"type": "feature_block", "min_columns": 1, "differentiable": true}',
+                '  - kind: "add_alternative"',
+                '    target_node: "ridge_g"',
+                '    alternative_id: "huber_trainable"',
+                "    parents: []",
+                '    primitive: "huber_residual_weight"',
+                '    global_refs: ["residual_huber_scale_retry"]',
+                '    description: "Huber weighting with a trainable scale parameter."',
+            ]
+        )
+    )
+
+    assert document.rationale == "block-style YAML from an LLM"
+    assert document.hypotheses == ("Temporal context should improve RUL features.",)
+    assert document.globals[0].name == "residual_huber_scale_retry"
+    assert document.globals[0].value == [1.35]
+    assert document.globals[0].trainable is True
+    assert document.nodes[0].name == "temporal_features_retry"
+    assert document.add[0].parents == ("base_features",)
+    assert document.add[0].output_contract == {"type": "feature_block", "min_columns": 1, "differentiable": True}
+    assert document.add[1].global_refs == ("residual_huber_scale_retry",)
+
+
 def test_paper_style_lambda_mutation_yaml_is_supported() -> None:
     document = MutationDocument.from_yaml(
         "\n".join(
