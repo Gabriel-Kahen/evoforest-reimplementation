@@ -36,6 +36,11 @@ class LLMRetryConfig:
     max_delay_seconds: float = 120.0
 
 
+@dataclass(frozen=True)
+class LLMStructuredOutputRetryConfig:
+    max_retries: int = 3
+
+
 class LLMClient(Protocol):
     def complete(self, system_prompt: str, user_prompt: str, *, temperature: float = 0.0) -> str:
         """Return one text completion for a system/user prompt pair."""
@@ -520,19 +525,49 @@ class LLMScientistAgent(ScientistAgent):
             island=island,
             max_hypotheses=max_hypotheses,
         )
-        response = ""
-        error = ""
-        try:
-            response = self.client.complete(system, user, temperature=self._temperature_for(island))
-            hypotheses = parse_hypotheses(response, graph, max_hypotheses)
-            if not hypotheses:
-                raise ValueError("LLM scientist returned no parseable hypotheses.")
-            return hypotheses
-        except Exception as exc:
-            error = str(exc)
-            raise
-        finally:
-            self._prompt_records.append(PromptRecord("scientist", system, user, response, error))
+        retry_config = _structured_output_retry_config()
+        retry_error = ""
+        retry_response = ""
+        for attempt_index in range(retry_config.max_retries + 1):
+            attempt_user = user
+            if attempt_index:
+                attempt_user = _structured_output_retry_prompt(
+                    user,
+                    stage="scientist",
+                    previous_response=retry_response,
+                    error=retry_error,
+                    attempt_index=attempt_index,
+                    max_retries=retry_config.max_retries,
+                )
+            response = ""
+            error = ""
+            try:
+                response = self.client.complete(system, attempt_user, temperature=self._temperature_for(island))
+            except Exception as exc:
+                error = str(exc)
+                self._prompt_records.append(
+                    PromptRecord(_prompt_stage("scientist", attempt_index), system, attempt_user, response, error)
+                )
+                raise
+            try:
+                hypotheses = parse_hypotheses(response, graph, max_hypotheses)
+                if not hypotheses:
+                    raise ValueError("LLM scientist returned no parseable hypotheses.")
+                self._prompt_records.append(
+                    PromptRecord(_prompt_stage("scientist", attempt_index), system, attempt_user, response, "")
+                )
+                return hypotheses
+            except Exception as exc:
+                error = str(exc)
+                self._prompt_records.append(
+                    PromptRecord(_prompt_stage("scientist", attempt_index), system, attempt_user, response, error)
+                )
+                if attempt_index >= retry_config.max_retries:
+                    raise
+                retry_error = error
+                retry_response = response
+                _log_structured_output_retry("scientist", error, attempt_index, retry_config.max_retries)
+        raise RuntimeError("LLM scientist structured-output retry loop exhausted.")
 
     def _temperature_for(self, island: int | None) -> float:
         if island is None or not self.island_temperatures:
@@ -583,21 +618,51 @@ class LLMEngineerAgent(EngineerAgent):
             step=step,
             island=island,
         )
-        response = ""
-        error = ""
-        try:
-            response = self.client.complete(system, user, temperature=self.temperature)
-            document = MutationDocument.from_yaml(response)
-            document = self._fill_missing_fields(graph, document, hypotheses)
-            self._validate_supported_document(graph, document)
-            if not (document.nodes or document.add or document.remove or document.globals):
-                raise ValueError("LLM engineer returned an empty mutation document.")
-            return document
-        except Exception as exc:
-            error = str(exc)
-            raise
-        finally:
-            self._prompt_records.append(PromptRecord("engineer", system, user, response, error))
+        retry_config = _structured_output_retry_config()
+        retry_error = ""
+        retry_response = ""
+        for attempt_index in range(retry_config.max_retries + 1):
+            attempt_user = user
+            if attempt_index:
+                attempt_user = _structured_output_retry_prompt(
+                    user,
+                    stage="engineer",
+                    previous_response=retry_response,
+                    error=retry_error,
+                    attempt_index=attempt_index,
+                    max_retries=retry_config.max_retries,
+                )
+            response = ""
+            error = ""
+            try:
+                response = self.client.complete(system, attempt_user, temperature=self.temperature)
+            except Exception as exc:
+                error = str(exc)
+                self._prompt_records.append(
+                    PromptRecord(_prompt_stage("engineer", attempt_index), system, attempt_user, response, error)
+                )
+                raise
+            try:
+                document = MutationDocument.from_yaml(response)
+                document = self._fill_missing_fields(graph, document, hypotheses)
+                self._validate_supported_document(graph, document)
+                if not (document.nodes or document.add or document.remove or document.globals):
+                    raise ValueError("LLM engineer returned an empty mutation document.")
+                self._prompt_records.append(
+                    PromptRecord(_prompt_stage("engineer", attempt_index), system, attempt_user, response, "")
+                )
+                return document
+            except Exception as exc:
+                error = str(exc)
+                self._prompt_records.append(
+                    PromptRecord(_prompt_stage("engineer", attempt_index), system, attempt_user, response, error)
+                )
+                if attempt_index >= retry_config.max_retries:
+                    raise
+                retry_error = error
+                retry_response = response
+                _log_structured_output_retry("engineer", error, attempt_index, retry_config.max_retries)
+        raise RuntimeError("LLM engineer structured-output retry loop exhausted.")
 
     def pop_prompt_records(self) -> tuple[PromptRecord, ...]:
         records = tuple(self._prompt_records)
@@ -681,24 +746,54 @@ class LLMMemorandumAgent:
             step=step,
             island=island,
         )
-        response = ""
-        error = ""
-        try:
-            response = self.client.complete(system, user, temperature=self.temperature)
-            memorandum = response.strip()
-            missing = [
-                section
-                for section in ("[OUTCOME HISTORY]", "[STATE]", "[WHAT WORKS]", "[WHAT FAILED]", "[ERROR LOG]")
-                if section not in memorandum
-            ]
-            if missing:
-                raise ValueError(f"LLM memorandum response is missing required sections: {', '.join(missing)}.")
-            return memorandum + "\n"
-        except Exception as exc:
-            error = str(exc)
-            raise
-        finally:
-            self._prompt_records.append(PromptRecord("memorandum", system, user, response, error))
+        retry_config = _structured_output_retry_config()
+        retry_error = ""
+        retry_response = ""
+        for attempt_index in range(retry_config.max_retries + 1):
+            attempt_user = user
+            if attempt_index:
+                attempt_user = _structured_output_retry_prompt(
+                    user,
+                    stage="memorandum",
+                    previous_response=retry_response,
+                    error=retry_error,
+                    attempt_index=attempt_index,
+                    max_retries=retry_config.max_retries,
+                )
+            response = ""
+            error = ""
+            try:
+                response = self.client.complete(system, attempt_user, temperature=self.temperature)
+            except Exception as exc:
+                error = str(exc)
+                self._prompt_records.append(
+                    PromptRecord(_prompt_stage("memorandum", attempt_index), system, attempt_user, response, error)
+                )
+                raise
+            try:
+                memorandum = response.strip()
+                missing = [
+                    section
+                    for section in ("[OUTCOME HISTORY]", "[STATE]", "[WHAT WORKS]", "[WHAT FAILED]", "[ERROR LOG]")
+                    if section not in memorandum
+                ]
+                if missing:
+                    raise ValueError(f"LLM memorandum response is missing required sections: {', '.join(missing)}.")
+                self._prompt_records.append(
+                    PromptRecord(_prompt_stage("memorandum", attempt_index), system, attempt_user, response, "")
+                )
+                return memorandum + "\n"
+            except Exception as exc:
+                error = str(exc)
+                self._prompt_records.append(
+                    PromptRecord(_prompt_stage("memorandum", attempt_index), system, attempt_user, response, error)
+                )
+                if attempt_index >= retry_config.max_retries:
+                    raise
+                retry_error = error
+                retry_response = response
+                _log_structured_output_retry("memorandum", error, attempt_index, retry_config.max_retries)
+        raise RuntimeError("LLM memorandum structured-output retry loop exhausted.")
 
     def pop_prompt_records(self) -> tuple[PromptRecord, ...]:
         records = tuple(self._prompt_records)
@@ -800,6 +895,64 @@ def _to_yaml_like(value: object, indent: int = 0) -> str:
                 rows.append(f"{prefix}- {json.dumps(item)}")
         return "\n".join(rows)
     return f"{prefix}{json.dumps(value)}"
+
+
+def _structured_output_retry_config() -> LLMStructuredOutputRetryConfig:
+    max_retries = _env_int("EVOFOREST_LLM_PARSE_MAX_RETRIES", 3)
+    if max_retries < 0:
+        raise ValueError("EVOFOREST_LLM_PARSE_MAX_RETRIES must be non-negative.")
+    return LLMStructuredOutputRetryConfig(max_retries=max_retries)
+
+
+def _prompt_stage(stage: str, attempt_index: int) -> str:
+    if attempt_index <= 0:
+        return stage
+    return f"{stage}_retry_{attempt_index:02d}"
+
+
+def _structured_output_retry_prompt(
+    original_user_prompt: str,
+    *,
+    stage: str,
+    previous_response: str,
+    error: str,
+    attempt_index: int,
+    max_retries: int,
+) -> str:
+    response_excerpt = _truncate_for_retry_prompt(previous_response.strip() or "(empty response)")
+    return "\n".join(
+        [
+            original_user_prompt,
+            "",
+            "==== RETRY REQUIRED: INVALID STRUCTURED OUTPUT ====",
+            f"The previous {stage} response failed parsing or validation.",
+            f"Validation error: {error}",
+            f"This is repair attempt {attempt_index} of {max_retries}.",
+            "Return a complete replacement response that satisfies the original output schema.",
+            "Do not explain the error. Do not include prose outside the requested structured output.",
+            "",
+            "Previous invalid response:",
+            "```text",
+            response_excerpt,
+            "```",
+        ]
+    )
+
+
+def _truncate_for_retry_prompt(text: str, limit: int = 4000) -> str:
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "\n... [truncated]"
+
+
+def _log_structured_output_retry(stage: str, error: str, attempt_index: int, max_retries: int) -> None:
+    retry_number = attempt_index + 1
+    one_line_error = " ".join(error.split())
+    print(
+        f"LLM {stage} returned invalid structured output ({one_line_error}); retrying {retry_number}/{max_retries}.",
+        file=sys.stderr,
+        flush=True,
+    )
 
 
 def _post_json(
