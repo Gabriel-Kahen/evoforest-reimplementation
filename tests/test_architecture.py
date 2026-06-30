@@ -707,6 +707,30 @@ def test_block_style_machine_mutation_yaml_is_supported() -> None:
     assert document.add[1].global_refs == ("residual_huber_scale_retry",)
 
 
+def test_bare_yaml_language_tag_is_ignored_in_mutation_documents() -> None:
+    document = MutationDocument.from_yaml(
+        "\n".join(
+            [
+                "yaml",
+                'rationale: "language tag without a markdown fence"',
+                "hypotheses:",
+                '  - "Use a compact primitive mutation."',
+                "nodes:",
+                "  []",
+                "remove:",
+                "  []",
+                "globals:",
+                "  []",
+                "add:",
+                '  - {"kind": "add_alternative", "target_node": "shape_stats", "primitive": "spectral_basic", "alternative_id": "spectral_yaml_tag", "parents": ["series"], "description": "frequency features"}',
+            ]
+        )
+    )
+
+    assert document.rationale == "language tag without a markdown fence"
+    assert document.add[0].alternative_id == "spectral_yaml_tag"
+
+
 def test_paper_style_lambda_mutation_yaml_is_supported() -> None:
     document = MutationDocument.from_yaml(
         "\n".join(
@@ -1442,6 +1466,9 @@ def test_prompt_builder_advertises_source_schema_only_when_enabled() -> None:
     assert '"output_contract": {"type": "feature_block"' in source_user
     assert '"torch_source": "lambda ctx, values:' in source_user
     assert "infer parents" in source_user
+    assert "Prefer registry-backed primitives" in source_user
+    assert "Never emit multiline code" in source_user
+    assert "usually one add/remove" in source_user
     assert '"source": "lambda ctx, values:' not in primitive_user
     assert 'add:\n  output:\n    - "lambda ctx, values:' not in primitive_user
 
