@@ -338,8 +338,12 @@ class PromptBuilder:
             ]
         )
         schema_lines = [
-            "Act as the EvoForest engineer. Select, combine, or reject the scientist hypotheses and emit one structured mutation document.",
-            "Output YAML only. Do not wrap the YAML in explanations.",
+            "Act as the EvoForest engineer. Select one compact graph edit from the scientist hypotheses and emit one structured mutation document.",
+            "Output YAML only. Do not wrap the YAML in explanations, analysis, markdown fences, or scratch work.",
+            "The first non-whitespace text in your response must be 'rationale:'.",
+            "The document must include at least one non-empty add, remove, nodes, or globals entry.",
+            "Prefer registry-backed primitives from the available primitive list; use source-backed lambdas only when no listed primitive can express the edit.",
+            "Keep every source, torch_source, and inline expression on one physical line. Never emit multiline code.",
         ]
         if self.allow_source:
             schema_lines.extend(
@@ -404,6 +408,7 @@ class PromptBuilder:
                 "Allowed new node kinds: intermediate, callable, output, fitting.",
                 "Existing node names and newly declared nodes may be used as mutation targets or parents.",
                 "Keep the DAG valid, keep globals append-only, and avoid adding broad branching unless diagnostics justify it.",
+                "Keep the mutation small enough to evaluate quickly: usually one add/remove, or one new node/global plus its required add.",
                 f"Step: {step}",
                 f"Island: {island if island is not None else 'single'}",
                 "",
@@ -930,6 +935,7 @@ def _structured_output_retry_prompt(
             f"This is repair attempt {attempt_index} of {max_retries}.",
             "Return a complete replacement response that satisfies the original output schema.",
             "Do not explain the error. Do not include prose outside the requested structured output.",
+            _structured_output_retry_stage_instruction(stage),
             "",
             "Previous invalid response:",
             "```text",
@@ -937,6 +943,19 @@ def _structured_output_retry_prompt(
             "```",
         ]
     )
+
+
+def _structured_output_retry_stage_instruction(stage: str) -> str:
+    if stage == "engineer":
+        return (
+            "For engineer repairs, emit only the extended mutation YAML beginning with rationale:. "
+            "Include at least one add/remove/global/node entry. Prefer a registry-backed primitive and avoid source lambdas in repair output unless strictly necessary."
+        )
+    if stage == "scientist":
+        return "For scientist repairs, emit concise Hypothesis/Rationale/Expected Improvement/Risk Mode blocks only."
+    if stage == "memorandum":
+        return "For memorandum repairs, emit all required memorandum sections exactly once."
+    return "Repair only the structured output requested by the original prompt."
 
 
 def _truncate_for_retry_prompt(text: str, limit: int = 4000) -> str:

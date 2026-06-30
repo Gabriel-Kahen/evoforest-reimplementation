@@ -326,6 +326,9 @@ class MutationEngine:
 
 def extract_mutation_yaml(text: str) -> str:
     stripped = text.strip()
+    lines = stripped.splitlines()
+    if lines and lines[0].strip().lower() in {"yaml", "yml"}:
+        stripped = "\n".join(lines[1:]).strip()
     if "```" not in stripped:
         return stripped
     chunks = stripped.split("```")
