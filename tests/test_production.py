@@ -300,6 +300,34 @@ def test_production_evolve_writes_fixed_splits_and_resumes(tmp_path) -> None:
     assert resumed["step"] == 2
     events = (run_dir / "events.jsonl").read_text(encoding="utf-8").strip().splitlines()
     assert len(events) == 2
+    jobs = read_jsonl(run_dir / "jobs.jsonl")
+    assert jobs
+    assert any(row["kind"] == "seed_evaluation" for row in jobs)
+    assert any(row["kind"] == "candidate_job" for row in jobs)
+    assert jobs[-1]["status"] == "completed"
+    inspected = inspect_run(run_dir)
+    assert inspected["job_count"] == len(jobs)
+    assert inspected["latest_job"]["status"] == "completed"
+
+
+def test_candidate_rss_guard_fails_candidate_and_persists_progress(tmp_path) -> None:
+    config = small_config(
+        tmp_path,
+        steps=1,
+        seed=42,
+        candidate_max_rss_mb=1,
+        candidate_progress_interval_seconds=0,
+    )
+    summary = ProductionEvolutionRunner(config).run()
+    run_dir = config.output_dir
+    events = read_jsonl(run_dir / "events.jsonl")
+    jobs = read_jsonl(run_dir / "jobs.jsonl")
+
+    assert summary["step"] == 1
+    assert events[-1]["failed"] is True
+    assert "CandidateGuardError" in events[-1]["error"]
+    assert any(row["status"] == "guard_failed" for row in jobs)
+    assert jobs[-1]["status"] == "failed"
 
 
 def test_export_inspect_and_recheck_keep_test_explicit(tmp_path) -> None:

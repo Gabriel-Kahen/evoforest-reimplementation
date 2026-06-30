@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from itertools import product
+import time
+from typing import Any, Callable
 
 import numpy as np
 
@@ -109,6 +111,7 @@ class RidgeEvaluator:
         torch_device: str | None = None,
         scorer: TaskScorer | ScoreFunction | str | None = None,
         task_schema: TaskSchema | dict[str, object] | None = None,
+        progress_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         self.n_splits = int(n_splits)
         self.seed = int(seed)
@@ -137,6 +140,11 @@ class RidgeEvaluator:
         self.diagnostics_mode = diagnostics_mode
         self.feature_pool_diagnostics = bool(feature_pool_diagnostics)
         self.retain_feature_matrix = bool(retain_feature_matrix)
+        self.progress_callback = progress_callback
+
+    def _emit_progress(self, payload: dict[str, Any]) -> None:
+        if self.progress_callback is not None:
+            self.progress_callback(dict(payload))
 
     def evaluate(
         self,
@@ -149,6 +157,7 @@ class RidgeEvaluator:
         working_graph = graph if update_graph else graph.clone()
         y = np.asarray(y, dtype=np.float64)
         shared_cache: dict[object, object] = {}
+        started_at = time.monotonic()
         search_cache_hits = 0
         search_cache_misses = 0
         feature_matrix_reuse_hits = 0
@@ -179,6 +188,12 @@ class RidgeEvaluator:
                 shared_cache,
                 folds=folds,
                 fold_diagnostics=fold_diagnostics,
+                progress_context={
+                    "config_index": 1,
+                    "configurations_evaluated": 1,
+                    "configurations_limit": 1,
+                    "configurations_total": 1,
+                },
             )
             feature_pool = [(result.feature_matrix, result.feature_names)] if self.feature_pool_diagnostics else []
             cache_row = result.diagnostics.get("cache", {})
@@ -197,6 +212,7 @@ class RidgeEvaluator:
             last_feature_signature: tuple[object, ...] | None = None
             last_feature_result: tuple[np.ndarray, list[str]] | None = None
             for candidate_config in configs:
+                config_index = len(config_rows) + 1
                 feature_signature = self._feature_signature(working_graph, candidate_config)
                 precomputed_features = last_feature_result if feature_signature == last_feature_signature else None
                 if precomputed_features is not None:
@@ -210,6 +226,12 @@ class RidgeEvaluator:
                     precomputed_features=precomputed_features,
                     folds=folds,
                     fold_diagnostics=fold_diagnostics,
+                    progress_context={
+                        "config_index": config_index,
+                        "configurations_evaluated": config_index,
+                        "configurations_limit": len(configs),
+                        "configurations_total": total_configurations,
+                    },
                 )
                 if result.feature_matrix is not None:
                     last_feature_signature = feature_signature
@@ -227,6 +249,18 @@ class RidgeEvaluator:
                         "n_features": len(result.feature_names),
                         "cache_hits": int(cache_row.get("hits", 0)) if isinstance(cache_row, dict) else 0,
                         "cache_misses": int(cache_row.get("misses", 0)) if isinstance(cache_row, dict) else 0,
+                    }
+                )
+                self._emit_progress(
+                    {
+                        "phase": "configuration_evaluated",
+                        "config_index": config_index,
+                        "configurations_evaluated": config_index,
+                        "configurations_limit": len(configs),
+                        "configurations_total": total_configurations,
+                        "score": float(result.score),
+                        "n_features": len(result.feature_names),
+                        "elapsed_seconds": time.monotonic() - started_at,
                     }
                 )
                 if best is None or result.score > best.score:
@@ -280,7 +314,9 @@ class RidgeEvaluator:
         precomputed_features: tuple[np.ndarray, list[str]] | None = None,
         folds: list[tuple[np.ndarray, np.ndarray]] | None = None,
         fold_diagnostics: dict[str, object] | None = None,
+        progress_context: dict[str, Any] | None = None,
     ) -> EvaluationResult:
+        progress_context = dict(progress_context or {})
         if precomputed_features is None:
             x, names, ctx = graph.evaluate_features(inputs, config=config, cache=shared_cache)
             feature_matrix_reused = False
@@ -288,6 +324,15 @@ class RidgeEvaluator:
             x, names = precomputed_features
             ctx = EvalContext(inputs=inputs, globals=graph.globals.clone(), cache=shared_cache if shared_cache is not None else {})
             feature_matrix_reused = True
+        self._emit_progress(
+            {
+                "phase": "features_evaluated",
+                **progress_context,
+                "n_rows": int(x.shape[0]),
+                "n_features": int(x.shape[1]),
+                "feature_matrix_reused": bool(feature_matrix_reused),
+            }
+        )
         sample_weight, residual_rule, fitting_diagnostics = self._evaluate_fitting_rules(graph, inputs, y, config, ctx)
         preds = np.zeros_like(y, dtype=np.float64)
         collect_full_diagnostics = self.diagnostics_mode == "full"
@@ -319,6 +364,17 @@ class RidgeEvaluator:
             fold_score, fold_raw_score = _score_and_raw(self.scorer, y[val_idx], preds[val_idx])
             fold_scores.append(float(fold_score))
             fold_raw_scores.append(float(fold_raw_score))
+            self._emit_progress(
+                {
+                    "phase": "fold_evaluated",
+                    **progress_context,
+                    "fold": int(fold_index + 1),
+                    "folds": int(len(folds)),
+                    "fold_score": float(fold_score),
+                    "fold_raw_score": float(fold_raw_score),
+                    "n_features": int(x.shape[1]),
+                }
+            )
             alphas.append(float(ridge_fit.alpha))
             if collect_full_diagnostics:
                 coefs.append(model.coef)

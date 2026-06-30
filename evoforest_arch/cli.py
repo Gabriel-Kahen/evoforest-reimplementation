@@ -81,6 +81,9 @@ PRODUCTION_CLI_DEFAULTS = {
     "llm_scientist_temperature": 0.35,
     "llm_island_temperatures": DEFAULT_ISLAND_TEMPERATURES,
     "llm_engineer_temperature": 0.0,
+    "candidate_timeout_seconds": None,
+    "candidate_max_rss_mb": None,
+    "candidate_progress_interval_seconds": 30.0,
 }
 
 
@@ -237,6 +240,14 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Keep LLM agents on registry-backed mutation schemas unless --allow-source-mutations is set.",
     )
+    evolve.add_argument("--candidate-timeout-seconds", type=float, default=None, help="Fail a candidate after this many elapsed seconds; disabled by default.")
+    evolve.add_argument("--candidate-max-rss-mb", type=float, default=None, help="Fail a candidate when process RSS exceeds this many MB; disabled by default.")
+    evolve.add_argument(
+        "--candidate-progress-interval-seconds",
+        type=float,
+        default=None,
+        help="Minimum seconds between durable candidate progress rows in jobs.jsonl.",
+    )
     evolve.add_argument("--resume", action="store_true")
     evolve.add_argument("--output", type=pathlib.Path, required=True)
     evolve.set_defaults(func=run_evolve)
@@ -364,6 +375,9 @@ def run_evolve(args: argparse.Namespace) -> int:
         island_workers=args.island_workers,
         island_devices=args.island_devices,
         migration_interval=args.migration_interval,
+        candidate_timeout_seconds=args.candidate_timeout_seconds,
+        candidate_max_rss_mb=args.candidate_max_rss_mb,
+        candidate_progress_interval_seconds=args.candidate_progress_interval_seconds,
     )
     registry = PrimitiveRegistry.for_task(task_schema_for_evolve_run(config, resume=args.resume))
     scientist, engineer, memorandum_agent = build_llm_agents(args, task_context=task_context, registry=registry)

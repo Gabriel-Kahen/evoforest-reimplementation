@@ -9,6 +9,7 @@ import multiprocessing as mp
 import os
 import pathlib
 import subprocess
+import time
 from typing import Any
 
 import numpy as np
@@ -50,6 +51,160 @@ VALIDATION_PROMOTION_POLICY = "validation_gated"
 CV_SCORE_PROMOTION_POLICY = "cv_score"
 SUPPORTED_PROMOTION_POLICIES = (VALIDATION_PROMOTION_POLICY, CV_SCORE_PROMOTION_POLICY)
 PAPER_PROFILE_STEPS = 600
+
+
+class CandidateGuardError(RuntimeError):
+    """Raised when a candidate exceeds configured runtime or memory guardrails."""
+
+
+def _is_candidate_guard_error(error: str | None) -> bool:
+    return bool(error and "CandidateGuardError" in error)
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _current_rss_mb() -> float | None:
+    statm = pathlib.Path("/proc/self/statm")
+    try:
+        if statm.exists():
+            parts = statm.read_text(encoding="utf-8").split()
+            if len(parts) >= 2:
+                page_size = os.sysconf("SC_PAGE_SIZE")
+                return float(int(parts[1]) * int(page_size) / (1024 * 1024))
+    except (OSError, ValueError):
+        pass
+    try:
+        import resource
+
+        rss = float(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+    except Exception:
+        return None
+    if rss > 100_000_000:
+        return rss / (1024 * 1024)
+    return rss / 1024
+
+
+def _write_jsonl_row(handle: Any, row: dict[str, Any]) -> None:
+    handle.write(json.dumps(_json_ready(row)) + "\n")
+    handle.flush()
+    try:
+        os.fsync(handle.fileno())
+    except OSError:
+        pass
+
+
+def _append_jsonl(path: pathlib.Path, row: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        _write_jsonl_row(handle, row)
+
+
+class CandidateJobLogger:
+    def __init__(
+        self,
+        run_dir: pathlib.Path,
+        *,
+        step: int,
+        timeout_seconds: float | None,
+        max_rss_mb: float | None,
+        progress_interval_seconds: float,
+    ) -> None:
+        self.run_dir = run_dir
+        self.step = int(step)
+        self.timeout_seconds = float(timeout_seconds) if timeout_seconds and timeout_seconds > 0 else None
+        self.max_rss_mb = float(max_rss_mb) if max_rss_mb and max_rss_mb > 0 else None
+        self.progress_interval_seconds = max(0.0, float(progress_interval_seconds))
+        self.started_at = time.monotonic()
+        self.started_at_utc = _utc_now_iso()
+        self._last_progress_emit = 0.0
+
+    @property
+    def elapsed_seconds(self) -> float:
+        return time.monotonic() - self.started_at
+
+    def emit(self, status: str, *, force: bool = True, **payload: Any) -> None:
+        row = {
+            "kind": "candidate_job",
+            "mode": "production_single",
+            "step": self.step,
+            "status": status,
+            "timestamp_utc": _utc_now_iso(),
+            "started_at_utc": self.started_at_utc,
+            "elapsed_seconds": self.elapsed_seconds,
+            "rss_mb": _current_rss_mb(),
+            **payload,
+        }
+        _append_jsonl(self.run_dir / "jobs.jsonl", row)
+        if force or status == "progress":
+            self._last_progress_emit = time.monotonic()
+
+    def progress(self, payload: dict[str, Any], *, split: str) -> None:
+        elapsed = self.elapsed_seconds
+        rss_mb = _current_rss_mb()
+        phase = str(payload.get("phase", "evaluation_progress"))
+        if self.timeout_seconds is not None and elapsed > self.timeout_seconds:
+            self.emit(
+                "guard_failed",
+                split=split,
+                phase=phase,
+                reason="candidate_timeout",
+                timeout_seconds=self.timeout_seconds,
+                progress=payload,
+            )
+            raise CandidateGuardError(f"Candidate step {self.step} exceeded timeout {self.timeout_seconds:.1f}s.")
+        if self.max_rss_mb is not None and rss_mb is not None and rss_mb > self.max_rss_mb:
+            self.emit(
+                "guard_failed",
+                split=split,
+                phase=phase,
+                reason="candidate_rss_limit",
+                max_rss_mb=self.max_rss_mb,
+                progress=payload,
+            )
+            raise CandidateGuardError(f"Candidate step {self.step} exceeded RSS limit {self.max_rss_mb:.1f} MB; observed {rss_mb:.1f} MB.")
+        now = time.monotonic()
+        if self.progress_interval_seconds == 0 or now - self._last_progress_emit >= self.progress_interval_seconds:
+            self.emit("progress", split=split, phase=phase, progress=payload)
+
+
+class EvaluationProgressLogger:
+    def __init__(self, run_dir: pathlib.Path, *, kind: str, step: int, progress_interval_seconds: float) -> None:
+        self.run_dir = run_dir
+        self.kind = str(kind)
+        self.step = int(step)
+        self.progress_interval_seconds = max(0.0, float(progress_interval_seconds))
+        self.started_at = time.monotonic()
+        self.started_at_utc = _utc_now_iso()
+        self._last_progress_emit = 0.0
+
+    @property
+    def elapsed_seconds(self) -> float:
+        return time.monotonic() - self.started_at
+
+    def emit(self, status: str, **payload: Any) -> None:
+        _append_jsonl(
+            self.run_dir / "jobs.jsonl",
+            {
+                "kind": self.kind,
+                "mode": "production_single",
+                "step": self.step,
+                "status": status,
+                "timestamp_utc": _utc_now_iso(),
+                "started_at_utc": self.started_at_utc,
+                "elapsed_seconds": self.elapsed_seconds,
+                "rss_mb": _current_rss_mb(),
+                **payload,
+            },
+        )
+        self._last_progress_emit = time.monotonic()
+
+    def progress(self, payload: dict[str, Any], *, split: str) -> None:
+        now = time.monotonic()
+        if self.progress_interval_seconds != 0 and now - self._last_progress_emit < self.progress_interval_seconds:
+            return
+        self.emit("progress", split=split, phase=str(payload.get("phase", "evaluation_progress")), progress=payload)
 
 
 @dataclass(frozen=True)
@@ -100,6 +255,9 @@ class ProductionConfig:
     island_devices: tuple[str, ...] | None = None
     migration_interval: int = 10
     torch_device: str | None = None
+    candidate_timeout_seconds: float | None = None
+    candidate_max_rss_mb: float | None = None
+    candidate_progress_interval_seconds: float = 30.0
 
     def dataset_config(self) -> dict[str, Any]:
         payload: dict[str, Any] = {}
@@ -931,7 +1089,7 @@ class ProductionIslandWorker:
             **metadata,
         }
         with (archive_dir / "index.jsonl").open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(row) + "\n")
+            _write_jsonl_row(handle, row)
 
     def _write_checkpoint(self, context: ProductionContext, step: int, metadata: dict[str, Any] | None = None) -> None:
         payload = {
@@ -962,20 +1120,20 @@ class ProductionIslandWorker:
             "best_validation_score": event.get("island_best_validation_score", event["best_validation_score"]),
         }
         with (self.run_dir / "events.jsonl").open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(island_event) + "\n")
+            _write_jsonl_row(handle, island_event)
 
     def _write_island_job_event(self, row: dict[str, Any]) -> None:
         if self.run_dir is None:
             raise RuntimeError("Production island worker has no run directory.")
         payload = {**row, "created_at_utc": datetime.now(timezone.utc).isoformat()}
         with (self.run_dir / "jobs.jsonl").open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(payload) + "\n")
+            _write_jsonl_row(handle, payload)
 
     def _write_island_migration_event(self, event: dict[str, Any]) -> None:
         if self.run_dir is None:
             raise RuntimeError("Production island worker has no run directory.")
         with (self.run_dir / "migrations.jsonl").open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(event) + "\n")
+            _write_jsonl_row(handle, event)
 
     def _job_terminal_payload(
         self,
@@ -1382,6 +1540,14 @@ class ProductionEvolutionRunner:
         self._write_memorandum(context, loop=loop)
         with events_path.open(mode, encoding="utf-8") as events:
             for step in range(context.state.step + 1, context.state.step + int(self.config.steps) + 1):
+                job = CandidateJobLogger(
+                    context.run_dir,
+                    step=step,
+                    timeout_seconds=self.config.candidate_timeout_seconds,
+                    max_rss_mb=self.config.candidate_max_rss_mb,
+                    progress_interval_seconds=self.config.candidate_progress_interval_seconds,
+                )
+                job.emit("proposing")
                 try:
                     document = loop._propose_document(
                         context.current_graph,
@@ -1390,44 +1556,74 @@ class ProductionEvolutionRunner:
                         memorandum=self._read_memorandum(context.run_dir),
                         execution_errors="\n".join(context.state.errors[-8:]),
                     )
+                except Exception as exc:
+                    job.emit("failed", phase="proposal", error=loop._format_exception(exc))
+                    raise
                 finally:
                     loop._write_prompt_records(context.run_dir, step)
                 loop._write_mutation_document(context.run_dir, step, document)
+                job.emit("evaluating_train", mutation=document.to_dict())
+                previous_callback = self.evaluator.progress_callback
+                self.evaluator.progress_callback = lambda payload, candidate_job=job: candidate_job.progress(payload, split="train")
                 outcome = loop._try_evaluate_candidate(context.current_graph, document, train_inputs, train_y)
-                if outcome.failed:
-                    document, outcome = loop._repair_candidate(
-                        context.current_graph,
-                        context.best_train_result,
-                        step,
-                        island=None,
-                        output_dir=context.run_dir,
-                        document=document,
-                        outcome=outcome,
-                        inputs=train_inputs,
-                        y=train_y,
-                        memorandum=self._read_memorandum(context.run_dir),
-                        errors=context.state.errors,
-                    )
+                self.evaluator.progress_callback = previous_callback
+                if outcome.failed and not _is_candidate_guard_error(outcome.error):
+                    job.emit("repairing", phase="train", error=outcome.error)
+                    previous_callback = self.evaluator.progress_callback
+                    self.evaluator.progress_callback = lambda payload, candidate_job=job: candidate_job.progress(payload, split="train_repair")
+                    try:
+                        document, outcome = loop._repair_candidate(
+                            context.current_graph,
+                            context.best_train_result,
+                            step,
+                            island=None,
+                            output_dir=context.run_dir,
+                            document=document,
+                            outcome=outcome,
+                            inputs=train_inputs,
+                            y=train_y,
+                            memorandum=self._read_memorandum(context.run_dir),
+                            errors=context.state.errors,
+                        )
+                    finally:
+                        self.evaluator.progress_callback = previous_callback
                 if outcome.failed:
                     event = self._failed_event(context, step, document.to_dict(), outcome.error or "Unknown candidate failure.")
                     context.state.step = step
                     context.state.rng_state = loop.rng.bit_generator.state
                     self._record_event(context.state, event)
-                    events.write(json.dumps(event) + "\n")
+                    _write_jsonl_row(events, event)
                     self._write_state(context.run_dir, context.state)
                     self._write_memorandum(context, loop=loop)
+                    job.emit("failed", phase="train", error=outcome.error)
                     continue
 
                 if outcome.application is None or outcome.candidate_graph is None or outcome.result is None:
                     raise RuntimeError("Candidate evaluation returned an incomplete success outcome.")
                 candidate_train = outcome.result
-                candidate_validation = self.evaluator.evaluate(
-                    outcome.candidate_graph,
-                    validation_inputs,
-                    validation_y,
-                    config=candidate_train.config,
-                    update_graph=False,
-                )
+                job.emit("evaluating_validation", config=candidate_train.config)
+                previous_callback = self.evaluator.progress_callback
+                self.evaluator.progress_callback = lambda payload, candidate_job=job: candidate_job.progress(payload, split="validation")
+                try:
+                    candidate_validation = self.evaluator.evaluate(
+                        outcome.candidate_graph,
+                        validation_inputs,
+                        validation_y,
+                        config=candidate_train.config,
+                        update_graph=False,
+                    )
+                except Exception as exc:
+                    event = self._failed_event(context, step, document.to_dict(), loop._format_exception(exc))
+                    context.state.step = step
+                    context.state.rng_state = loop.rng.bit_generator.state
+                    self._record_event(context.state, event)
+                    _write_jsonl_row(events, event)
+                    self._write_state(context.run_dir, context.state)
+                    self._write_memorandum(context, loop=loop)
+                    job.emit("failed", phase="validation", error=loop._format_exception(exc))
+                    continue
+                finally:
+                    self.evaluator.progress_callback = previous_callback
                 previous_best_train_score = float(context.best_train_result.score)
                 previous_best_validation_score = float(context.best_validation_result.score)
                 accepted = self._promotes(candidate_train, candidate_validation, context)
@@ -1458,9 +1654,16 @@ class ProductionEvolutionRunner:
                     previous_best_validation_score=previous_best_validation_score,
                 )
                 self._record_event(context.state, event)
-                events.write(json.dumps(event) + "\n")
+                _write_jsonl_row(events, event)
                 self._write_state(context.run_dir, context.state)
                 self._write_memorandum(context, loop=loop)
+                job.emit(
+                    "completed",
+                    accepted=accepted,
+                    train_score=float(candidate_train.score),
+                    validation_score=float(candidate_validation.score),
+                    best_validation_score=float(context.state.best_validation_score),
+                )
 
         return inspect_run(context.run_dir)
 
@@ -1783,8 +1986,7 @@ class ProductionEvolutionRunner:
         event = commit.event
         context.state.step = int(event["step"])
         self._record_event(context.state, event)
-        root_events.write(json.dumps(event) + "\n")
-        root_events.flush()
+        _write_jsonl_row(root_events, event)
         self._write_state(context.run_dir, context.state)
         self._write_memorandum(context)
         self._write_root_job_event(
@@ -1836,7 +2038,7 @@ class ProductionEvolutionRunner:
         self._replace_island_snapshot(context, islands, migration.snapshot)
         event = migration.event
         with (context.run_dir / "migrations.jsonl").open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(event) + "\n")
+            _write_jsonl_row(handle, event)
 
     def _island_by_id(self, islands: list[ProductionIslandContext], island_id: int) -> ProductionIslandContext:
         for island in islands:
@@ -1956,6 +2158,9 @@ class ProductionEvolutionRunner:
             "scorer": self.evaluator.scorer.name,
             "task_schema": self.task_schema.to_dict(),
             "torch_device": self.evaluator.torch_device,
+            "diagnostics_mode": self.evaluator.diagnostics_mode,
+            "feature_pool_diagnostics": bool(self.evaluator.feature_pool_diagnostics),
+            "retain_feature_matrix": bool(self.evaluator.retain_feature_matrix),
         }
 
     def _configured_island_count(self) -> int:
@@ -2049,13 +2254,13 @@ class ProductionEvolutionRunner:
         payload = {**row, "created_at_utc": datetime.now(timezone.utc).isoformat()}
         for directory in (root_dir, island_dir):
             with (directory / "jobs.jsonl").open("a", encoding="utf-8") as handle:
-                handle.write(json.dumps(payload) + "\n")
+                _write_jsonl_row(handle, payload)
 
     @staticmethod
     def _write_root_job_event(root_dir: pathlib.Path, row: dict[str, Any]) -> None:
         payload = {**row, "created_at_utc": datetime.now(timezone.utc).isoformat()}
         with (root_dir / "jobs.jsonl").open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(payload) + "\n")
+            _write_jsonl_row(handle, payload)
 
     def _job_terminal_payload(
         self,
@@ -2170,14 +2375,39 @@ class ProductionEvolutionRunner:
             split_sizes={name: int(split_y.shape[0]) for name, (_split_inputs, split_y) in splits.items()},
             evaluator=self._active_evaluator_config(),
         )
-        best_train = self.evaluator.evaluate(current_graph, train_inputs, train_y, update_graph=True)
+        seed_logger = EvaluationProgressLogger(
+            run_dir,
+            kind="seed_evaluation",
+            step=0,
+            progress_interval_seconds=self.config.candidate_progress_interval_seconds,
+        )
+        seed_logger.emit("evaluating_train")
+        previous_callback = self.evaluator.progress_callback
+        self.evaluator.progress_callback = lambda payload, logger=seed_logger: logger.progress(payload, split="train")
+        try:
+            best_train = self.evaluator.evaluate(current_graph, train_inputs, train_y, update_graph=True)
+        finally:
+            self.evaluator.progress_callback = previous_callback
+        seed_logger.emit("train_completed", train_score=float(best_train.score), config=dict(best_train.config))
         self._write_initialization_status(
             run_dir,
             "seed_validation_evaluation_started",
             best_train_score=float(best_train.score),
             best_train_config=dict(best_train.config),
         )
-        best_validation = self.evaluator.evaluate(current_graph, validation_inputs, validation_y, config=best_train.config, update_graph=False)
+        seed_logger.emit("evaluating_validation", config=dict(best_train.config))
+        previous_callback = self.evaluator.progress_callback
+        self.evaluator.progress_callback = lambda payload, logger=seed_logger: logger.progress(payload, split="validation")
+        try:
+            best_validation = self.evaluator.evaluate(current_graph, validation_inputs, validation_y, config=best_train.config, update_graph=False)
+        finally:
+            self.evaluator.progress_callback = previous_callback
+        seed_logger.emit(
+            "completed",
+            train_score=float(best_train.score),
+            validation_score=float(best_validation.score),
+            config=dict(best_train.config),
+        )
         self._write_initialization_status(
             run_dir,
             "seed_evaluation_finished",
@@ -2335,6 +2565,11 @@ class ProductionEvolutionRunner:
             "evaluator": self._active_evaluator_config(),
             "scorer": self.evaluator.scorer.to_dict(),
             "mutation": {"allow_source_mutations": bool(self.config.allow_source_mutations)},
+            "candidate_guard": {
+                "timeout_seconds": self.config.candidate_timeout_seconds,
+                "max_rss_mb": self.config.candidate_max_rss_mb,
+                "progress_interval_seconds": float(self.config.candidate_progress_interval_seconds),
+            },
             "islands": {
                 "mode": "async" if int(self.config.islands) > 1 and self.config.async_islands else "single",
                 "count": max(1, int(self.config.islands)),
@@ -2398,7 +2633,7 @@ class ProductionEvolutionRunner:
             **metadata,
         }
         with (archive_dir / "index.jsonl").open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(row) + "\n")
+            _write_jsonl_row(handle, row)
 
     def _write_checkpoint(self, context: ProductionContext, step: int, metadata: dict[str, Any] | None = None) -> None:
         payload = {
@@ -2637,15 +2872,41 @@ def make_production_split_manifest(
     )
 
 
+def _jsonl_count(path: pathlib.Path) -> int:
+    if not path.exists():
+        return 0
+    try:
+        return sum(1 for line in path.read_text(encoding="utf-8").splitlines() if line.strip())
+    except OSError:
+        return 0
+
+
+def _latest_jsonl(path: pathlib.Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        lines = [line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    except OSError:
+        return None
+    for line in reversed(lines):
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(row, dict):
+            return row
+    return None
+
+
 def inspect_run(run_dir: str | pathlib.Path) -> dict[str, Any]:
     path = pathlib.Path(run_dir)
     manifest = json.loads((path / "run_manifest.json").read_text(encoding="utf-8"))
     split_manifest = read_split_manifest(path / "splits.json")
     state = RunState.from_dict(json.loads((path / "state.json").read_text(encoding="utf-8")))
     events_path = path / "events.jsonl"
-    event_count = 0
-    if events_path.exists() and events_path.read_text(encoding="utf-8").strip():
-        event_count = len(events_path.read_text(encoding="utf-8").splitlines())
+    jobs_path = path / "jobs.jsonl"
+    event_count = _jsonl_count(events_path)
+    job_count = _jsonl_count(jobs_path)
     summary = {
         "run_id": state.run_id,
         "run_dir": str(path),
@@ -2663,6 +2924,9 @@ def inspect_run(run_dir: str | pathlib.Path) -> dict[str, Any]:
             "test": len(split_manifest.test_indices),
         },
         "event_count": event_count,
+        "latest_event": _latest_jsonl(events_path),
+        "job_count": job_count,
+        "latest_job": _latest_jsonl(jobs_path),
         "test_recheck_count": int(state.test_recheck_count),
         "acceptance": manifest.get("acceptance", {}),
         "artifacts": {
@@ -2672,6 +2936,7 @@ def inspect_run(run_dir: str | pathlib.Path) -> dict[str, Any]:
             "best_graph": str(path / state.best_graph_path),
             "current_graph": str(path / state.current_graph_path),
             "archive_index": str(path / "archive" / "index.jsonl"),
+            "jobs": str(jobs_path),
         },
         "safe_staged_execution_rules": manifest.get("safe_staged_execution_rules", []),
     }
@@ -2682,9 +2947,8 @@ def inspect_run(run_dir: str | pathlib.Path) -> dict[str, Any]:
             island_dir = path / "islands" / f"island_{island_id}"
             island_state = RunState.from_dict(json.loads((island_dir / "state.json").read_text(encoding="utf-8")))
             island_events_path = island_dir / "events.jsonl"
-            island_events = 0
-            if island_events_path.exists() and island_events_path.read_text(encoding="utf-8").strip():
-                island_events = len(island_events_path.read_text(encoding="utf-8").splitlines())
+            island_jobs_path = island_dir / "jobs.jsonl"
+            island_events = _jsonl_count(island_events_path)
             island_rows.append(
                 {
                     "island": island_id,
@@ -2697,6 +2961,8 @@ def inspect_run(run_dir: str | pathlib.Path) -> dict[str, Any]:
                     "best_train_score": float(island_state.best_train_score),
                     "best_validation_score": float(island_state.best_validation_score),
                     "event_count": island_events,
+                    "job_count": _jsonl_count(island_jobs_path),
+                    "latest_job": _latest_jsonl(island_jobs_path),
                     "state": str(island_dir / "state.json"),
                     "best_graph": str(island_dir / island_state.best_graph_path),
                     "current_graph": str(island_dir / island_state.current_graph_path),
@@ -2720,7 +2986,6 @@ def inspect_run(run_dir: str | pathlib.Path) -> dict[str, Any]:
             "items": island_rows,
         }
         summary["artifacts"]["migrations"] = str(migrations_path)
-        summary["artifacts"]["jobs"] = str(path / "jobs.jsonl")
     return summary
 
 
@@ -2780,7 +3045,7 @@ def recheck_run(run_dir: str | pathlib.Path, *, include_test: bool = False, allo
         (path / "state.json").write_text(json.dumps(state.to_dict(), indent=2), encoding="utf-8")
     result["created_at_utc"] = datetime.now(timezone.utc).isoformat()
     with (path / "validation_rechecks.jsonl").open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(result) + "\n")
+        _write_jsonl_row(handle, result)
     return result
 
 
