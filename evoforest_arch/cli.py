@@ -151,6 +151,11 @@ def main(argv: list[str] | None = None) -> int:
     demo.add_argument("--task-context-file", type=pathlib.Path, default=None)
     demo.add_argument("--task-source-file", action="append", type=pathlib.Path, default=[])
     demo.add_argument("--allow-source-mutations", action="store_true")
+    demo.add_argument(
+        "--disable-llm-source-mutations",
+        action="store_true",
+        help="Keep LLM agents on registry-backed mutation schemas unless --allow-source-mutations is set.",
+    )
     demo.add_argument("--output", type=pathlib.Path, default=pathlib.Path("runs/demo"))
     demo.set_defaults(func=run_demo)
 
@@ -227,6 +232,11 @@ def main(argv: list[str] | None = None) -> int:
     evolve.add_argument("--llm-engineer-temperature", type=float, default=None)
     evolve.add_argument("--task-context-file", type=pathlib.Path, default=None)
     evolve.add_argument("--task-source-file", action="append", type=pathlib.Path, default=[])
+    evolve.add_argument(
+        "--disable-llm-source-mutations",
+        action="store_true",
+        help="Keep LLM agents on registry-backed mutation schemas unless --allow-source-mutations is set.",
+    )
     evolve.add_argument("--resume", action="store_true")
     evolve.add_argument("--output", type=pathlib.Path, required=True)
     evolve.set_defaults(func=run_evolve)
@@ -270,7 +280,7 @@ def run_demo(args: argparse.Namespace) -> int:
     task_sources = read_task_sources(args.task_source_file)
     registry = PrimitiveRegistry.for_task(TaskSchema.structural_break())
     scientist, engineer, memorandum_agent = build_llm_agents(args, task_context=task_context, registry=registry)
-    source_allowed = args.allow_source_mutations or scientist is not None or engineer is not None
+    source_allowed = _llm_source_allowed(args, scientist is not None or engineer is not None)
     mutation_engine = MutationEngine(registry=registry, allow_source=source_allowed)
     loop = EvolutionLoop(
         graph,
@@ -357,7 +367,10 @@ def run_evolve(args: argparse.Namespace) -> int:
     )
     registry = PrimitiveRegistry.for_task(task_schema_for_evolve_run(config, resume=args.resume))
     scientist, engineer, memorandum_agent = build_llm_agents(args, task_context=task_context, registry=registry)
-    config = replace(config, allow_source_mutations=args.allow_source_mutations or scientist is not None or engineer is not None)
+    config = replace(
+        config,
+        allow_source_mutations=_llm_source_allowed(args, scientist is not None or engineer is not None),
+    )
     summary = ProductionEvolutionRunner(
         config,
         scientist=scientist,
@@ -390,7 +403,7 @@ def build_llm_agents(
     if provider is None:
         return None, None, None
     client = llm_client_from_env(args.env_file)
-    source_allowed = args.allow_source_mutations or provider is not None
+    source_allowed = _llm_source_allowed(args, provider is not None)
     prompt_builder = PromptBuilder(task_context=task_context or PromptBuilder().task_context, registry=registry, allow_source=source_allowed)
     return (
         LLMScientistAgent(
@@ -412,6 +425,14 @@ def build_llm_agents(
             temperature=0.0,
         ),
     )
+
+
+def _llm_source_allowed(args: argparse.Namespace, llm_enabled: bool) -> bool:
+    if args.allow_source_mutations:
+        return True
+    if getattr(args, "disable_llm_source_mutations", False):
+        return False
+    return bool(llm_enabled)
 
 
 def read_task_sources(paths: list[pathlib.Path]) -> tuple[tuple[str, str], ...]:

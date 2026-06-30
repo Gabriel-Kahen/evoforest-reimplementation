@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import argparse
 import urllib.error
 
 import numpy as np
@@ -9,6 +10,7 @@ import pytest
 
 from evoforest_arch import llm as llm_module
 from evoforest_arch.agents import EngineerAgent, ScientistAgent
+from evoforest_arch.cli import build_llm_agents
 from evoforest_arch.evaluator import RidgeEvaluator, abs_feature_correlation, effective_rank, feature_correlation_summary, max_correlation_scores, most_correlated_names, safe_corr_columns
 from evoforest_arch.evolution import EvolutionLoop
 from evoforest_arch.feedback import toon_report
@@ -17,6 +19,7 @@ from evoforest_arch.llm import ClaudeLLMClient, GeminiLLMClient, LLMEngineerAgen
 from evoforest_arch.maintenance import GraphMaintenance
 from evoforest_arch.metrics import FoldStrategy, RMSE_SCORER, safe_corr
 from evoforest_arch.mutations import GlobalSpec, MutationDocument, MutationEngine, MutationSpec, NodeSpec, RemoveSpec
+from evoforest_arch.primitives import PrimitiveRegistry
 from evoforest_arch.rank_readout import fit_rank_feature_expansion, select_rank_ensemble
 from evoforest_arch.readout import fit_ridge, select_alpha, select_alpha_and_fit_ridge
 from evoforest_arch.seed import build_seed_graph, build_structural_break_seed_graph
@@ -1471,6 +1474,40 @@ def test_prompt_builder_advertises_source_schema_only_when_enabled() -> None:
     assert "usually one add/remove" in source_user
     assert '"source": "lambda ctx, values:' not in primitive_user
     assert 'add:\n  output:\n    - "lambda ctx, values:' not in primitive_user
+
+
+def test_llm_agents_can_disable_source_mutation_schema(tmp_path, monkeypatch) -> None:
+    for key in ("EVOFOREST_LLM_PROVIDER", "EVOFOREST_LLM_MODEL", "OPENAI_API_KEY"):
+        monkeypatch.delenv(key, raising=False)
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "OPENAI_API_KEY=test-key\nEVOFOREST_LLM_MODEL=test-model\n",
+        encoding="utf-8",
+    )
+    args = argparse.Namespace(
+        llm_provider="openai",
+        env_file=env_file,
+        allow_source_mutations=False,
+        disable_llm_source_mutations=True,
+        llm_scientist_temperature=0.35,
+        llm_island_temperatures=(),
+        llm_engineer_temperature=0.0,
+    )
+
+    _scientist, engineer, _memorandum = build_llm_agents(
+        args,
+        registry=PrimitiveRegistry.for_task(TaskSchema.structural_break()),
+    )
+
+    assert engineer is not None
+    assert engineer.allow_source is False
+    dataset = make_structural_break_data(n_series=35, length=70, seed=25)
+    graph = build_structural_break_seed_graph()
+    result = RidgeEvaluator(n_splits=3, seed=25, max_configurations=4).evaluate(graph, dataset.inputs(), dataset.y)
+    hypothesis = ScientistAgent().generate(graph, result, max_hypotheses=1)
+    _system, user = engineer.prompt_builder.engineer_prompts(graph, result, hypothesis)
+    assert '"source": "lambda ctx, values:' not in user
+    assert "Source-backed lambda edits are disabled" in user
 
 
 def test_failed_llm_source_mutation_is_logged_and_fed_back(tmp_path) -> None:
