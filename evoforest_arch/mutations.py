@@ -133,10 +133,10 @@ class MutationDocument:
                 target_node=str(row["target_node"]),
                 primitive=str(row.get("primitive", "source" if row.get("source") else "")),
                 alternative_id=str(row["alternative_id"]),
-                parents=tuple(str(parent) for parent in row.get("parents", [])),
+                parents=_coerce_string_tuple(row.get("parents", [])),
                 description=str(row.get("description", "")),
                 source=str(row.get("source", "")),
-                global_refs=tuple(str(name) for name in row.get("global_refs", [])),
+                global_refs=_coerce_string_tuple(row.get("global_refs", [])),
                 node_kind=str(row.get("node_kind", "")),
                 output_contract=dict(row.get("output_contract", {})) if isinstance(row.get("output_contract", {}), dict) else {},
                 torch_source=str(row.get("torch_source", "")),
@@ -396,8 +396,8 @@ def _from_paper_style_yaml(text: str) -> MutationDocument:
                 add_counts[current_add_node] = count + 1
                 payload = _paper_source_payload(item)
                 source = str(payload.get("source", item))
-                parents = tuple(str(parent) for parent in payload.get("parents", _infer_source_parents(source)))
-                global_refs = tuple(str(name) for name in payload.get("global_refs", _infer_source_global_refs(source)))
+                parents = _coerce_string_tuple(payload.get("parents", _infer_source_parents(source)))
+                global_refs = _coerce_string_tuple(payload.get("global_refs", _infer_source_global_refs(source)))
                 additions.append(
                     MutationSpec(
                         kind="add_alternative",
@@ -433,6 +433,26 @@ def _yaml_scalar(value: str) -> str:
             if len(value) >= 2 and value[-1] == value[0]:
                 return value[1:-1]
     return value
+
+
+def _coerce_string_tuple(value: object) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return ()
+        if len(stripped) >= 2 and stripped[0] in {"[", "("} and stripped[-1] in {"]", ")"}:
+            try:
+                parsed = ast.literal_eval(stripped)
+            except (SyntaxError, ValueError):
+                pass
+            else:
+                return _coerce_string_tuple(parsed)
+        return (stripped,)
+    if isinstance(value, (list, tuple)):
+        return tuple(str(item) for item in value)
+    return (str(value),)
 
 
 def _paper_source_payload(item: str) -> dict[str, object]:

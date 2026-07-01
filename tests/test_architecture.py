@@ -734,6 +734,32 @@ def test_bare_yaml_language_tag_is_ignored_in_mutation_documents() -> None:
     assert document.add[0].alternative_id == "spectral_yaml_tag"
 
 
+def test_machine_mutation_yaml_accepts_stringified_parent_lists() -> None:
+    document = MutationDocument.from_yaml(
+        "\n".join(
+            [
+                'rationale: "stringified list fields from an LLM"',
+                "hypotheses:",
+                "  []",
+                "nodes:",
+                "  []",
+                "remove:",
+                "  []",
+                "globals:",
+                "  []",
+                "add:",
+                '  - kind: "add_alternative"',
+                '    target_node: "shape_stats"',
+                '    alternative_id: "spectral_stringified_parents"',
+                '    primitive: "spectral_basic"',
+                '    parents: "[\'series\']"',
+            ]
+        )
+    )
+
+    assert document.add[0].parents == ("series",)
+
+
 def test_paper_style_lambda_mutation_yaml_is_supported() -> None:
     document = MutationDocument.from_yaml(
         "\n".join(
@@ -772,6 +798,21 @@ def test_paper_style_source_object_preserves_contracts_and_node_kind() -> None:
     assert spec.node_kind == "output"
     assert spec.output_contract == {"type": "feature_block", "n_columns": 1}
     assert spec.torch_source.startswith("lambda ctx, values:")
+
+
+def test_paper_style_source_object_accepts_stringified_parent_lists() -> None:
+    document = MutationDocument.from_yaml(
+        "\n".join(
+            [
+                "add:",
+                "  output:",
+                '    - {"source": "lambda ctx, values: FeatureBlock(values[\'segment_stats\'].values[:, :1], [\'first_value\'])", "parents": "[\'segment_stats\']", "global_refs": "[\'gate_scale\']", "node_kind": "output"}',
+            ]
+        )
+    )
+
+    assert document.add[0].parents == ("segment_stats",)
+    assert document.add[0].global_refs == ("gate_scale",)
 
 
 def test_source_output_contract_rejects_wrong_shape() -> None:
