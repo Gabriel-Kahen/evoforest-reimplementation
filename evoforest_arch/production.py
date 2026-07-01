@@ -1557,8 +1557,16 @@ class ProductionEvolutionRunner:
                         execution_errors="\n".join(context.state.errors[-8:]),
                     )
                 except Exception as exc:
-                    job.emit("failed", phase="proposal", error=loop._format_exception(exc))
-                    raise
+                    error = loop._format_exception(exc)
+                    job.emit("failed", phase="proposal", error=error)
+                    event = self._failed_event(context, step, {"proposal_failed": True}, error)
+                    context.state.step = step
+                    context.state.rng_state = loop.rng.bit_generator.state
+                    self._record_event(context.state, event)
+                    _write_jsonl_row(events, event)
+                    self._write_state(context.run_dir, context.state)
+                    self._write_memorandum(context, loop=loop)
+                    continue
                 finally:
                     loop._write_prompt_records(context.run_dir, step)
                 loop._write_mutation_document(context.run_dir, step, document)

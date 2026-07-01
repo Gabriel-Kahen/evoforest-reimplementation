@@ -330,6 +330,33 @@ def test_candidate_rss_guard_fails_candidate_and_persists_progress(tmp_path) -> 
     assert jobs[-1]["status"] == "failed"
 
 
+def test_production_records_proposal_parse_failure_and_continues(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("EVOFOREST_LLM_PARSE_MAX_RETRIES", "0")
+    config = small_config(tmp_path, steps=1, seed=44)
+    client = StaticLLMClient(
+        (
+            "Hypothesis: Try malformed mutation output.\nRationale: Exercise proposal containment.\nExpected Improvement: none.\nRisk Mode: Risky.",
+            "add:\n  - not-a-mapping",
+        )
+    )
+
+    summary = ProductionEvolutionRunner(
+        config,
+        scientist=LLMScientistAgent(client),
+        engineer=LLMEngineerAgent(client),
+    ).run()
+    run_dir = config.output_dir
+    events = read_jsonl(run_dir / "events.jsonl")
+    jobs = read_jsonl(run_dir / "jobs.jsonl")
+
+    assert summary["step"] == 1
+    assert events[-1]["failed"] is True
+    assert events[-1]["mutation"] == {"proposal_failed": True}
+    assert "section 'add' item 0 must be a mapping" in events[-1]["error"]
+    assert jobs[-1]["status"] == "failed"
+    assert jobs[-1]["phase"] == "proposal"
+
+
 def test_export_inspect_and_recheck_keep_test_explicit(tmp_path) -> None:
     config = small_config(tmp_path, steps=1, seed=43)
     ProductionEvolutionRunner(config).run()

@@ -141,7 +141,7 @@ class MutationDocument:
                 output_contract=dict(row.get("output_contract", {})) if isinstance(row.get("output_contract", {}), dict) else {},
                 torch_source=str(row.get("torch_source", "")),
             )
-            for row in data.get("add", [])
+            for row in _mapping_rows(data.get("add", []), "add")
         )
         nodes = tuple(
             NodeSpec(
@@ -149,7 +149,7 @@ class MutationDocument:
                 kind=str(row["kind"]),
                 description=str(row.get("description", "")),
             )
-            for row in data.get("nodes", [])
+            for row in _mapping_rows(data.get("nodes", []), "nodes")
         )
         remove = tuple(
             RemoveSpec(
@@ -157,19 +157,19 @@ class MutationDocument:
                 alternative_id=str(row["alternative_id"]),
                 reason=str(row.get("reason", "")),
             )
-            for row in data.get("remove", [])
+            for row in _mapping_rows(data.get("remove", []), "remove")
         )
         globals_ = tuple(
             GlobalSpec(
                 name=str(row["name"]),
-                value=[float(value) for value in row.get("value", [])],
-                trainable=bool(row.get("trainable", True)),
+                value=_coerce_float_list(row.get("value", [])),
+                trainable=_coerce_bool(row.get("trainable", True)),
                 description=str(row.get("description", "")),
             )
-            for row in data.get("globals", [])
+            for row in _mapping_rows(data.get("globals", []), "globals")
         )
         return cls(
-            hypotheses=tuple(str(item) for item in data.get("hypotheses", [])),
+            hypotheses=_coerce_string_tuple(data.get("hypotheses", [])),
             rationale=str(data.get("rationale", "")),
             nodes=nodes,
             add=add,
@@ -453,6 +453,51 @@ def _coerce_string_tuple(value: object) -> tuple[str, ...]:
     if isinstance(value, (list, tuple)):
         return tuple(str(item) for item in value)
     return (str(value),)
+
+
+def _coerce_float_list(value: object) -> list[float]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return []
+        if len(stripped) >= 2 and stripped[0] in {"[", "("} and stripped[-1] in {"]", ")"}:
+            try:
+                parsed = ast.literal_eval(stripped)
+            except (SyntaxError, ValueError):
+                pass
+            else:
+                return _coerce_float_list(parsed)
+        return [float(stripped)]
+    if isinstance(value, (list, tuple)):
+        return [float(item) for item in value]
+    return [float(value)]
+
+
+def _coerce_bool(value: object) -> bool:
+    if isinstance(value, str):
+        stripped = value.strip().lower()
+        if stripped in {"false", "no", "0", "off"}:
+            return False
+        if stripped in {"true", "yes", "1", "on"}:
+            return True
+    return bool(value)
+
+
+def _mapping_rows(value: object, section: str) -> tuple[dict[str, object], ...]:
+    if value is None:
+        return ()
+    if isinstance(value, dict):
+        return (value,)
+    if not isinstance(value, list):
+        raise ValueError(f"Mutation YAML section {section!r} must be a list of mappings.")
+    rows: list[dict[str, object]] = []
+    for index, row in enumerate(value):
+        if not isinstance(row, dict):
+            raise ValueError(f"Mutation YAML section {section!r} item {index} must be a mapping, got {type(row).__name__}.")
+        rows.append(row)
+    return tuple(rows)
 
 
 def _paper_source_payload(item: str) -> dict[str, object]:

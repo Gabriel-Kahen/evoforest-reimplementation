@@ -746,7 +746,9 @@ def test_machine_mutation_yaml_accepts_stringified_parent_lists() -> None:
                 "remove:",
                 "  []",
                 "globals:",
-                "  []",
+                '  - name: "stringified_scale"',
+                '    value: "[0.25]"',
+                '    trainable: "false"',
                 "add:",
                 '  - kind: "add_alternative"',
                 '    target_node: "shape_stats"',
@@ -758,6 +760,29 @@ def test_machine_mutation_yaml_accepts_stringified_parent_lists() -> None:
     )
 
     assert document.add[0].parents == ("series",)
+    assert document.globals[0].value == [0.25]
+    assert document.globals[0].trainable is False
+
+
+def test_machine_mutation_yaml_reports_non_mapping_rows() -> None:
+    with pytest.raises(ValueError, match="section 'add' item 0 must be a mapping"):
+        MutationDocument.from_yaml(
+            "\n".join(
+                [
+                    'rationale: "bad rows"',
+                    "hypotheses:",
+                    "  []",
+                    "nodes:",
+                    "  []",
+                    "remove:",
+                    "  []",
+                    "globals:",
+                    "  []",
+                    "add:",
+                    "  - not-a-mapping",
+                ]
+            )
+        )
 
 
 def test_paper_style_lambda_mutation_yaml_is_supported() -> None:
