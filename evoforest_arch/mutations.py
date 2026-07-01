@@ -5,6 +5,8 @@ from dataclasses import dataclass, field
 import hashlib
 import json
 
+import numpy as np
+
 from evoforest_arch.graph import Graph
 from evoforest_arch.maintenance import GraphMaintenance, MaintenanceReport
 from evoforest_arch.primitives import PrimitiveRegistry
@@ -312,9 +314,34 @@ class MutationEngine:
             )
         else:
             alternative = self.registry.build(spec.primitive, spec.alternative_id, spec.parents)
+            self._ensure_registry_globals(graph, alternative.global_refs)
         if spec.description:
             alternative.description = spec.description
         graph.nodes[spec.target_node].add_alternative(alternative)
+
+    @staticmethod
+    def _ensure_registry_globals(graph: Graph, global_refs: tuple[str, ...]) -> None:
+        existing = set(graph.globals.names())
+        for name in global_refs:
+            if name in existing:
+                continue
+            if name == "gate_scale":
+                graph.globals.add(name, [1.0], trainable=True, description="Shared scale for callable gate families.")
+            elif name == "projection_vector":
+                graph.globals.add(
+                    name,
+                    np.linspace(0.2, 1.0, 16),
+                    trainable=True,
+                    description="Low-dimensional global vector used by projection outputs.",
+                )
+            elif name == "residual_huber_scale":
+                graph.globals.add(
+                    name,
+                    [1.0],
+                    trainable=False,
+                    description="Shared threshold for residual-based Ridge reweighting.",
+                )
+            existing.add(name)
 
     @staticmethod
     def _apply_node(graph: Graph, spec: NodeSpec) -> None:

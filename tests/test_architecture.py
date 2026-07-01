@@ -565,6 +565,29 @@ def test_mutation_engine_adds_alternative_without_mutating_parent_graph() -> Non
     assert len(output_mutated.nodes["output"].alternatives) == len(graph.nodes["output"].alternatives) + 1
 
 
+def test_registry_primitive_reintroduces_pruned_required_global() -> None:
+    graph = build_structural_break_seed_graph()
+    pruned = MutationEngine().apply_document(
+        graph,
+        MutationDocument(remove=(RemoveSpec("output", "projection", "test pruning"),)),
+    ).graph
+    assert "projection_vector" not in pruned.globals.names()
+
+    restored = MutationEngine().apply(
+        pruned,
+        MutationSpec(
+            kind="add_alternative",
+            target_node="output",
+            primitive="projection_outputs",
+            alternative_id="projection_restored",
+            parents=("segment_stats", "trend_stats", "shape_stats"),
+            description="Reintroduce a projection after maintenance pruned its global.",
+        ),
+    )
+    assert "projection_vector" in restored.globals.names()
+    assert any(alternative.id == "projection_restored" for alternative in restored.nodes["output"].alternatives)
+
+
 def test_mutation_document_round_trip_and_maintenance() -> None:
     graph = build_structural_break_seed_graph()
     document = MutationDocument(
