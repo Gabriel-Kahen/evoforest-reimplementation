@@ -436,6 +436,7 @@ class PromptBuilder:
                 "The @globals store contains persistent trainable parameters. New globals are append-only at mutation time; unused globals may be pruned by maintenance.",
                 "TOON diagnostics include exact additive Ridge contribution fields: shap is the normalized global linear contribution, and cv_shap is the out-of-fold contribution magnitude.",
                 "Prefer complementary features, productive bottleneck expansion, useful callable reuse, and removal of redundant or dead structure.",
+                "Avoid repeating rejected mutation signatures from the outcome history unless the target, parent set, primitive, or rationale is materially different.",
                 "Respect DAG validity and computational cost. Adding intermediate alternatives multiplies configurations; adding output alternatives increases feature count.",
             ]
         )

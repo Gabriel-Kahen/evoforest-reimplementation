@@ -669,6 +669,46 @@ def test_paper_profile_promotion_uses_cv_score_not_validation_gate(tmp_path) -> 
     assert runner._promotes(dummy_result(0.51), dummy_result(0.1), context) is True
 
 
+def test_production_history_records_mutation_signature() -> None:
+    state = RunState(
+        run_id="dummy",
+        step=7,
+        archive_version=0,
+        best_train_score=-20.0,
+        best_validation_score=-21.0,
+        best_config={},
+        current_graph_path="current_graph.json",
+        best_graph_path="best_graph.json",
+        rng_state={},
+    )
+    mutation = MutationDocument(
+        rationale="Repeated projection should be visible to the next prompt.",
+        add=(
+            MutationSpec(
+                kind="add_alternative",
+                target_node="output",
+                primitive="projection_outputs",
+                alternative_id="proj_again",
+                parents=("features",),
+            ),
+        ),
+    ).to_dict()
+
+    ProductionEvolutionRunner._record_event(
+        state,
+        {
+            "step": 7,
+            "accepted": False,
+            "train_score": -20.5,
+            "validation_score": -21.2,
+            "best_validation_score": -21.0,
+            "mutation": mutation,
+        },
+    )
+
+    assert "mutation=add:output.proj_again:projection_outputs(features)" in state.history[-1]
+
+
 def test_production_islands_require_async_mode(tmp_path) -> None:
     config = small_config(tmp_path, steps=1, islands=2, async_islands=False)
 

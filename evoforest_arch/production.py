@@ -61,6 +61,12 @@ def _is_candidate_guard_error(error: str | None) -> bool:
     return bool(error and "CandidateGuardError" in error)
 
 
+def _dict_rows(value: object) -> tuple[dict[str, object], ...]:
+    if not isinstance(value, list):
+        return ()
+    return tuple(row for row in value if isinstance(row, dict))
+
+
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -2762,14 +2768,43 @@ class ProductionEvolutionRunner:
         validation = event.get("validation_score")
         train_text = "n/a" if train is None else f"{float(train):.6f}"
         validation_text = "n/a" if validation is None else f"{float(validation):.6f}"
+        mutation_text = ProductionEvolutionRunner._summarize_mutation(event.get("mutation"))
         state.history.append(
             f"- {status}: step={int(event['step'])} train={train_text} validation={validation_text} "
-            f"best_validation={float(event['best_validation_score']):.6f}"
+            f"best_validation={float(event['best_validation_score']):.6f} {mutation_text}"
         )
         del state.history[:-40]
         if event.get("failed"):
-            state.errors.append(f"- step={int(event['step'])}: {event.get('error', '')}")
+            state.errors.append(f"- step={int(event['step'])}: {event.get('error', '')} {mutation_text}")
             del state.errors[:-40]
+
+    @staticmethod
+    def _summarize_mutation(mutation: object) -> str:
+        if not isinstance(mutation, dict):
+            return "mutation=unknown"
+        pieces: list[str] = []
+        for row in _dict_rows(mutation.get("add")):
+            target = str(row.get("target_node", "?"))
+            alternative = str(row.get("alternative_id", "?"))
+            primitive = str(row.get("primitive") or ("source" if row.get("source") else "?"))
+            parents = row.get("parents", [])
+            parent_text = ""
+            if isinstance(parents, list):
+                shown = ",".join(str(parent) for parent in parents[:3])
+                suffix = ",..." if len(parents) > 3 else ""
+                parent_text = f"({shown}{suffix})"
+            pieces.append(f"add:{target}.{alternative}:{primitive}{parent_text}")
+        for row in _dict_rows(mutation.get("remove")):
+            pieces.append(f"remove:{row.get('target_node', '?')}.{row.get('alternative_id', '?')}")
+        for row in _dict_rows(mutation.get("nodes")):
+            pieces.append(f"node:{row.get('name', '?')}:{row.get('kind', '?')}")
+        for row in _dict_rows(mutation.get("globals")):
+            pieces.append(f"global:{row.get('name', '?')}")
+        if not pieces:
+            rationale = str(mutation.get("rationale", "")).strip()
+            if rationale:
+                pieces.append(f"rationale:{rationale[:80]}")
+        return "mutation=" + (";".join(pieces[:6]) if pieces else "empty")
 
     @staticmethod
     def _read_state(run_dir: pathlib.Path) -> RunState:

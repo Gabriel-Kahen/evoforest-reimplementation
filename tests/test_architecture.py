@@ -1551,7 +1551,7 @@ def test_prompt_builder_advertises_source_schema_only_when_enabled() -> None:
     graph = build_structural_break_seed_graph()
     result = RidgeEvaluator(n_splits=3, seed=24, max_configurations=4).evaluate(graph, dataset.inputs(), dataset.y)
     hypothesis = ScientistAgent().generate(graph, result, max_hypotheses=1)
-    _system, source_user = PromptBuilder(allow_source=True).engineer_prompts(graph, result, hypothesis)
+    source_system, source_user = PromptBuilder(allow_source=True).engineer_prompts(graph, result, hypothesis)
     _system, primitive_user = PromptBuilder(allow_source=False).engineer_prompts(graph, result, hypothesis)
     assert '"source": "lambda ctx, values:' in source_user
     assert 'add:\n  output:\n    - "lambda ctx, values:' in source_user
@@ -1559,6 +1559,7 @@ def test_prompt_builder_advertises_source_schema_only_when_enabled() -> None:
     assert '"torch_source": "lambda ctx, values:' in source_user
     assert "infer parents" in source_user
     assert "Prefer registry-backed primitives" in source_user
+    assert "Avoid repeating rejected mutation signatures" in source_system
     assert "Never emit multiline code" in source_user
     assert "usually one add/remove" in source_user
     assert '"source": "lambda ctx, values:' not in primitive_user
