@@ -207,14 +207,15 @@ class RidgeEvaluator:
         else:
             configs, total_configurations = self._configuration_candidates(working_graph)
             best: EvaluationResult | None = None
+            best_feature_signature: tuple[object, ...] | None = None
             config_rows: list[dict[str, object]] = []
-            feature_pool: list[tuple[np.ndarray | None, list[str]]] = []
-            last_feature_signature: tuple[object, ...] | None = None
-            last_feature_result: tuple[np.ndarray, list[str]] | None = None
+            feature_pool_by_signature: dict[tuple[object, ...], tuple[np.ndarray | None, list[str]]] = {}
+            feature_results_by_signature: dict[tuple[object, ...], tuple[np.ndarray, list[str]]] = {}
+            scoring_diagnostics_mode = "basic" if self.diagnostics_mode == "full" else self.diagnostics_mode
             for candidate_config in configs:
                 config_index = len(config_rows) + 1
                 feature_signature = self._feature_signature(working_graph, candidate_config)
-                precomputed_features = last_feature_result if feature_signature == last_feature_signature else None
+                precomputed_features = feature_results_by_signature.get(feature_signature)
                 if precomputed_features is not None:
                     feature_matrix_reuse_hits += 1
                 result = self._evaluate_single_config(
@@ -226,6 +227,7 @@ class RidgeEvaluator:
                     precomputed_features=precomputed_features,
                     folds=folds,
                     fold_diagnostics=fold_diagnostics,
+                    diagnostics_mode=scoring_diagnostics_mode,
                     progress_context={
                         "config_index": config_index,
                         "configurations_evaluated": config_index,
@@ -234,10 +236,9 @@ class RidgeEvaluator:
                     },
                 )
                 if result.feature_matrix is not None:
-                    last_feature_signature = feature_signature
-                    last_feature_result = (result.feature_matrix, result.feature_names)
+                    feature_results_by_signature[feature_signature] = (result.feature_matrix, result.feature_names)
                 if self.feature_pool_diagnostics:
-                    feature_pool.append((result.feature_matrix, result.feature_names))
+                    feature_pool_by_signature.setdefault(feature_signature, (result.feature_matrix, result.feature_names))
                 cache_row = result.diagnostics.get("cache", {})
                 if isinstance(cache_row, dict):
                     search_cache_hits += int(cache_row.get("hits", 0))
@@ -265,10 +266,47 @@ class RidgeEvaluator:
                 )
                 if best is None or result.score > best.score:
                     best = result
+                    best_feature_signature = feature_signature
             if best is None:
                 raise ValueError("No graph configurations were available for evaluation.")
-            result = best
+            if self.diagnostics_mode == "full":
+                result = self._evaluate_single_config(
+                    working_graph,
+                    inputs,
+                    y,
+                    best.config,
+                    shared_cache,
+                    precomputed_features=(
+                        feature_results_by_signature.get(best_feature_signature)
+                        if best_feature_signature is not None
+                        else None
+                    ),
+                    folds=folds,
+                    fold_diagnostics=fold_diagnostics,
+                    diagnostics_mode="full",
+                    progress_context={
+                        "phase_detail": "winner_diagnostics",
+                        "config_index": len(config_rows),
+                        "configurations_evaluated": len(config_rows),
+                        "configurations_limit": len(configs),
+                        "configurations_total": total_configurations,
+                    },
+                )
+                result.diagnostics["evaluation_passes"] = {
+                    "configuration_scoring": "basic",
+                    "winner_diagnostics": "full",
+                    "winner_rerun": True,
+                }
+            else:
+                result = best
+                result.diagnostics["evaluation_passes"] = {
+                    "configuration_scoring": "basic",
+                    "winner_diagnostics": "basic",
+                    "winner_rerun": False,
+                }
+            feature_pool = list(feature_pool_by_signature.values())
             result.diagnostics["configuration_search"] = self._configuration_search_diagnostics(config_rows, total_configurations)
+            result.diagnostics["configuration_search"]["unique_feature_matrices"] = len(feature_results_by_signature)
         search_cache = {
             "hits": int(search_cache_hits),
             "misses": int(search_cache_misses),
@@ -315,8 +353,10 @@ class RidgeEvaluator:
         folds: list[tuple[np.ndarray, np.ndarray]] | None = None,
         fold_diagnostics: dict[str, object] | None = None,
         progress_context: dict[str, Any] | None = None,
+        diagnostics_mode: str | None = None,
     ) -> EvaluationResult:
         progress_context = dict(progress_context or {})
+        resolved_diagnostics_mode = diagnostics_mode or self.diagnostics_mode
         if precomputed_features is None:
             x, names, ctx = graph.evaluate_features(inputs, config=config, cache=shared_cache)
             feature_matrix_reused = False
@@ -335,7 +375,7 @@ class RidgeEvaluator:
         )
         sample_weight, residual_rule, fitting_diagnostics = self._evaluate_fitting_rules(graph, inputs, y, config, ctx)
         preds = np.zeros_like(y, dtype=np.float64)
-        collect_full_diagnostics = self.diagnostics_mode == "full"
+        collect_full_diagnostics = resolved_diagnostics_mode == "full"
         fold_abs_contribution_sum = np.zeros(x.shape[1], dtype=np.float64) if collect_full_diagnostics else None
         cv_reconstructed = np.zeros_like(y, dtype=np.float64) if collect_full_diagnostics else None
         alphas: list[float] = []
@@ -388,7 +428,7 @@ class RidgeEvaluator:
             )
         score = float(np.mean(fold_scores)) if fold_scores else _score_and_raw(self.scorer, y, preds)[0]
         selected_alternatives = graph.selected_alternatives(config)
-        if self.diagnostics_mode == "full":
+        if resolved_diagnostics_mode == "full":
             assert fold_abs_contribution_sum is not None
             assert cv_reconstructed is not None
             feature_dependencies = feature_dependency_rows(names, graph.output_dependency_map(config))
@@ -465,13 +505,14 @@ class RidgeEvaluator:
         matrices = [matrix for matrix, _names in feature_pool if matrix is not None and matrix.size]
         if not matrices:
             return
+        n_configurations = len(matrices)
         n_feature_names = sum(len(names_) for _matrix, names_ in feature_pool)
         x_pool = matrices[0] if len(matrices) == 1 else np.column_stack(matrices)
         feature_pool.clear()
         matrices.clear()
         pool_fit = self._fit_global_diagnostic_model(x_pool, y, None, None)
         result.diagnostics["valid_feature_pool"] = {
-            "n_configurations": int(len(matrices)),
+            "n_configurations": int(n_configurations),
             "n_features": int(x_pool.shape[1]),
             "n_feature_names": int(n_feature_names),
         }
