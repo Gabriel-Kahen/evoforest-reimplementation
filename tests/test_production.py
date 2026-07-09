@@ -579,6 +579,7 @@ def test_paper_profile_constructor_encodes_long_run_contract(tmp_path) -> None:
     assert config.island_workers == 4
     assert config.island_devices == PAPER_GPU_DEVICES
     assert config.max_configurations == 64
+    assert config.screening_finalists == 16
     assert config.refine_globals is True
     assert config.refine_backend == "torch"
     assert config.promotion_policy == CV_SCORE_PROMOTION_POLICY
@@ -614,6 +615,7 @@ def test_cli_paper_profile_writes_paper_manifest_without_long_run(tmp_path) -> N
     assert manifest["profile_spec"]["target_steps"] == 600
     assert manifest["profile_spec"]["promotion_metric"] == "train_cv_score"
     assert manifest["evaluator"]["max_configurations"] == 64
+    assert manifest["evaluator"]["screening_finalists"] == 16
     assert manifest["evaluator"]["refine_backend"] == "torch"
     assert manifest["evaluator"]["refine_globals"] is False
     assert manifest["acceptance"]["policy"] == "paper_cv_score_improvement"

@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import argparse
+import time
 import urllib.error
 
 import numpy as np
@@ -634,6 +635,91 @@ def test_feature_pool_contains_each_unique_matrix_once() -> None:
     search = result.diagnostics["configuration_search"]
     assert result.diagnostics["valid_feature_pool"]["n_configurations"] == search["unique_feature_matrices"]
     assert result.diagnostics["valid_feature_pool"]["n_configurations"] < search["evaluated"]
+
+
+def test_capped_configuration_planner_is_seed_independent_and_covers_alternatives() -> None:
+    graph = build_structural_break_seed_graph()
+    first, total = RidgeEvaluator(seed=1, max_configurations=8)._configuration_candidates(graph)
+    second, second_total = RidgeEvaluator(seed=999, max_configurations=8)._configuration_candidates(graph)
+
+    assert first == second
+    assert total == second_total
+    assert len(first) == 8
+    assert first[0] == graph.default_config()
+    for node_name, alternatives in graph.configuration_space().items():
+        assert {config[node_name] for config in first} == set(alternatives)
+
+
+def test_staged_configuration_screening_uses_exact_cv_for_final_selection() -> None:
+    dataset = make_structural_break_data(n_series=72, length=70, seed=45)
+    evaluator = RidgeEvaluator(
+        n_splits=3,
+        seed=45,
+        max_configurations=64,
+        screening_finalists=5,
+        refine_globals=False,
+        diagnostics_mode="basic",
+        feature_pool_diagnostics=False,
+    )
+    result = evaluator.evaluate(build_structural_break_seed_graph(), dataset.inputs(), dataset.y)
+    search = result.diagnostics["configuration_search"]
+
+    assert search["planned"] == search["total"] == 48
+    assert search["evaluated"] == 5
+    assert search["capped"] is True
+    assert search["planner_capped"] is False
+    assert search["screening_capped"] is True
+    assert search["planner"]["method"] == "deterministic_exhaustive"
+    assert search["planner"]["coverage_fraction"] == 1.0
+    assert search["screening"]["enabled"] is True
+    assert search["screening"]["approximate"] is True
+    assert search["screening"]["screened"] == 48
+    assert search["screening"]["finalists"] == 5
+    assert search["screening"]["winner_selected_by_exact_cv"] is True
+    assert search["screening"]["full_plan_exact_best_recall_guaranteed"] is False
+    assert search["screening"]["winner_config"] == result.config
+    assert search["best_config_score"] == result.score
+    assert search["top_configs"][0]["config"] == result.config
+
+    repeated = evaluator.evaluate(build_structural_break_seed_graph(), dataset.inputs(), dataset.y)
+    assert repeated.config == result.config
+    assert repeated.score == result.score
+    repeated_screening = dict(repeated.diagnostics["configuration_search"]["screening"])
+    first_screening = dict(search["screening"])
+    repeated_screening.pop("cache_entries_added")
+    first_screening.pop("cache_entries_added")
+    assert repeated_screening == first_screening
+
+
+def test_single_screening_finalist_keeps_the_approximate_winner() -> None:
+    graph = build_structural_break_seed_graph()
+    evaluator = RidgeEvaluator(screening_finalists=1)
+    configs, _total = evaluator._configuration_candidates(graph)
+    default = graph.default_config()
+    challenger = next(config for config in configs if config != default)
+    rows = [
+        {"config": default, "approximate_score": 0.0, "planner_index": 0},
+        {"config": challenger, "approximate_score": 1.0, "planner_index": 1},
+    ]
+
+    assert evaluator._screening_finalists(graph, [default, challenger], rows) == [challenger]
+
+
+def test_large_configuration_plan_avoids_quadratic_distance_rescans() -> None:
+    class PlannerGraph:
+        @staticmethod
+        def configuration_space() -> dict[str, list[str]]:
+            return {f"axis_{axis}": [f"alternative_{index}" for index in range(10)] for axis in range(8)}
+
+        def default_config(self) -> dict[str, str]:
+            return {key: values[0] for key, values in self.configuration_space().items()}
+
+    started = time.monotonic()
+    configs, total = RidgeEvaluator(max_configurations=128)._configuration_candidates(PlannerGraph())  # type: ignore[arg-type]
+
+    assert len(configs) == 128
+    assert total == 100_000_000
+    assert time.monotonic() - started < 3.0
 
 
 def test_configuration_search_reuses_fold_assignments() -> None:

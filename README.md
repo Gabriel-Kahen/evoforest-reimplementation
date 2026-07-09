@@ -19,7 +19,12 @@ The implementation focuses on the reusable system design:
 - A single output node whose alternatives are all evaluated as ensemble features.
 - Fitting nodes (`ridge_w`, `ridge_g`) that alter sample weighting and iterative
   residual reweighting.
-- A Ridge-based cross-validation evaluator with capped configuration search.
+- A Ridge-based cross-validation evaluator with deterministic coverage-aware capped
+  configuration planning. Large plans use a clearly labeled, single-fold fixed-alpha
+  approximate screen; only finalists enter the unchanged exact CV scorer, and the
+  selected winner always passes that exact gate. Screening can exclude the true
+  full-plan exact-CV optimum, so selection is exact among finalists rather than an
+  exhaustive optimality guarantee.
 - Task-aware fold strategies: random, grouped random, leave-group-out style
   grouped folds, stratified target folds, and time-blocked folds.
 - Objective-aware scoring with raw metric direction preserved for lower-is-better

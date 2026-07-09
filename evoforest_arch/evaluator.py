@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from itertools import product
+import math
 import time
 from typing import Any, Callable
 
@@ -10,7 +11,7 @@ import numpy as np
 from evoforest_arch.evaluation_cache import PersistentEvaluationCache, fingerprint_inputs
 from evoforest_arch.graph import EvalContext, Graph, ResidualWeightRule
 from evoforest_arch.metrics import DEFAULT_SCORER, FoldStrategy, ScoreFunction, TaskScorer, coerce_fold_strategy, coerce_scorer, safe_corr
-from evoforest_arch.readout import DEFAULT_ALPHAS, RidgeModel, Standardizer, combine_sample_weights, normalize_sample_weight, select_alpha_and_fit_ridge
+from evoforest_arch.readout import DEFAULT_ALPHAS, RidgeModel, Standardizer, combine_sample_weights, fit_ridge, normalize_sample_weight, select_alpha_and_fit_ridge
 from evoforest_arch.task import TaskSchema
 
 
@@ -98,6 +99,7 @@ class RidgeEvaluator:
         seed: int = 0,
         alphas: np.ndarray = DEFAULT_ALPHAS,
         max_configurations: int = 64,
+        screening_finalists: int = 16,
         refine_globals: bool = True,
         refine_steps: int = 20,
         refine_backend: str = "auto",
@@ -121,6 +123,7 @@ class RidgeEvaluator:
         self.seed = int(seed)
         self.alphas = np.asarray(alphas, dtype=np.float64)
         self.max_configurations = max(1, int(max_configurations))
+        self.screening_finalists = max(1, int(screening_finalists))
         self.refine_globals = bool(refine_globals)
         self.refine_steps = int(refine_steps)
         self.refine_backend = refine_backend
@@ -223,9 +226,53 @@ class RidgeEvaluator:
             result.diagnostics["configuration_search"] = self._configuration_search_diagnostics(
                 [{"score": result.score, "config": result.config, "n_features": len(result.feature_names)}],
                 total_configurations=1,
+                planned_configurations=1,
             )
+            result.diagnostics["configuration_search"]["planner"] = {
+                "method": "fixed_configuration",
+                "deterministic": True,
+                "planned": 1,
+            }
+            result.diagnostics["configuration_search"]["screening"] = {
+                "enabled": False,
+                "approximate": False,
+                "screened": 0,
+                "finalists": 1,
+                "winner_selected_by_exact_cv": True,
+                "full_plan_exact_best_recall_guaranteed": True,
+            }
         else:
             configs, total_configurations = self._configuration_candidates(working_graph)
+            planner_diagnostics = self._configuration_planner_diagnostics(working_graph, configs, total_configurations)
+            screening_rows: list[dict[str, object]] = []
+            exact_configs = configs
+            screening_enabled = len(configs) > self.screening_finalists
+            screening_cache_entries_before = len(shared_cache)
+            if screening_enabled:
+                for planner_index, candidate_config in enumerate(configs):
+                    row = self._screen_single_config(
+                        working_graph,
+                        inputs,
+                        y,
+                        candidate_config,
+                        shared_cache,
+                        folds,
+                        cache_namespace=dataset_fingerprint,
+                    )
+                    row["planner_index"] = int(planner_index)
+                    screening_rows.append(row)
+                    self._emit_progress(
+                        {
+                            "phase": "configuration_screened",
+                            "config_index": int(planner_index + 1),
+                            "configurations_screened": int(planner_index + 1),
+                            "configurations_limit": len(configs),
+                            "configurations_total": total_configurations,
+                            "approximate_score": float(row["approximate_score"]),
+                            "elapsed_seconds": time.monotonic() - started_at,
+                        }
+                    )
+                exact_configs = self._screening_finalists(working_graph, configs, screening_rows)
             best: EvaluationResult | None = None
             best_feature_result: tuple[np.ndarray, list[str]] | None = None
             config_rows: list[dict[str, object]] = []
@@ -236,7 +283,7 @@ class RidgeEvaluator:
             seen_feature_signatures: set[tuple[object, ...]] = set()
             last_feature_signature: tuple[object, ...] | None = None
             last_feature_result: tuple[np.ndarray, list[str]] | None = None
-            for candidate_config in configs:
+            for candidate_config in exact_configs:
                 config_index = len(config_rows) + 1
                 feature_signature = self._feature_signature(working_graph, candidate_config)
                 seen_feature_signatures.add(feature_signature)
@@ -261,7 +308,7 @@ class RidgeEvaluator:
                     progress_context={
                         "config_index": config_index,
                         "configurations_evaluated": config_index,
-                        "configurations_limit": len(configs),
+                        "configurations_limit": len(exact_configs),
                         "configurations_total": total_configurations,
                     },
                 )
@@ -290,7 +337,7 @@ class RidgeEvaluator:
                         "phase": "configuration_evaluated",
                         "config_index": config_index,
                         "configurations_evaluated": config_index,
-                        "configurations_limit": len(configs),
+                        "configurations_limit": len(exact_configs),
                         "configurations_total": total_configurations,
                         "score": float(result.score),
                         "n_features": len(result.feature_names),
@@ -318,7 +365,7 @@ class RidgeEvaluator:
                         "phase_detail": "winner_diagnostics",
                         "config_index": len(config_rows),
                         "configurations_evaluated": len(config_rows),
-                        "configurations_limit": len(configs),
+                        "configurations_limit": len(exact_configs),
                         "configurations_total": total_configurations,
                     },
                 )
@@ -346,8 +393,36 @@ class RidgeEvaluator:
                     "winner_rerun": False,
                 }
             feature_pool = list(feature_pool_by_signature.values())
-            result.diagnostics["configuration_search"] = self._configuration_search_diagnostics(config_rows, total_configurations)
+            result.diagnostics["configuration_search"] = self._configuration_search_diagnostics(
+                config_rows,
+                total_configurations,
+                planned_configurations=len(configs),
+            )
             result.diagnostics["configuration_search"]["unique_feature_matrices"] = len(seen_feature_signatures)
+            result.diagnostics["configuration_search"]["planner"] = planner_diagnostics
+            result.diagnostics["configuration_search"]["screening"] = {
+                "enabled": bool(screening_enabled),
+                "approximate": bool(screening_enabled),
+                "method": "single_fold_fixed_alpha" if screening_enabled else "not_needed",
+                "omits": ["remaining_cv_folds", "alpha_selection", "ridge_g_irls"] if screening_enabled else [],
+                "screened": len(screening_rows),
+                "finalists": len(exact_configs),
+                "finalist_limit": int(self.screening_finalists),
+                "cache_entries_added": int(len(shared_cache) - screening_cache_entries_before),
+                "winner_selected_by_exact_cv": True,
+                "full_plan_exact_best_recall_guaranteed": not screening_enabled,
+                "winner_config": dict(result.config),
+                "top_approximate": [
+                    {
+                        "approximate_score": float(row["approximate_score"]),
+                        "config": row["config"],
+                    }
+                    for row in sorted(
+                        screening_rows,
+                        key=lambda row: (-float(row["approximate_score"]), int(row["planner_index"])),
+                    )[:8]
+                ],
+            }
         search_cache = {
             "hits": int(search_cache_hits),
             "misses": int(search_cache_misses),
@@ -651,33 +726,193 @@ class RidgeEvaluator:
         keys = sorted(space)
         if not keys:
             return [{}], 1
-        total = int(np.prod([len(space[key]) for key in keys]))
+        total = math.prod(len(space[key]) for key in keys)
         if total <= self.max_configurations:
             return [dict(zip(keys, values, strict=True)) for values in product(*(space[key] for key in keys))], total
 
-        rng = np.random.default_rng(self.seed)
+        limit = min(self.max_configurations, total)
         default = graph.default_config()
-        configs = [default]
-        seen = {tuple(default[key] for key in keys)}
-        while len(configs) < self.max_configurations:
-            candidate = {key: str(rng.choice(space[key])) for key in keys}
+        configs: list[dict[str, str]] = []
+        seen: set[tuple[str, ...]] = set()
+
+        def append(candidate: dict[str, str]) -> None:
             signature = tuple(candidate[key] for key in keys)
-            if signature in seen:
-                continue
-            seen.add(signature)
-            configs.append(candidate)
+            if signature not in seen and len(configs) < limit:
+                seen.add(signature)
+                configs.append(candidate)
+
+        append(default)
+        # The first coverage slot changes every available axis, which gives small
+        # budgets a genuinely different configuration while covering one alternative
+        # per axis. Higher-cardinality tails are then introduced one axis at a time,
+        # keeping the early plan stable when another axis merely appends an option.
+        append({key: space[key][1] if len(space[key]) > 1 else default[key] for key in keys})
+        for offset in range(2, max(len(space[key]) for key in keys)):
+            for key in keys:
+                if offset >= len(space[key]):
+                    continue
+                candidate = dict(default)
+                candidate[key] = space[key][offset]
+                append(candidate)
+        if len(configs) >= limit:
+            return configs, total
+
+        pool_limit = min(total, max(512, limit * 16))
+        stride = max(1, total // pool_limit)
+        while math.gcd(stride, total) != 1:
+            stride += 1
+        pool: list[dict[str, str]] = []
+        for counter in range(pool_limit):
+            index = (counter * stride) % total
+            digits: list[int] = []
+            remainder = index
+            for key in reversed(keys):
+                radix = len(space[key])
+                digits.append(remainder % radix)
+                remainder //= radix
+            digits.reverse()
+            candidate = {key: space[key][digit] for key, digit in zip(keys, digits, strict=True)}
+            signature = tuple(candidate[key] for key in keys)
+            if signature not in seen:
+                pool.append(candidate)
+
+        counts = {(key, alternative): 0 for key in keys for alternative in space[key]}
+        for candidate in configs:
+            for key in keys:
+                counts[(key, candidate[key])] += 1
+        min_distances = [
+            min(sum(candidate[key] != selected[key] for key in keys) for selected in configs)
+            for candidate in pool
+        ]
+        while len(configs) < limit and pool:
+            def priority(index: int) -> tuple[object, ...]:
+                candidate = pool[index]
+                signature = tuple(candidate[key] for key in keys)
+                unseen = sum(1 for key in keys if counts[(key, candidate[key])] == 0)
+                rarity = sum(1.0 / (1.0 + counts[(key, candidate[key])]) for key in keys)
+                return (-unseen, -min_distances[index], -rarity, signature)
+
+            best_index = min(range(len(pool)), key=priority)
+            candidate = pool.pop(best_index)
+            min_distances.pop(best_index)
+            append(candidate)
+            for key in keys:
+                counts[(key, candidate[key])] += 1
+            for index, remaining in enumerate(pool):
+                distance = sum(candidate[key] != remaining[key] for key in keys)
+                min_distances[index] = min(min_distances[index], distance)
+
+        if len(configs) != limit:
+            raise RuntimeError(f"Deterministic configuration planner produced {len(configs)} of {limit} requested candidates.")
         return configs, total
 
+    def _configuration_planner_diagnostics(
+        self,
+        graph: Graph,
+        configs: list[dict[str, str]],
+        total_configurations: int,
+    ) -> dict[str, object]:
+        space = graph.configuration_space()
+        coverage: dict[str, object] = {}
+        covered = 0
+        available = 0
+        for key in sorted(space):
+            counts = {alternative: sum(config.get(key) == alternative for config in configs) for alternative in space[key]}
+            covered += sum(count > 0 for count in counts.values())
+            available += len(counts)
+            coverage[key] = {
+                "alternatives": len(counts),
+                "covered": sum(count > 0 for count in counts.values()),
+                "counts": counts,
+            }
+        return {
+            "method": "deterministic_exhaustive" if len(configs) == total_configurations else "deterministic_coverage_greedy",
+            "deterministic": True,
+            "seed_independent": True,
+            "planned": len(configs),
+            "total": int(total_configurations),
+            "coverage_fraction": float(covered / max(available, 1)),
+            "axes": coverage,
+        }
+
+    def _screen_single_config(
+        self,
+        graph: Graph,
+        inputs: dict[str, object],
+        y: np.ndarray,
+        config: dict[str, str],
+        shared_cache: dict[object, object],
+        folds: list[tuple[np.ndarray, np.ndarray]],
+        cache_namespace: str = "",
+    ) -> dict[str, object]:
+        x, names, ctx = graph.evaluate_features(
+            inputs,
+            config=config,
+            cache=shared_cache,
+            cache_namespace=cache_namespace,
+        )
+        sample_weight, _residual_rule, _fitting = self._evaluate_fitting_rules(graph, inputs, y, config, ctx)
+        train_idx, validation_idx = folds[0]
+        standardizer = Standardizer.fit(x[train_idx])
+        x_train = standardizer.transform(x[train_idx])
+        x_validation = standardizer.transform(x[validation_idx])
+        train_weight = sample_weight[train_idx] if sample_weight is not None else None
+        fixed_alpha = float(self.alphas[len(self.alphas) // 2])
+        model = fit_ridge(x_train, y[train_idx], fixed_alpha, sample_weight=train_weight)
+        approximate_score, approximate_raw_score = _score_and_raw(self.scorer, y[validation_idx], model.predict(x_validation))
+        return {
+            "config": dict(config),
+            "approximate_score": float(approximate_score),
+            "approximate_raw_score": float(approximate_raw_score),
+            "n_features": len(names),
+            "fixed_alpha": fixed_alpha,
+            "cache_hits": int(ctx.cache_hits),
+            "cache_misses": int(ctx.cache_misses),
+        }
+
+    def _screening_finalists(
+        self,
+        graph: Graph,
+        configs: list[dict[str, str]],
+        screening_rows: list[dict[str, object]],
+    ) -> list[dict[str, str]]:
+        limit = min(self.screening_finalists, len(configs))
+        ranked = sorted(
+            screening_rows,
+            key=lambda row: (-float(row["approximate_score"]), int(row["planner_index"])),
+        )
+        finalists = [dict(row["config"]) for row in ranked[:limit]]
+        default = graph.default_config()
+        if limit > 1 and default not in finalists:
+            finalists[-1] = default
+        planner_order = {tuple(config[key] for key in sorted(config)): index for index, config in enumerate(configs)}
+        return sorted(
+            finalists,
+            key=lambda config: (
+                repr(self._feature_signature(graph, config)),
+                planner_order[tuple(config[key] for key in sorted(config))],
+            ),
+        )
+
     @staticmethod
-    def _configuration_search_diagnostics(config_rows: list[dict[str, object]], total_configurations: int) -> dict[str, object]:
+    def _configuration_search_diagnostics(
+        config_rows: list[dict[str, object]],
+        total_configurations: int,
+        planned_configurations: int | None = None,
+    ) -> dict[str, object]:
         scores = np.asarray([float(row["score"]) for row in config_rows], dtype=np.float64)
         n_features = [int(row.get("n_features", 0)) for row in config_rows]
         top_rows = sorted(config_rows, key=lambda row: float(row["score"]), reverse=True)[:8]
+        planned = len(config_rows) if planned_configurations is None else int(planned_configurations)
+        evaluated = len(config_rows)
         if scores.size == 0:
             return {
                 "evaluated": 0,
+                "planned": planned,
                 "total": int(total_configurations),
-                "capped": False,
+                "capped": int(total_configurations) > 0,
+                "planner_capped": int(total_configurations) > planned,
+                "screening_capped": planned > 0,
                 "score_range": [0.0, 0.0],
                 "score_mean": 0.0,
                 "score_std": 0.0,
@@ -687,9 +922,12 @@ class RidgeEvaluator:
                 "top_configs": [],
             }
         return {
-            "evaluated": len(config_rows),
+            "evaluated": evaluated,
+            "planned": planned,
             "total": int(total_configurations),
-            "capped": int(total_configurations) > len(config_rows),
+            "capped": int(total_configurations) > evaluated,
+            "planner_capped": int(total_configurations) > planned,
+            "screening_capped": planned > evaluated,
             "score_range": [float(np.min(scores)), float(np.max(scores))],
             "score_mean": float(np.mean(scores)),
             "score_std": float(np.std(scores)),
@@ -728,7 +966,9 @@ class RidgeEvaluator:
             "n_features_global": int(search.get("n_features_global", len(result.feature_names))) if isinstance(search, dict) else len(result.feature_names),
             "n_features_best_config": len(result.feature_names),
             "n_configs": int(search.get("evaluated", 1)) if isinstance(search, dict) else 1,
+            "n_configs_planned": int(search.get("planned", search.get("evaluated", 1))) if isinstance(search, dict) else 1,
             "n_configs_total": int(search.get("total", 1)) if isinstance(search, dict) else 1,
+            "configuration_screening": search.get("screening", {}) if isinstance(search, dict) else {},
         }
 
     @staticmethod
