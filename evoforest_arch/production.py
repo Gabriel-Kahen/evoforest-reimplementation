@@ -564,6 +564,7 @@ class ProductionIslandWorker:
         self.best_train_result = best_train_result
         self.best_validation_result = best_validation_result
         self._prepared_jobs: dict[str, dict[str, Any]] = {}
+        self.evaluator = RidgeEvaluator(**self.evaluator_config)
 
     def run_candidate(
         self,
@@ -876,7 +877,7 @@ class ProductionIslandWorker:
         registry = registry_from_manifest(self.manifest)
         loop = EvolutionLoop(
             graph,
-            evaluator=RidgeEvaluator(**self.evaluator_config),
+            evaluator=self.evaluator,
             mutation_engine=MutationEngine(registry=registry, allow_source=self.allow_source_mutations),
             scientist=self.scientist,
             engineer=self.engineer,

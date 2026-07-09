@@ -12,6 +12,7 @@ from evoforest_arch import llm as llm_module
 from evoforest_arch.agents import EngineerAgent, ScientistAgent
 from evoforest_arch.cli import build_llm_agents
 from evoforest_arch.evaluator import RidgeEvaluator, abs_feature_correlation, effective_rank, feature_correlation_summary, max_correlation_scores, most_correlated_names, safe_corr_columns
+from evoforest_arch.evaluation_cache import PersistentEvaluationCache, fingerprint_callable
 from evoforest_arch.evolution import EvolutionLoop
 from evoforest_arch.feedback import toon_report
 from evoforest_arch.graph import CallableFamily, EvalContext, FeatureBlock, Graph, ResidualWeightRule
@@ -26,6 +27,9 @@ from evoforest_arch.seed import build_seed_graph, build_structural_break_seed_gr
 from evoforest_arch.source import SourceExecutionError
 from evoforest_arch.synthetic import make_structural_break_data, make_tabular_data
 from evoforest_arch.task import InputSpec, TaskSchema
+
+
+_PERSISTENT_CACHE_CALLS: dict[str, int] = {}
 
 
 def test_default_seed_graph_is_task_independent_tabular() -> None:
@@ -110,11 +114,12 @@ def test_configuration_search_uses_ancestor_conditioned_shared_cache() -> None:
     graph.add_node("a", "intermediate", "Shared ancestor.")
     graph.add_node("b", "intermediate", "Child depending on selected ancestor.")
     graph.add_node("output", "output", "Scored output.")
-    counts = {"a0": 0, "a1": 0, "b0": 0, "b1": 0, "out": 0}
+    keys = ["search_a0", "search_a1", "search_b0", "search_b1", "search_out"]
+    _PERSISTENT_CACHE_CALLS.update({key: 0 for key in keys})
 
     def a_fn(label: str, offset: float):
         def fn(_ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
-            counts[label] += 1
+            _PERSISTENT_CACHE_CALLS[f"search_{label}"] += 1
             series = np.asarray(values["series"], dtype=np.float64)
             return FeatureBlock(series[:, :1] + offset, [label])
 
@@ -122,7 +127,7 @@ def test_configuration_search_uses_ancestor_conditioned_shared_cache() -> None:
 
     def b_fn(label: str, scale: float):
         def fn(_ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
-            counts[label] += 1
+            _PERSISTENT_CACHE_CALLS[f"search_{label}"] += 1
             block = values["a"]
             assert isinstance(block, FeatureBlock)
             return FeatureBlock(block.values * scale, [label])
@@ -130,7 +135,7 @@ def test_configuration_search_uses_ancestor_conditioned_shared_cache() -> None:
         return fn
 
     def out_fn(_ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
-        counts["out"] += 1
+        _PERSISTENT_CACHE_CALLS["search_out"] += 1
         a_block = values["a"]
         b_block = values["b"]
         assert isinstance(a_block, FeatureBlock)
@@ -150,11 +155,212 @@ def test_configuration_search_uses_ancestor_conditioned_shared_cache() -> None:
     assert cache["shared_across_configurations"] is True
     assert cache["key"] == "ancestor_conditioned_subpath"
     assert cache["hits"] > 0
-    assert counts["a0"] == 1
-    assert counts["a1"] == 1
-    assert counts["b0"] == 2
-    assert counts["b1"] == 2
-    assert counts["out"] == 4
+    assert _PERSISTENT_CACHE_CALLS["search_a0"] == 1
+    assert _PERSISTENT_CACHE_CALLS["search_a1"] == 1
+    assert _PERSISTENT_CACHE_CALLS["search_b0"] == 2
+    assert _PERSISTENT_CACHE_CALLS["search_b1"] == 2
+    assert _PERSISTENT_CACHE_CALLS["search_out"] == 4
+
+
+def test_persistent_cache_reuses_identical_graph_clone_across_evaluations() -> None:
+    dataset = make_tabular_data(n_samples=48, n_features=3, seed=901)
+    graph = Graph("persistent_clone")
+    graph.add_input("x")
+    graph.add_node("output", "output")
+    _PERSISTENT_CACHE_CALLS["clone_output"] = 0
+
+    def output_fn(_ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
+        _PERSISTENT_CACHE_CALLS["clone_output"] += 1
+        return FeatureBlock(np.asarray(values["x"], dtype=np.float64), ["a", "b", "c"])
+
+    graph.add_alternative("output", "raw", ("x",), output_fn)
+    evaluator = RidgeEvaluator(n_splits=2, seed=901, refine_globals=False, diagnostics_mode="basic", feature_pool_diagnostics=False)
+
+    first = evaluator.evaluate(graph, dataset.inputs(), dataset.y, config={})
+    expected_features = first.feature_matrix.copy()
+    first.feature_matrix[0, 0] = 1_000_000.0
+    second = evaluator.evaluate(graph.clone(), dataset.inputs(), dataset.y, config={})
+
+    assert _PERSISTENT_CACHE_CALLS["clone_output"] == 1
+    np.testing.assert_allclose(second.predictions, first.predictions)
+    np.testing.assert_allclose(second.feature_matrix, expected_features)
+    persistent = second.diagnostics["configuration_search"]["cache"]["persistent"]
+    assert persistent["cross_evaluation_hits"] >= 1
+    assert persistent["stores"] == 0
+
+    changed_inputs = {"x": dataset.inputs()["x"].copy()}
+    changed_inputs["x"][0, 0] += 0.5
+    third = evaluator.evaluate(graph, changed_inputs, dataset.y, config={})
+    assert _PERSISTENT_CACHE_CALLS["clone_output"] == 2
+    assert third.diagnostics["configuration_search"]["cache"]["persistent"]["cross_evaluation_hits"] == 0
+
+
+def test_persistent_cache_output_mutation_reuses_unchanged_subpaths() -> None:
+    dataset = make_tabular_data(n_samples=48, n_features=3, seed=902)
+    graph = Graph("persistent_output_mutation")
+    graph.add_input("x")
+    graph.add_node("shared", "intermediate")
+    graph.add_node("output", "output")
+    _PERSISTENT_CACHE_CALLS.update({"mutation_shared": 0, "mutation_old": 0, "mutation_new": 0})
+
+    def shared_fn(_ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
+        _PERSISTENT_CACHE_CALLS["mutation_shared"] += 1
+        return FeatureBlock(np.asarray(values["x"], dtype=np.float64)[:, :1], ["shared"])
+
+    def old_fn(_ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
+        _PERSISTENT_CACHE_CALLS["mutation_old"] += 1
+        block = values["shared"]
+        assert isinstance(block, FeatureBlock)
+        return FeatureBlock(block.values, ["old"])
+
+    def new_fn(_ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
+        _PERSISTENT_CACHE_CALLS["mutation_new"] += 1
+        block = values["shared"]
+        assert isinstance(block, FeatureBlock)
+        return FeatureBlock(np.square(block.values), ["new"])
+
+    graph.add_alternative("shared", "base", ("x",), shared_fn)
+    graph.add_alternative("output", "old", ("shared",), old_fn)
+    evaluator = RidgeEvaluator(n_splits=2, seed=902, refine_globals=False, diagnostics_mode="basic", feature_pool_diagnostics=False)
+    evaluator.evaluate(graph, dataset.inputs(), dataset.y, config={})
+
+    mutated = graph.clone()
+    mutated.add_alternative("output", "new", ("shared",), new_fn)
+    result = evaluator.evaluate(mutated, dataset.inputs(), dataset.y, config={})
+
+    assert {
+        "shared": _PERSISTENT_CACHE_CALLS["mutation_shared"],
+        "old": _PERSISTENT_CACHE_CALLS["mutation_old"],
+        "new": _PERSISTENT_CACHE_CALLS["mutation_new"],
+    } == {"shared": 1, "old": 1, "new": 1}
+    assert result.feature_names == ["output.old.old", "output.new.new"]
+    assert result.diagnostics["configuration_search"]["cache"]["persistent"]["cross_evaluation_hits"] >= 2
+
+
+def test_persistent_cache_invalidates_changed_global_and_descendants() -> None:
+    dataset = make_tabular_data(n_samples=48, n_features=3, seed=903)
+    graph = Graph("persistent_global_mutation")
+    graph.add_input("x")
+    graph.add_node("scaled", "intermediate")
+    graph.add_node("output", "output")
+    graph.globals.add("scale", [1.0], trainable=False)
+    calls = {"scaled": 0, "output": 0}
+
+    def scaled_fn(ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
+        calls["scaled"] += 1
+        scale = float(ctx.globals.get("scale")[0])
+        return FeatureBlock(np.asarray(values["x"], dtype=np.float64)[:, :1] * scale, ["scaled"])
+
+    def output_fn(_ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
+        calls["output"] += 1
+        block = values["scaled"]
+        assert isinstance(block, FeatureBlock)
+        return FeatureBlock(block.values, ["output"])
+
+    graph.add_alternative("scaled", "base", ("x",), scaled_fn, global_refs=("scale",))
+    graph.add_alternative("output", "base", ("scaled",), output_fn)
+    evaluator = RidgeEvaluator(n_splits=2, seed=903, refine_globals=False, diagnostics_mode="basic", feature_pool_diagnostics=False)
+    first = evaluator.evaluate(graph, dataset.inputs(), dataset.y, config={})
+
+    mutated = graph.clone()
+    mutated.globals.set("scale", [2.0])
+    second = evaluator.evaluate(mutated, dataset.inputs(), dataset.y, config={})
+
+    assert calls == {"scaled": 2, "output": 2}
+    assert not np.array_equal(first.feature_matrix, second.feature_matrix)
+    assert second.diagnostics["configuration_search"]["cache"]["persistent"]["cross_evaluation_hits"] == 0
+
+
+def test_persistent_cache_invalidates_changed_parent_semantics_and_descendants() -> None:
+    dataset = make_tabular_data(n_samples=48, n_features=3, seed=904)
+    graph = Graph("persistent_parent_mutation")
+    graph.add_input("x")
+    graph.add_node("parent", "intermediate")
+    graph.add_node("output", "output")
+    calls = {"parent_v1": 0, "parent_v2": 0, "output": 0}
+
+    def parent_v1(_ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
+        calls["parent_v1"] += 1
+        return FeatureBlock(np.asarray(values["x"], dtype=np.float64)[:, :1], ["parent"])
+
+    def parent_v2(_ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
+        calls["parent_v2"] += 1
+        return FeatureBlock(-np.asarray(values["x"], dtype=np.float64)[:, :1], ["parent"])
+
+    def output_fn(_ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
+        calls["output"] += 1
+        block = values["parent"]
+        assert isinstance(block, FeatureBlock)
+        return FeatureBlock(block.values, ["output"])
+
+    graph.add_alternative("parent", "base", ("x",), parent_v1)
+    graph.add_alternative("output", "base", ("parent",), output_fn)
+    evaluator = RidgeEvaluator(n_splits=2, seed=904, refine_globals=False, diagnostics_mode="basic", feature_pool_diagnostics=False)
+    first = evaluator.evaluate(graph, dataset.inputs(), dataset.y, config={})
+
+    mutated = graph.clone()
+    mutated.nodes["parent"].alternatives[0].fn = parent_v2
+    second = evaluator.evaluate(mutated, dataset.inputs(), dataset.y, config={})
+
+    assert calls == {"parent_v1": 1, "parent_v2": 1, "output": 2}
+    np.testing.assert_allclose(second.feature_matrix, -first.feature_matrix)
+    assert second.diagnostics["configuration_search"]["cache"]["persistent"]["cross_evaluation_hits"] == 0
+
+
+def test_persistent_cache_fingerprints_captured_callable_state() -> None:
+    def make_transform(sign: float):
+        def transform(values: np.ndarray) -> np.ndarray:
+            return values * sign
+
+        return transform
+
+    def make_output(transform):
+        def output(_ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
+            return FeatureBlock(transform(np.asarray(values["x"], dtype=np.float64)[:, :1]), ["value"])
+
+        return output
+
+    positive = make_output(make_transform(1.0))
+    negative = make_output(make_transform(-1.0))
+    assert fingerprint_callable(positive) != fingerprint_callable(negative)
+
+    dataset = make_tabular_data(n_samples=48, n_features=3, seed=905)
+    graph = Graph("captured_callable")
+    graph.add_input("x")
+    graph.add_node("output", "output")
+    graph.add_alternative("output", "signed", ("x",), positive)
+    evaluator = RidgeEvaluator(n_splits=2, seed=905, refine_globals=False, diagnostics_mode="basic")
+    first = evaluator.evaluate(graph, dataset.inputs(), dataset.y, config={})
+
+    mutated = graph.clone()
+    mutated.nodes["output"].alternatives[0].fn = negative
+    second = evaluator.evaluate(mutated, dataset.inputs(), dataset.y, config={})
+
+    np.testing.assert_allclose(second.feature_matrix, -first.feature_matrix)
+    assert second.diagnostics["configuration_search"]["cache"]["persistent"]["cross_evaluation_hits"] == 0
+
+
+def test_disabling_persistent_cache_skips_input_fingerprinting() -> None:
+    dataset = make_tabular_data(n_samples=40, n_features=3, seed=906)
+    inputs = {**dataset.inputs(), "unused": lambda value: value}
+    result = RidgeEvaluator(
+        n_splits=2,
+        seed=906,
+        refine_globals=False,
+        diagnostics_mode="basic",
+        persistent_cache=False,
+    ).evaluate(build_seed_graph(), inputs, dataset.y, config={})
+
+    assert result.diagnostics["configuration_search"]["cache"]["persistent"]["enabled"] is False
+
+
+def test_persistent_cache_byte_limit_counts_python_payloads() -> None:
+    cache = PersistentEvaluationCache(max_entries=4, max_bytes=1_024)
+    cache.begin_evaluation()
+    cache["large"] = FeatureBlock(np.ones((1, 1)), ["x" * 2_000_000])
+
+    assert len(cache) == 0
+    assert cache.stats()["evictions"] == 1
 
 
 def test_ridge_evaluator_scores_synthetic_breaks() -> None:

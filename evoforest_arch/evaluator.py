@@ -7,6 +7,7 @@ from typing import Any, Callable
 
 import numpy as np
 
+from evoforest_arch.evaluation_cache import PersistentEvaluationCache, fingerprint_inputs
 from evoforest_arch.graph import EvalContext, Graph, ResidualWeightRule
 from evoforest_arch.metrics import DEFAULT_SCORER, FoldStrategy, ScoreFunction, TaskScorer, coerce_fold_strategy, coerce_scorer, safe_corr
 from evoforest_arch.readout import DEFAULT_ALPHAS, RidgeModel, Standardizer, combine_sample_weights, normalize_sample_weight, select_alpha_and_fit_ridge
@@ -112,6 +113,9 @@ class RidgeEvaluator:
         scorer: TaskScorer | ScoreFunction | str | None = None,
         task_schema: TaskSchema | dict[str, object] | None = None,
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
+        persistent_cache: bool = True,
+        cache_max_entries: int = 4096,
+        cache_max_bytes: int = 1_073_741_824,
     ) -> None:
         self.n_splits = int(n_splits)
         self.seed = int(seed)
@@ -141,6 +145,14 @@ class RidgeEvaluator:
         self.feature_pool_diagnostics = bool(feature_pool_diagnostics)
         self.retain_feature_matrix = bool(retain_feature_matrix)
         self.progress_callback = progress_callback
+        self.persistent_cache = bool(persistent_cache)
+        self.evaluation_cache = PersistentEvaluationCache(max_entries=cache_max_entries, max_bytes=cache_max_bytes)
+
+    def clear_evaluation_cache(self) -> None:
+        self.evaluation_cache.clear()
+
+    def evaluation_cache_diagnostics(self) -> dict[str, int | bool]:
+        return {"enabled": self.persistent_cache, **self.evaluation_cache.stats()}
 
     def _emit_progress(self, payload: dict[str, Any]) -> None:
         if self.progress_callback is not None:
@@ -156,7 +168,14 @@ class RidgeEvaluator:
     ) -> EvaluationResult:
         working_graph = graph if update_graph else graph.clone()
         y = np.asarray(y, dtype=np.float64)
-        shared_cache: dict[object, object] = {}
+        if self.persistent_cache:
+            dataset_fingerprint = fingerprint_inputs(inputs)
+            self.evaluation_cache.begin_evaluation()
+            shared_cache: dict[object, object] = self.evaluation_cache
+        else:
+            dataset_fingerprint = ""
+            shared_cache = {}
+        persistent_stats_before = self.evaluation_cache.stats()
         started_at = time.monotonic()
         search_cache_hits = 0
         search_cache_misses = 0
@@ -186,6 +205,7 @@ class RidgeEvaluator:
                 y,
                 selected,
                 shared_cache,
+                cache_namespace=dataset_fingerprint,
                 folds=folds,
                 fold_diagnostics=fold_diagnostics,
                 progress_context={
@@ -233,6 +253,7 @@ class RidgeEvaluator:
                     y,
                     candidate_config,
                     shared_cache,
+                    cache_namespace=dataset_fingerprint,
                     precomputed_features=precomputed_features,
                     folds=folds,
                     fold_diagnostics=fold_diagnostics,
@@ -288,6 +309,7 @@ class RidgeEvaluator:
                     y,
                     best.config,
                     shared_cache,
+                    cache_namespace=dataset_fingerprint,
                     precomputed_features=best_feature_result,
                     folds=folds,
                     fold_diagnostics=fold_diagnostics,
@@ -333,6 +355,19 @@ class RidgeEvaluator:
             "feature_matrix_reuse_hits": int(feature_matrix_reuse_hits),
             "shared_across_configurations": True,
             "key": "ancestor_conditioned_subpath",
+            "key_version": "content_addressed_v2",
+            "dataset_fingerprint": dataset_fingerprint,
+        }
+        persistent_stats_after = self.evaluation_cache.stats()
+        search_cache["persistent"] = {
+            "enabled": self.persistent_cache,
+            "cross_evaluation_hits": int(persistent_stats_after["cross_evaluation_hits"] - persistent_stats_before["cross_evaluation_hits"]),
+            "stores": int(persistent_stats_after["stores"] - persistent_stats_before["stores"]),
+            "evictions": int(persistent_stats_after["evictions"] - persistent_stats_before["evictions"]),
+            "entries": int(persistent_stats_after["entries"]),
+            "bytes": int(persistent_stats_after["bytes"]),
+            "max_entries": int(persistent_stats_after["max_entries"]),
+            "max_bytes": int(persistent_stats_after["max_bytes"]),
         }
         result.diagnostics["configuration_search"]["cache"] = search_cache
         result.diagnostics["cache"] = {
@@ -342,6 +377,8 @@ class RidgeEvaluator:
             "search_entries": search_cache["entries"],
             "shared_across_configurations": True,
             "key": "ancestor_conditioned_subpath",
+            "key_version": search_cache["key_version"],
+            "persistent": search_cache["persistent"],
         }
         if self.feature_pool_diagnostics:
             self._attach_valid_feature_pool_diagnostics(result, y, feature_pool)
@@ -368,6 +405,7 @@ class RidgeEvaluator:
         y: np.ndarray,
         config: dict[str, str],
         shared_cache: dict[object, object] | None = None,
+        cache_namespace: str = "",
         precomputed_features: tuple[np.ndarray, list[str]] | None = None,
         folds: list[tuple[np.ndarray, np.ndarray]] | None = None,
         fold_diagnostics: dict[str, object] | None = None,
@@ -377,11 +415,16 @@ class RidgeEvaluator:
         progress_context = dict(progress_context or {})
         resolved_diagnostics_mode = diagnostics_mode or self.diagnostics_mode
         if precomputed_features is None:
-            x, names, ctx = graph.evaluate_features(inputs, config=config, cache=shared_cache)
+            x, names, ctx = graph.evaluate_features(inputs, config=config, cache=shared_cache, cache_namespace=cache_namespace)
             feature_matrix_reused = False
         else:
             x, names = precomputed_features
-            ctx = EvalContext(inputs=inputs, globals=graph.globals.clone(), cache=shared_cache if shared_cache is not None else {})
+            ctx = EvalContext(
+                inputs=inputs,
+                globals=graph.globals.clone(),
+                cache=shared_cache if shared_cache is not None else {},
+                cache_namespace=cache_namespace,
+            )
             feature_matrix_reused = True
         self._emit_progress(
             {
