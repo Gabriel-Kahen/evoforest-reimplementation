@@ -67,6 +67,34 @@ def test_seed_graph_exposes_paper_architecture_motifs() -> None:
     assert "ridge_g" in graph.configuration_space()
 
 
+def test_paper_graph_contract_rejects_extra_output_and_fitting_nodes() -> None:
+    graph = build_structural_break_seed_graph()
+    graph.validate_paper_architecture()
+
+    with pytest.raises(ValueError, match="logical output node must be named 'output'"):
+        Graph().add_node("predictions", "output")
+    with pytest.raises(ValueError, match="exactly one output node"):
+        graph.add_node("output", "output")
+    with pytest.raises(ValueError, match="Fitting nodes are limited"):
+        Graph().add_node("custom_fit", "fitting")
+
+
+def test_built_in_alternatives_have_typed_output_contracts() -> None:
+    graph = build_structural_break_seed_graph()
+
+    assert graph.nodes["segment_stats"].alternatives[0].output_contract == {
+        "type": "feature_block",
+        "min_columns": 1,
+    }
+    assert graph.nodes["activation"].alternatives[0].output_contract == {"type": "callable"}
+    assert graph.nodes["output"].alternatives[0].output_contract == {
+        "type": "feature_block",
+        "min_columns": 1,
+    }
+    assert graph.nodes["ridge_w"].alternatives[0].output_contract == {"type": "sample_weight"}
+    assert graph.nodes["ridge_g"].alternatives[0].output_contract == {"type": "residual_weight_rule"}
+
+
 def test_graph_evaluates_alternatives_callables_and_globals() -> None:
     dataset = make_structural_break_data(n_series=40, length=80, seed=3)
     graph = build_structural_break_seed_graph()
@@ -829,6 +857,40 @@ def test_mutation_engine_adds_alternative_without_mutating_parent_graph() -> Non
     assert len(output_mutated.nodes["output"].alternatives) == len(graph.nodes["output"].alternatives) + 1
 
 
+@pytest.mark.parametrize(
+    ("node", "message"),
+    [
+        (NodeSpec("second_output", "output"), "add behavior as an alternative"),
+        (NodeSpec("custom_fitter", "fitting"), "add behavior as an alternative"),
+    ],
+)
+def test_mutation_documents_reject_new_output_and_fitting_nodes_early(node: NodeSpec, message: str) -> None:
+    graph = build_structural_break_seed_graph()
+    before = graph.to_dict()
+
+    with pytest.raises(ValueError, match=message):
+        MutationEngine().apply_document(graph, MutationDocument(nodes=(node,)))
+
+    assert graph.to_dict() == before
+
+
+def test_llm_document_validation_rejects_extra_output_node() -> None:
+    graph = build_structural_break_seed_graph()
+    document = MutationDocument(nodes=(NodeSpec("predictions", "output"),))
+    engineer = LLMEngineerAgent(StaticLLMClient([]))
+
+    with pytest.raises(ValueError, match="add behavior as an alternative"):
+        engineer._validate_supported_document(graph, document)
+
+
+def test_mutation_cannot_remove_last_paper_node_alternative() -> None:
+    graph = build_structural_break_seed_graph()
+    removals = tuple(RemoveSpec("output", alternative.id) for alternative in graph.nodes["output"].alternatives)
+
+    with pytest.raises(ValueError, match="without alternatives"):
+        MutationEngine().apply_document(graph, MutationDocument(remove=removals))
+
+
 def test_registry_primitive_reintroduces_pruned_required_global() -> None:
     graph = build_structural_break_seed_graph()
     pruned = MutationEngine().apply_document(
@@ -1241,6 +1303,32 @@ def test_maintenance_prunes_unreachable_nodes_and_unused_globals() -> None:
     assert "unused" in report.removed_globals
 
 
+def test_runtime_contract_rejects_wrong_callable_return_type() -> None:
+    dataset = make_structural_break_data(n_series=20, length=50, seed=8)
+    graph = build_structural_break_seed_graph()
+    graph.nodes["activation"].alternatives[0].fn = lambda _ctx, _values: np.ones(20)
+
+    with pytest.raises(TypeError, match="must return CallableFamily"):
+        graph.evaluate_features(dataset.inputs())
+
+
+def test_torch_contract_is_scoped_to_trainable_global_paths() -> None:
+    graph = build_structural_break_seed_graph()
+    graph.add_alternative(
+        "output",
+        "numpy_only_constant",
+        ("series",),
+        lambda _ctx, values: np.asarray(values["series"])[:, :1],
+    )
+
+    graph.validate_torch_trainable_paths()
+    projection = next(alternative for alternative in graph.nodes["output"].alternatives if alternative.id == "projection")
+    projection.torch_fn = None
+
+    with pytest.raises(ValueError, match="trainable globals.*projection_vector.*output.projection"):
+        graph.validate_torch_trainable_paths()
+
+
 def test_global_refinement_phase_runs_without_mutating_parent_graph() -> None:
     dataset = make_structural_break_data(n_series=50, length=80, seed=13)
     graph = build_structural_break_seed_graph()
@@ -1260,6 +1348,8 @@ def test_global_refinement_phase_runs_without_mutating_parent_graph() -> None:
 def test_numpy_refinement_backend_can_be_requested_explicitly() -> None:
     dataset = make_structural_break_data(n_series=40, length=70, seed=17)
     graph = build_structural_break_seed_graph()
+    projection = next(alternative for alternative in graph.nodes["output"].alternatives if alternative.id == "projection")
+    projection.torch_fn = None
     result = RidgeEvaluator(
         n_splits=3,
         seed=17,

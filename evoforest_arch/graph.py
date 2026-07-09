@@ -12,6 +12,34 @@ from evoforest_arch.globals import GlobalStore
 
 ArrayLike = np.ndarray
 AlternativeFn = Callable[["EvalContext", dict[str, Any]], Any]
+PAPER_OUTPUT_NODE = "output"
+PAPER_FITTING_NODES = frozenset({"ridge_w", "ridge_g"})
+GRAPH_NODE_KINDS = frozenset({"input", "intermediate", "callable", "output", "fitting"})
+
+
+def default_output_contract(node_name: str, node_kind: str) -> dict[str, object]:
+    """Return the paper-level type contract for an alternative."""
+    if node_kind in {"intermediate", "output"}:
+        return {"type": "feature_block", "min_columns": 1}
+    if node_kind == "callable":
+        return {"type": "callable"}
+    if node_name == "ridge_w":
+        return {"type": "sample_weight"}
+    if node_name == "ridge_g":
+        return {"type": "residual_weight_rule"}
+    return {}
+
+
+def allowed_output_contract_types(node_name: str, node_kind: str) -> frozenset[str]:
+    if node_kind in {"intermediate", "output"}:
+        return frozenset({"feature_block", "array"})
+    if node_kind == "callable":
+        return frozenset({"callable"})
+    if node_name == "ridge_w":
+        return frozenset({"sample_weight", "array"})
+    if node_name == "ridge_g":
+        return frozenset({"residual_weight_rule"})
+    return frozenset()
 
 
 @dataclass
@@ -87,6 +115,9 @@ class GraphNode:
     def add_alternative(self, alternative: NodeAlternative) -> None:
         if any(existing.id == alternative.id for existing in self.alternatives):
             raise ValueError(f"Node {self.name!r} already has alternative {alternative.id!r}.")
+        contract = default_output_contract(self.name, self.kind)
+        contract.update(alternative.output_contract)
+        alternative.output_contract = contract
         self.alternatives.append(alternative)
 
     def default_alternative_id(self) -> str:
@@ -128,9 +159,13 @@ class Graph:
         self.globals = GlobalStore()
 
     def add_input(self, name: str, description: str = "") -> None:
+        self._validate_node_identity(name, "input")
         self._add_node(GraphNode(name=name, kind="input", description=description))
 
     def add_node(self, name: str, kind: str, description: str = "") -> GraphNode:
+        if kind == "input":
+            raise ValueError("Use add_input() to declare graph inputs.")
+        self._validate_node_identity(name, kind)
         node = GraphNode(name=name, kind=kind, description=description)
         self._add_node(node)
         return node
@@ -233,6 +268,74 @@ class Graph:
 
         for name in self.nodes:
             visit(name, ())
+
+    def validate_paper_architecture(self) -> None:
+        """Validate the graph invariants that are observable in the paper."""
+        for name, node in self.nodes.items():
+            if node.kind not in GRAPH_NODE_KINDS:
+                raise ValueError(f"Node {name!r} has unsupported kind {node.kind!r}.")
+            if name == PAPER_OUTPUT_NODE and node.kind != "output":
+                raise ValueError("The reserved node name 'output' must identify the logical output node.")
+            if name in PAPER_FITTING_NODES and node.kind != "fitting":
+                raise ValueError(f"The reserved node name {name!r} must identify a fitting node.")
+        output_nodes = self.output_nodes()
+        if output_nodes != [PAPER_OUTPUT_NODE]:
+            raise ValueError(
+                "Paper architecture requires exactly one logical output node named "
+                f"{PAPER_OUTPUT_NODE!r}; found {output_nodes!r}. Add output behavior as alternatives."
+            )
+        fitting_nodes = set(self.fitting_nodes())
+        invalid_fitting = fitting_nodes - PAPER_FITTING_NODES
+        if invalid_fitting:
+            raise ValueError(
+                "Paper architecture only permits optional fitting nodes 'ridge_w' and 'ridge_g'; "
+                f"found {sorted(invalid_fitting)!r}. Add fitting behavior as alternatives."
+            )
+        for name in (PAPER_OUTPUT_NODE, *sorted(fitting_nodes)):
+            if not self.nodes[name].alternatives:
+                raise ValueError(f"Paper architecture node {name!r} must contain at least one alternative.")
+        for name, node in self.nodes.items():
+            if node.kind == "input":
+                continue
+            allowed_contracts = allowed_output_contract_types(name, node.kind)
+            for alternative in node.alternatives:
+                contract_type = str(alternative.output_contract.get("type", ""))
+                if allowed_contracts and contract_type not in allowed_contracts:
+                    raise ValueError(
+                        f"Alternative {name}.{alternative.id} has output contract type {contract_type!r}; "
+                        f"expected one of {sorted(allowed_contracts)!r}."
+                    )
+        self.validate_acyclic()
+
+    def validate_torch_trainable_paths(self, config: dict[str, str] | None = None) -> None:
+        """Require differentiable implementations only on active trainable-global paths.
+
+        Output alternatives are an ensemble, so each is inspected. Intermediate and
+        callable nodes follow the selected configuration, just as refinement does.
+        """
+        trainable = set(self.globals.trainable_names())
+        if not trainable:
+            return
+        selected = self.selected_config(config)
+        for node_name in self.output_nodes():
+            for output in self.nodes[node_name].alternatives:
+                dependencies = self.alternative_dependencies(node_name, output.id, selected)
+                path: list[tuple[str, NodeAlternative]] = []
+                path_globals: set[str] = set()
+                for dependency in dependencies:
+                    dependency_node, alternative_id = dependency.split(".", maxsplit=1)
+                    alternative = self._alternative(self.nodes[dependency_node], alternative_id)
+                    path.append((dependency_node, alternative))
+                    path_globals.update(alternative.global_refs)
+                active_globals = path_globals & trainable
+                if not active_globals:
+                    continue
+                missing = [f"{name}.{alternative.id}" for name, alternative in path if alternative.torch_fn is None]
+                if missing:
+                    raise ValueError(
+                        f"Output path {node_name}.{output.id} references trainable globals "
+                        f"{sorted(active_globals)!r} but lacks Torch evaluators for {missing!r}."
+                    )
 
     def configuration_space(self) -> dict[str, list[str]]:
         reachable = self.reachable_nodes()
@@ -399,6 +502,7 @@ class Graph:
         parent_values = {parent: self.evaluate_node(parent, config, ctx) for parent in alternative.parents}
         ctx.cache_misses += 1
         value = alternative.fn(ctx, parent_values)
+        validate_alternative_result(self.nodes[name], alternative, value, ctx.inputs)
         ctx.cache[key] = value
         return value
 
@@ -466,6 +570,7 @@ class Graph:
         cache: dict[object, Any] | None = None,
         cache_namespace: str = "",
     ) -> tuple[np.ndarray, list[str], EvalContext]:
+        self.validate_paper_architecture()
         selected = self.selected_config(config)
         ctx = EvalContext(
             inputs=inputs,
@@ -501,6 +606,21 @@ class Graph:
         if node.name in self.nodes:
             raise ValueError(f"Graph already has a node named {node.name!r}.")
         self.nodes[node.name] = node
+
+    def _validate_node_identity(self, name: str, kind: str) -> None:
+        if kind not in GRAPH_NODE_KINDS:
+            raise ValueError(f"Unsupported graph node kind {kind!r}; expected one of {sorted(GRAPH_NODE_KINDS)}.")
+        if name == PAPER_OUTPUT_NODE and kind != "output":
+            raise ValueError("The reserved node name 'output' must identify the logical output node.")
+        if name in PAPER_FITTING_NODES and kind != "fitting":
+            raise ValueError(f"The reserved node name {name!r} must identify a fitting node.")
+        if kind == "output":
+            if name != PAPER_OUTPUT_NODE:
+                raise ValueError("The paper architecture's logical output node must be named 'output'.")
+            if self.output_nodes():
+                raise ValueError("The paper architecture permits exactly one output node; add output behavior as an alternative.")
+        if kind == "fitting" and name not in PAPER_FITTING_NODES:
+            raise ValueError("Fitting nodes are limited to 'ridge_w' and 'ridge_g'; add fitting behavior as an alternative.")
 
     @staticmethod
     def _alternative(node: GraphNode, alternative_id: str) -> NodeAlternative:
@@ -542,6 +662,60 @@ def as_feature_block(value: Any, prefix: str) -> FeatureBlock:
     else:
         raise ValueError(f"Cannot convert value with shape {array.shape} to FeatureBlock.")
     return FeatureBlock(values=array, names=names)
+
+
+def validate_alternative_result(
+    node: GraphNode,
+    alternative: NodeAlternative,
+    value: Any,
+    inputs: dict[str, Any],
+) -> None:
+    """Validate the lightweight, serializable contract attached to an alternative."""
+    contract = alternative.output_contract
+    expected_type = str(contract.get("type", ""))
+    label = f"{node.name}.{alternative.id}"
+    if expected_type == "callable":
+        if not isinstance(value, CallableFamily):
+            raise TypeError(f"Alternative {label} must return CallableFamily, got {type(value).__name__}.")
+        return
+    if expected_type == "residual_weight_rule":
+        if not isinstance(value, ResidualWeightRule) and not callable(value):
+            raise TypeError(f"Alternative {label} must return ResidualWeightRule or a callable.")
+        return
+    if expected_type == "sample_weight":
+        array = np.asarray(value, dtype=np.float64)
+        if array.ndim != 1:
+            raise ValueError(f"Alternative {label} must return one sample weight per row, got shape {array.shape}.")
+        sample_count = _infer_sample_count(inputs)
+        if sample_count is not None and array.shape[0] != sample_count:
+            raise ValueError(f"Alternative {label} returned {array.shape[0]} sample weights, expected {sample_count}.")
+        return
+    if expected_type not in {"feature_block", "array"}:
+        return
+    array = value.values if isinstance(value, FeatureBlock) else np.asarray(value, dtype=np.float64)
+    if array.ndim not in {1, 2}:
+        raise ValueError(f"Alternative {label} must return a 1-D or 2-D feature block, got shape {array.shape}.")
+    sample_count = _infer_sample_count(inputs)
+    if sample_count is not None and array.shape[0] != sample_count:
+        raise ValueError(f"Alternative {label} returned {array.shape[0]} rows, expected {sample_count}.")
+    n_columns = 1 if array.ndim == 1 else int(array.shape[1])
+    expected_columns = contract.get("n_columns")
+    if expected_columns is not None and n_columns != int(expected_columns):
+        raise ValueError(f"Alternative {label} returned {n_columns} columns, expected {int(expected_columns)}.")
+    minimum = contract.get("min_columns")
+    if minimum is not None and n_columns < int(minimum):
+        raise ValueError(f"Alternative {label} returned {n_columns} columns, expected at least {int(minimum)}.")
+    maximum = contract.get("max_columns")
+    if maximum is not None and n_columns > int(maximum):
+        raise ValueError(f"Alternative {label} returned {n_columns} columns, expected at most {int(maximum)}.")
+
+
+def _infer_sample_count(inputs: dict[str, Any]) -> int | None:
+    for value in inputs.values():
+        array = np.asarray(value)
+        if array.ndim > 0:
+            return int(array.shape[0])
+    return None
 
 
 def alternative_name_parts(row: dict[str, object]) -> tuple[str, str]:

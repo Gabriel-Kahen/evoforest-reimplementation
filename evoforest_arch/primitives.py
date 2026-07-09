@@ -11,6 +11,9 @@ from evoforest_arch.task import TaskSchema
 
 
 PrimitiveFactory = Callable[[str, tuple[str, ...]], NodeAlternative]
+CALLABLE_PRIMITIVES = frozenset({"identity_callable", "sigmoid_gate_callable", "clipped_linear_callable"})
+SAMPLE_WEIGHT_PRIMITIVES = frozenset({"uniform_sample_weight", "boundary_energy_weight", "late_energy_weight"})
+RESIDUAL_WEIGHT_PRIMITIVES = frozenset({"identity_residual_weight", "huber_residual_weight"})
 
 
 @dataclass
@@ -89,6 +92,15 @@ class PrimitiveRegistry:
             raise KeyError(f"Unknown primitive {primitive!r}.")
         alternative = self.factories[primitive](alternative_id, parents)
         alternative.primitive = primitive
+        if primitive in CALLABLE_PRIMITIVES:
+            alternative.output_contract.setdefault("type", "callable")
+        elif primitive in SAMPLE_WEIGHT_PRIMITIVES:
+            alternative.output_contract.setdefault("type", "sample_weight")
+        elif primitive in RESIDUAL_WEIGHT_PRIMITIVES:
+            alternative.output_contract.setdefault("type", "residual_weight_rule")
+        else:
+            alternative.output_contract.setdefault("type", "feature_block")
+            alternative.output_contract.setdefault("min_columns", 1)
         return alternative
 
 

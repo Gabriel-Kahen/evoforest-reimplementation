@@ -107,7 +107,7 @@ def graph_from_dict(
             alternative.stats = copy.deepcopy(stats) if isinstance(stats, dict) else {}
             graph.nodes[node_name].add_alternative(alternative)
 
-    graph.validate_acyclic()
+    graph.validate_paper_architecture()
     return graph
 
 

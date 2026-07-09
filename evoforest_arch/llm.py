@@ -19,7 +19,7 @@ from evoforest_arch.agents import EngineerAgent, Hypothesis, ScientistAgent
 from evoforest_arch.evaluator import EvaluationResult
 from evoforest_arch.feedback import feedback_summary, toon_report
 from evoforest_arch.graph import Graph
-from evoforest_arch.mutations import MutationDocument, RemoveSpec
+from evoforest_arch.mutations import MutationDocument, RemoveSpec, validate_mutation_document_architecture
 from evoforest_arch.primitives import PrimitiveRegistry
 
 
@@ -372,7 +372,7 @@ class PromptBuilder:
                 "hypotheses:",
                 "  - \"short hypothesis text\"",
                 "nodes:",
-                "  - {\"name\": \"optional_new_node\", \"kind\": \"intermediate\", \"description\": \"what it computes\"}",
+                "  - {\"name\": \"optional_new_node\", \"kind\": \"intermediate|callable\", \"description\": \"what it computes\"}",
                 "remove:",
                 "  - {\"target_node\": \"node\", \"alternative_id\": \"alt\", \"reason\": \"why it is safe to remove\"}",
                 "globals:",
@@ -405,7 +405,7 @@ class PromptBuilder:
                 "Available primitive names:",
                 ", ".join(sorted((self.registry or PrimitiveRegistry.default()).factories)),
                 "",
-                "Allowed new node kinds: intermediate, callable, output, fitting.",
+                "Allowed new node kinds: intermediate, callable. The single output node and optional fitting nodes already exist; extend them with alternatives.",
                 "Existing node names and newly declared nodes may be used as mutation targets or parents.",
                 "Keep the DAG valid, keep globals append-only, and avoid adding broad branching unless diagnostics justify it.",
                 "Keep the mutation small enough to evaluate quickly: usually one add/remove, or one new node/global plus its required add.",
@@ -687,9 +687,10 @@ class LLMEngineerAgent(EngineerAgent):
         )
 
     def _validate_supported_document(self, graph: Graph, document: MutationDocument) -> None:
+        validate_mutation_document_architecture(graph, document)
         known_nodes = set(graph.nodes)
         new_nodes = set()
-        allowed_kinds = {"intermediate", "callable", "output", "fitting"}
+        allowed_kinds = {"intermediate", "callable"}
         for node in document.nodes:
             if node.name in known_nodes or node.name in new_nodes:
                 raise ValueError(f"Mutation declares duplicate node {node.name!r}.")

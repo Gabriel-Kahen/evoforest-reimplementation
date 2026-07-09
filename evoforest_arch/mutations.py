@@ -7,7 +7,7 @@ import json
 
 import numpy as np
 
-from evoforest_arch.graph import Graph
+from evoforest_arch.graph import Graph, allowed_output_contract_types, default_output_contract
 from evoforest_arch.maintenance import GraphMaintenance, MaintenanceReport
 from evoforest_arch.primitives import PrimitiveRegistry
 from evoforest_arch.source import build_source_alternative
@@ -269,6 +269,8 @@ class MutationEngine:
         return self.apply_document(graph, MutationDocument(add=(spec,))).graph
 
     def apply_document(self, graph: Graph, document: MutationDocument) -> MutationApplication:
+        graph.validate_paper_architecture()
+        validate_mutation_document_architecture(graph, document)
         mutated = graph.clone()
         explicit_removed: list[str] = []
         for global_spec in document.globals:
@@ -288,6 +290,7 @@ class MutationEngine:
         for spec in document.add:
             self._apply_add(mutated, spec)
         cleaned, report = self.maintenance.clean(mutated)
+        cleaned.validate_paper_architecture()
         report.removed_alternatives = explicit_removed + report.removed_alternatives
         return MutationApplication(graph=cleaned, maintenance=report)
 
@@ -302,6 +305,8 @@ class MutationEngine:
         if spec.source:
             if not self.allow_source:
                 raise ValueError("Source-backed mutation alternatives require MutationEngine(allow_source=True).")
+            output_contract = default_output_contract(spec.target_node, target_kind)
+            output_contract.update(spec.output_contract)
             alternative = build_source_alternative(
                 spec.alternative_id,
                 spec.parents,
@@ -309,7 +314,7 @@ class MutationEngine:
                 description=spec.description,
                 global_refs=spec.global_refs,
                 node_kind=target_kind,
-                output_contract=spec.output_contract,
+                output_contract=output_contract,
                 torch_source=spec.torch_source,
             )
         else:
@@ -345,10 +350,68 @@ class MutationEngine:
 
     @staticmethod
     def _apply_node(graph: Graph, spec: NodeSpec) -> None:
-        allowed = {"intermediate", "callable", "output", "fitting"}
+        allowed = {"intermediate", "callable"}
         if spec.kind not in allowed:
+            if spec.kind in {"output", "fitting"}:
+                raise ValueError(
+                    f"Mutation documents cannot add {spec.kind} nodes; add an alternative to 'output', 'ridge_w', or 'ridge_g'."
+                )
             raise ValueError(f"Unsupported node kind {spec.kind!r}; expected one of {sorted(allowed)}.")
         graph.add_node(spec.name, spec.kind, spec.description)
+
+
+def validate_mutation_document_architecture(graph: Graph, document: MutationDocument) -> None:
+    """Reject topology and type violations before cloning or executing a mutation."""
+    known_nodes = set(graph.nodes)
+    new_nodes: set[str] = set()
+    for node in document.nodes:
+        if node.name in known_nodes or node.name in new_nodes:
+            raise ValueError(f"Mutation declares duplicate node {node.name!r}.")
+        if node.name in {"output", "ridge_w", "ridge_g"}:
+            raise ValueError(f"Mutation cannot redeclare reserved paper architecture node {node.name!r}.")
+        if node.kind in {"output", "fitting"}:
+            raise ValueError(
+                f"Mutation documents cannot add {node.kind} node {node.name!r}; "
+                "add behavior as an alternative to 'output', 'ridge_w', or 'ridge_g'."
+            )
+        if node.kind not in {"intermediate", "callable"}:
+            raise ValueError(f"Unsupported node kind {node.kind!r}; expected 'intermediate' or 'callable'.")
+        new_nodes.add(node.name)
+    all_nodes = known_nodes | new_nodes
+    node_kinds = {name: node.kind for name, node in graph.nodes.items()}
+    node_kinds.update({node.name: node.kind for node in document.nodes})
+    additions_by_node: dict[str, int] = {}
+    for addition in document.add:
+        additions_by_node[addition.target_node] = additions_by_node.get(addition.target_node, 0) + 1
+        if addition.target_node not in all_nodes:
+            raise ValueError(f"Add target node {addition.target_node!r} does not exist.")
+        for parent in addition.parents:
+            if parent not in all_nodes:
+                raise ValueError(f"Parent node {parent!r} does not exist.")
+        target_kind = node_kinds[addition.target_node]
+        if addition.node_kind and addition.node_kind != target_kind:
+            raise ValueError(
+                f"Mutation for {addition.target_node!r} declares node_kind {addition.node_kind!r}, "
+                f"but the target is {target_kind!r}."
+            )
+        contract_type = str(addition.output_contract.get("type", ""))
+        allowed_types = {"", *allowed_output_contract_types(addition.target_node, target_kind)}
+        if contract_type not in allowed_types:
+            raise ValueError(
+                f"Alternative for {addition.target_node!r} has output contract type {contract_type!r}; "
+                f"expected one of {sorted(allowed_types)!r}."
+            )
+
+    removals_by_node: dict[str, int] = {}
+    for removal in document.remove:
+        removals_by_node[removal.target_node] = removals_by_node.get(removal.target_node, 0) + 1
+    for node_name, removal_count in removals_by_node.items():
+        node = graph.nodes.get(node_name)
+        if node is None or node.kind not in {"output", "fitting"}:
+            continue
+        remaining = len(node.alternatives) - removal_count + additions_by_node.get(node_name, 0)
+        if remaining < 1:
+            raise ValueError(f"Mutation would leave paper architecture node {node_name!r} without alternatives.")
 
 
 def extract_mutation_yaml(text: str) -> str:

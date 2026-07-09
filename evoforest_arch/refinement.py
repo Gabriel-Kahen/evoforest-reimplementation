@@ -5,7 +5,7 @@ from typing import Any
 
 import numpy as np
 
-from evoforest_arch.graph import Graph, NodeAlternative
+from evoforest_arch.graph import EvalContext, Graph, NodeAlternative
 from evoforest_arch.readout import Standardizer, select_alpha_and_fit_ridge
 
 
@@ -166,8 +166,13 @@ class TorchFixedPathEvaluator:
         self.torch = torch_module
         self.device = device
         self.inputs = {name: self._torch_input(value) for name, value in inputs.items()}
+        self.active_globals = set(parameters.keys())
         self.ctx = TorchEvalContext(self.inputs, TorchGlobalProxy(graph, parameters, self.torch, self.device))
         self.cache: dict[tuple[str, str], Any] = {}
+        self.numpy_ctx = EvalContext(
+            inputs=inputs,
+            globals=graph.globals.clone(),
+        )
 
     def _torch_input(self, value: object) -> object:
         if not isinstance(value, np.ndarray):
@@ -181,7 +186,10 @@ class TorchFixedPathEvaluator:
         for node_name in self.graph.output_nodes():
             node = self.graph.nodes[node_name]
             for alternative in node.alternatives:
-                value = self.evaluate_alternative(node_name, alternative.id)
+                if self._output_references_active_global(node_name, alternative.id):
+                    value = self.evaluate_alternative(node_name, alternative.id)
+                else:
+                    value = self._constant_numpy_alternative(node_name, alternative.id)
                 if value.ndim == 1:
                     value = value.reshape(-1, 1)
                 if value.ndim != 2:
@@ -190,6 +198,29 @@ class TorchFixedPathEvaluator:
         if not blocks:
             raise UnsupportedTorchRefinement("Graph has no output alternatives for torch refinement.")
         return self.torch.cat(blocks, dim=1)
+
+    def _output_references_active_global(self, node_name: str, alternative_id: str) -> bool:
+        for dependency in self.graph.alternative_dependencies(node_name, alternative_id, self.config):
+            dependency_node, dependency_alternative = dependency.split(".", maxsplit=1)
+            alternative = self._alternative(
+                self.graph.nodes[dependency_node].alternatives,
+                dependency_alternative,
+                dependency_node,
+            )
+            if self.active_globals.intersection(alternative.global_refs):
+                return True
+        return False
+
+    def _constant_numpy_alternative(self, name: str, alternative_id: str) -> Any:
+        numpy_value = self.graph.evaluate_alternative(name, alternative_id, self.config, self.numpy_ctx)
+        if hasattr(numpy_value, "values"):
+            numpy_value = numpy_value.values
+        try:
+            return self.torch.as_tensor(numpy_value, dtype=self.torch.float64, device=self.device)
+        except (TypeError, ValueError) as exc:
+            raise UnsupportedTorchRefinement(
+                f"Constant NumPy alternative {name}.{alternative_id} cannot be represented as a Torch tensor."
+            ) from exc
 
     def evaluate_node(self, name: str) -> Any:
         node = self.graph.nodes[name]
@@ -205,9 +236,10 @@ class TorchFixedPathEvaluator:
         node = self.graph.nodes[name]
         alternative = self._alternative(node.alternatives, alternative_id, name)
         if alternative.torch_fn is None:
-            raise UnsupportedTorchRefinement(f"Alternative {name}.{alternative_id} has no torch evaluator.")
-        parent_values = {parent: self.evaluate_node(parent) for parent in alternative.parents}
-        value = alternative.torch_fn(self.ctx, parent_values)
+            value = self._constant_numpy_alternative(name, alternative_id)
+        else:
+            parent_values = {parent: self.evaluate_node(parent) for parent in alternative.parents}
+            value = alternative.torch_fn(self.ctx, parent_values)
         self.cache[key] = value
         return value
 
@@ -226,6 +258,11 @@ class TorchLBFGSRefiner:
         self.device = device
 
     def refine(self, graph: Graph, inputs: dict[str, object], y: np.ndarray, config: dict[str, str]) -> RefinementResult:
+        graph.validate_paper_architecture()
+        try:
+            graph.validate_torch_trainable_paths(config)
+        except ValueError as exc:
+            raise UnsupportedTorchRefinement(str(exc)) from exc
         try:
             import torch
         except ImportError as exc:
