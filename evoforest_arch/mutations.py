@@ -300,6 +300,8 @@ class MutationEngine:
         if spec.target_node not in graph.nodes:
             raise KeyError(f"Unknown target node {spec.target_node!r}.")
         target_kind = graph.nodes[spec.target_node].kind
+        if target_kind == "input":
+            raise ValueError(f"Mutation alternatives cannot target input node {spec.target_node!r}.")
         if spec.node_kind and spec.node_kind != target_kind:
             raise ValueError(f"Mutation for {spec.target_node!r} declares node_kind {spec.node_kind!r}, but graph node kind is {target_kind!r}.")
         if spec.source:
@@ -389,6 +391,8 @@ def validate_mutation_document_architecture(graph: Graph, document: MutationDocu
             if parent not in all_nodes:
                 raise ValueError(f"Parent node {parent!r} does not exist.")
         target_kind = node_kinds[addition.target_node]
+        if target_kind == "input":
+            raise ValueError(f"Mutation alternatives cannot target input node {addition.target_node!r}.")
         if addition.node_kind and addition.node_kind != target_kind:
             raise ValueError(
                 f"Mutation for {addition.target_node!r} declares node_kind {addition.node_kind!r}, "

@@ -95,6 +95,8 @@ def graph_from_dict(
                 )
             elif primitive:
                 alternative = registry.build(str(primitive), alt_id, parents)
+                if output_contract:
+                    alternative.output_contract = copy.deepcopy(output_contract)
             else:
                 raise ValueError(f"Alternative {node_name}.{alt_id} has no primitive or source to rebuild from.")
 

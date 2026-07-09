@@ -15,7 +15,8 @@ from evoforest_arch.evaluator import RidgeEvaluator, abs_feature_correlation, ef
 from evoforest_arch.evaluation_cache import PersistentEvaluationCache, fingerprint_callable
 from evoforest_arch.evolution import EvolutionLoop
 from evoforest_arch.feedback import toon_report
-from evoforest_arch.graph import CallableFamily, EvalContext, FeatureBlock, Graph, ResidualWeightRule
+from evoforest_arch.graph import CallableFamily, EvalContext, FeatureBlock, Graph, NodeAlternative, ResidualWeightRule
+from evoforest_arch.graph_io import graph_from_dict, graph_hash
 from evoforest_arch.llm import ClaudeLLMClient, GeminiLLMClient, LLMEngineerAgent, LLMMemorandumAgent, LLMScientistAgent, OpenAILLMClient, PromptBuilder, StaticLLMClient, llm_client_from_env, llm_provider_from_env
 from evoforest_arch.maintenance import GraphMaintenance
 from evoforest_arch.metrics import FoldStrategy, RMSE_SCORER, safe_corr
@@ -93,6 +94,34 @@ def test_built_in_alternatives_have_typed_output_contracts() -> None:
     }
     assert graph.nodes["ridge_w"].alternatives[0].output_contract == {"type": "sample_weight"}
     assert graph.nodes["ridge_g"].alternatives[0].output_contract == {"type": "residual_weight_rule"}
+
+
+def test_registry_graph_round_trip_preserves_serialized_output_contract() -> None:
+    graph = build_seed_graph()
+    graph.nodes["output"].alternatives[0].output_contract["n_columns"] = 123
+
+    restored = graph_from_dict(graph.to_dict())
+
+    assert restored.nodes["output"].alternatives[0].output_contract["n_columns"] == 123
+    assert graph_hash(restored) == graph_hash(graph)
+
+
+def test_custom_registry_primitive_infers_contract_from_target_node() -> None:
+    registry = PrimitiveRegistry(factories={})
+
+    def custom_factory(alternative_id: str, parents: tuple[str, ...]) -> NodeAlternative:
+        return NodeAlternative(
+            alternative_id,
+            parents,
+            lambda _ctx, _values: CallableFamily("custom", lambda values: values),
+        )
+
+    registry.register("custom_gate", custom_factory)
+    graph = build_seed_graph()
+    graph.nodes["activation"].add_alternative(registry.build("custom_gate", "custom", ()))
+
+    graph.validate_paper_architecture()
+    assert graph.nodes["activation"].alternatives[-1].output_contract == {"type": "callable"}
 
 
 def test_graph_evaluates_alternatives_callables_and_globals() -> None:
@@ -874,12 +903,35 @@ def test_mutation_documents_reject_new_output_and_fitting_nodes_early(node: Node
     assert graph.to_dict() == before
 
 
+def test_mutation_documents_reject_alternatives_on_input_nodes() -> None:
+    graph = build_structural_break_seed_graph()
+    document = MutationDocument(
+        add=(MutationSpec(kind="add_alternative", target_node="series", alternative_id="ignored", primitive="identity_callable", parents=()),)
+    )
+
+    with pytest.raises(ValueError, match="cannot target input node"):
+        MutationEngine().apply_document(graph, document)
+
+    assert graph.nodes["series"].alternatives == []
+
+
 def test_llm_document_validation_rejects_extra_output_node() -> None:
     graph = build_structural_break_seed_graph()
     document = MutationDocument(nodes=(NodeSpec("predictions", "output"),))
     engineer = LLMEngineerAgent(StaticLLMClient([]))
 
     with pytest.raises(ValueError, match="add behavior as an alternative"):
+        engineer._validate_supported_document(graph, document)
+
+
+def test_llm_document_validation_rejects_primitive_incompatible_with_target() -> None:
+    graph = build_structural_break_seed_graph()
+    document = MutationDocument(
+        add=(MutationSpec(kind="add_alternative", target_node="output", alternative_id="weights", primitive="uniform_sample_weight", parents=()),)
+    )
+    engineer = LLMEngineerAgent(StaticLLMClient([]))
+
+    with pytest.raises(ValueError, match="incompatible with output node"):
         engineer._validate_supported_document(graph, document)
 
 

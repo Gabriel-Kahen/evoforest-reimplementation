@@ -18,7 +18,7 @@ import numpy as np
 from evoforest_arch.agents import EngineerAgent, Hypothesis, ScientistAgent
 from evoforest_arch.evaluator import EvaluationResult
 from evoforest_arch.feedback import feedback_summary, toon_report
-from evoforest_arch.graph import Graph
+from evoforest_arch.graph import Graph, allowed_output_contract_types, default_output_contract
 from evoforest_arch.mutations import MutationDocument, RemoveSpec, validate_mutation_document_architecture
 from evoforest_arch.primitives import PrimitiveRegistry
 
@@ -717,6 +717,19 @@ class LLMEngineerAgent(EngineerAgent):
                     raise ValueError("Source-backed LLM mutations are disabled for this engineer agent.")
             elif add.primitive not in self.registry.factories:
                 raise ValueError(f"Unknown primitive {add.primitive!r}.")
+            else:
+                target_kind = graph.nodes[add.target_node].kind if add.target_node in graph.nodes else next(
+                    node.kind for node in document.nodes if node.name == add.target_node
+                )
+                alternative = self.registry.build(add.primitive, add.alternative_id, add.parents)
+                contract = default_output_contract(add.target_node, target_kind)
+                contract.update(alternative.output_contract)
+                allowed_types = allowed_output_contract_types(add.target_node, target_kind)
+                if allowed_types and str(contract.get("type", "")) not in allowed_types:
+                    raise ValueError(
+                        f"Primitive {add.primitive!r} returns {contract.get('type')!r}, which is incompatible "
+                        f"with {target_kind} node {add.target_node!r}."
+                    )
             for parent in add.parents:
                 if parent not in all_nodes:
                     raise ValueError(f"Parent node {parent!r} does not exist.")

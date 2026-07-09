@@ -187,6 +187,8 @@ class Graph:
     ) -> None:
         if node_name not in self.nodes:
             raise KeyError(f"Unknown node {node_name!r}.")
+        if self.nodes[node_name].kind == "input":
+            raise ValueError(f"Input node {node_name!r} cannot contain alternatives.")
         for parent in parents:
             if parent not in self.nodes:
                 raise KeyError(f"Alternative {alternative_id!r} references unknown parent {parent!r}.")
@@ -278,6 +280,8 @@ class Graph:
                 raise ValueError("The reserved node name 'output' must identify the logical output node.")
             if name in PAPER_FITTING_NODES and node.kind != "fitting":
                 raise ValueError(f"The reserved node name {name!r} must identify a fitting node.")
+            if node.kind == "input" and node.alternatives:
+                raise ValueError(f"Input node {name!r} cannot contain alternatives.")
         output_nodes = self.output_nodes()
         if output_nodes != [PAPER_OUTPUT_NODE]:
             raise ValueError(
