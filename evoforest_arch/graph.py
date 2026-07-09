@@ -6,6 +6,7 @@ import copy
 
 import numpy as np
 
+from evoforest_arch.evaluation_cache import fingerprint_callable, fingerprint_value
 from evoforest_arch.globals import GlobalStore
 
 
@@ -111,6 +112,7 @@ class EvalContext:
     cache_misses: int = 0
     key_cache: dict[tuple[str, str], tuple[object, ...]] = field(default_factory=dict)
     alternative_lookup: dict[str, dict[str, NodeAlternative]] | None = None
+    cache_namespace: str = ""
 
     def read_input(self, name: str) -> Any:
         if name not in self.inputs:
@@ -381,7 +383,15 @@ class Graph:
 
     def evaluate_alternative(self, name: str, alternative_id: str, config: dict[str, str], ctx: EvalContext) -> Any:
         node = self.nodes[name]
-        key = self.alternative_cache_key(name, alternative_id, config, memo=ctx.key_cache, alternative_lookup=ctx.alternative_lookup)
+        key = self.alternative_cache_key(
+            name,
+            alternative_id,
+            config,
+            memo=ctx.key_cache,
+            alternative_lookup=ctx.alternative_lookup,
+            cache_namespace=ctx.cache_namespace,
+            globals_store=ctx.globals,
+        )
         if key in ctx.cache:
             ctx.cache_hits += 1
             return ctx.cache[key]
@@ -400,6 +410,8 @@ class Graph:
         *,
         memo: dict[tuple[str, str], tuple[object, ...]] | None = None,
         alternative_lookup: dict[str, dict[str, NodeAlternative]] | None = None,
+        cache_namespace: str = "",
+        globals_store: GlobalStore | None = None,
     ) -> tuple[object, ...]:
         memo_key = (node_name, alternative_id)
         if memo is not None and memo_key in memo:
@@ -413,8 +425,36 @@ class Graph:
                 parent_keys.append(("input", parent))
                 continue
             parent_alt_id = config.get(parent, parent_node.default_alternative_id())
-            parent_keys.append(self.alternative_cache_key(parent, parent_alt_id, config, memo=memo, alternative_lookup=alternative_lookup))
-        key = (node_name, alternative_id, tuple(parent_keys))
+            parent_keys.append(
+                self.alternative_cache_key(
+                    parent,
+                    parent_alt_id,
+                    config,
+                    memo=memo,
+                    alternative_lookup=alternative_lookup,
+                    cache_namespace=cache_namespace,
+                    globals_store=globals_store,
+                )
+            )
+        global_store = globals_store or self.globals
+        global_values = tuple((name, fingerprint_value(global_store.get(name))) for name in alternative.global_refs)
+        semantics = (
+            alternative.primitive,
+            alternative.source,
+            tuple(alternative.parents),
+            tuple(alternative.global_refs),
+            alternative.output_contract,
+            fingerprint_callable(alternative.fn),
+        )
+        key = (
+            "ancestor_conditioned_subpath_v2",
+            cache_namespace,
+            node_name,
+            alternative_id,
+            fingerprint_value(semantics),
+            global_values,
+            tuple(parent_keys),
+        )
         if memo is not None:
             memo[memo_key] = key
         return key
@@ -424,6 +464,7 @@ class Graph:
         inputs: dict[str, Any],
         config: dict[str, str] | None = None,
         cache: dict[object, Any] | None = None,
+        cache_namespace: str = "",
     ) -> tuple[np.ndarray, list[str], EvalContext]:
         selected = self.selected_config(config)
         ctx = EvalContext(
@@ -431,6 +472,7 @@ class Graph:
             globals=self.globals.clone(),
             cache=cache if cache is not None else {},
             alternative_lookup=self._alternative_lookup(),
+            cache_namespace=cache_namespace,
         )
         blocks: list[FeatureBlock] = []
         for node_name in self.output_nodes():
