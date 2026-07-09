@@ -313,6 +313,64 @@ def test_configuration_search_reuses_adjacent_identical_feature_matrices() -> No
     cache = result.diagnostics["configuration_search"]["cache"]
     assert cache["feature_matrix_reuse_hits"] > 0
     assert result.diagnostics["configuration_search"]["evaluated"] > cache["feature_matrix_reuse_hits"]
+    assert (
+        result.diagnostics["configuration_search"]["evaluated"]
+        == result.diagnostics["configuration_search"]["unique_feature_matrices"]
+        + cache["feature_matrix_reuse_hits"]
+    )
+
+
+def test_full_diagnostics_are_computed_only_for_the_winning_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
+    dataset = make_tabular_data(n_samples=64, n_features=5, seed=49)
+    evaluator = RidgeEvaluator(
+        n_splits=2,
+        seed=49,
+        max_configurations=8,
+        diagnostics_mode="full",
+        feature_pool_diagnostics=False,
+    )
+    full_diagnostic_calls = 0
+    objective_diagnostic_calls = 0
+    original_diagnostics = evaluator._diagnostics
+    original_objective_diagnostics = evaluator._objective_diagnostics
+
+    def counted_diagnostics(*args: object, **kwargs: object) -> dict[str, object]:
+        nonlocal full_diagnostic_calls
+        full_diagnostic_calls += 1
+        return original_diagnostics(*args, **kwargs)
+
+    def counted_objective_diagnostics(*args: object, **kwargs: object) -> dict[str, object]:
+        nonlocal objective_diagnostic_calls
+        objective_diagnostic_calls += 1
+        return original_objective_diagnostics(*args, **kwargs)
+
+    monkeypatch.setattr(evaluator, "_diagnostics", counted_diagnostics)
+    monkeypatch.setattr(evaluator, "_objective_diagnostics", counted_objective_diagnostics)
+    result = evaluator.evaluate(build_seed_graph(), dataset.inputs(), dataset.y)
+
+    assert result.diagnostics["configuration_search"]["evaluated"] == 8
+    assert full_diagnostic_calls == 1
+    assert objective_diagnostic_calls == 1
+    assert result.diagnostics["evaluation_passes"] == {
+        "configuration_scoring": "score",
+        "winner_diagnostics": "full",
+        "winner_rerun": True,
+    }
+    assert result.diagnostics["features"]
+
+
+def test_feature_pool_contains_each_unique_matrix_once() -> None:
+    dataset = make_tabular_data(n_samples=64, n_features=5, seed=50)
+    result = RidgeEvaluator(
+        n_splits=2,
+        seed=50,
+        max_configurations=36,
+        diagnostics_mode="basic",
+    ).evaluate(build_seed_graph(), dataset.inputs(), dataset.y)
+
+    search = result.diagnostics["configuration_search"]
+    assert result.diagnostics["valid_feature_pool"]["n_configurations"] == search["unique_feature_matrices"]
+    assert result.diagnostics["valid_feature_pool"]["n_configurations"] < search["evaluated"]
 
 
 def test_configuration_search_reuses_fold_assignments() -> None:
