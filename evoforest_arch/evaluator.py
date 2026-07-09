@@ -207,15 +207,24 @@ class RidgeEvaluator:
         else:
             configs, total_configurations = self._configuration_candidates(working_graph)
             best: EvaluationResult | None = None
-            best_feature_signature: tuple[object, ...] | None = None
+            best_feature_result: tuple[np.ndarray, list[str]] | None = None
             config_rows: list[dict[str, object]] = []
             feature_pool_by_signature: dict[tuple[object, ...], tuple[np.ndarray | None, list[str]]] = {}
-            feature_results_by_signature: dict[tuple[object, ...], tuple[np.ndarray, list[str]]] = {}
-            scoring_diagnostics_mode = "basic" if self.diagnostics_mode == "full" else self.diagnostics_mode
+            feature_results_by_signature: dict[tuple[object, ...], tuple[np.ndarray, list[str]]] | None = (
+                {} if self.feature_pool_diagnostics else None
+            )
+            seen_feature_signatures: set[tuple[object, ...]] = set()
+            last_feature_signature: tuple[object, ...] | None = None
+            last_feature_result: tuple[np.ndarray, list[str]] | None = None
             for candidate_config in configs:
                 config_index = len(config_rows) + 1
                 feature_signature = self._feature_signature(working_graph, candidate_config)
-                precomputed_features = feature_results_by_signature.get(feature_signature)
+                seen_feature_signatures.add(feature_signature)
+                precomputed_features = (
+                    feature_results_by_signature.get(feature_signature)
+                    if feature_results_by_signature is not None
+                    else last_feature_result if feature_signature == last_feature_signature else None
+                )
                 if precomputed_features is not None:
                     feature_matrix_reuse_hits += 1
                 result = self._evaluate_single_config(
@@ -227,7 +236,7 @@ class RidgeEvaluator:
                     precomputed_features=precomputed_features,
                     folds=folds,
                     fold_diagnostics=fold_diagnostics,
-                    diagnostics_mode=scoring_diagnostics_mode,
+                    diagnostics_mode="score",
                     progress_context={
                         "config_index": config_index,
                         "configurations_evaluated": config_index,
@@ -236,7 +245,10 @@ class RidgeEvaluator:
                     },
                 )
                 if result.feature_matrix is not None:
-                    feature_results_by_signature[feature_signature] = (result.feature_matrix, result.feature_names)
+                    last_feature_signature = feature_signature
+                    last_feature_result = (result.feature_matrix, result.feature_names)
+                    if feature_results_by_signature is not None:
+                        feature_results_by_signature[feature_signature] = last_feature_result
                 if self.feature_pool_diagnostics:
                     feature_pool_by_signature.setdefault(feature_signature, (result.feature_matrix, result.feature_names))
                 cache_row = result.diagnostics.get("cache", {})
@@ -266,7 +278,7 @@ class RidgeEvaluator:
                 )
                 if best is None or result.score > best.score:
                     best = result
-                    best_feature_signature = feature_signature
+                    best_feature_result = last_feature_result
             if best is None:
                 raise ValueError("No graph configurations were available for evaluation.")
             if self.diagnostics_mode == "full":
@@ -276,11 +288,7 @@ class RidgeEvaluator:
                     y,
                     best.config,
                     shared_cache,
-                    precomputed_features=(
-                        feature_results_by_signature.get(best_feature_signature)
-                        if best_feature_signature is not None
-                        else None
-                    ),
+                    precomputed_features=best_feature_result,
                     folds=folds,
                     fold_diagnostics=fold_diagnostics,
                     diagnostics_mode="full",
@@ -293,20 +301,31 @@ class RidgeEvaluator:
                     },
                 )
                 result.diagnostics["evaluation_passes"] = {
-                    "configuration_scoring": "basic",
+                    "configuration_scoring": "score",
                     "winner_diagnostics": "full",
                     "winner_rerun": True,
                 }
             else:
                 result = best
+                scoring_diagnostics = result.diagnostics
+                result.diagnostics = self._basic_diagnostics(
+                    result.predictions,
+                    y,
+                    inputs,
+                    result.feature_names,
+                    working_graph.selected_alternatives(result.config),
+                    result.score,
+                )
+                for key in ("folds", "fitting", "cache", "graph"):
+                    result.diagnostics[key] = scoring_diagnostics[key]
                 result.diagnostics["evaluation_passes"] = {
-                    "configuration_scoring": "basic",
+                    "configuration_scoring": "score",
                     "winner_diagnostics": "basic",
                     "winner_rerun": False,
                 }
             feature_pool = list(feature_pool_by_signature.values())
             result.diagnostics["configuration_search"] = self._configuration_search_diagnostics(config_rows, total_configurations)
-            result.diagnostics["configuration_search"]["unique_feature_matrices"] = len(feature_results_by_signature)
+            result.diagnostics["configuration_search"]["unique_feature_matrices"] = len(seen_feature_signatures)
         search_cache = {
             "hits": int(search_cache_hits),
             "misses": int(search_cache_misses),
@@ -446,8 +465,16 @@ class RidgeEvaluator:
                 global_fit,
             )
             diagnostics["alternatives"] = alternative_diagnostics(diagnostics["features"], selected_alternatives, score)
-        else:
+        elif resolved_diagnostics_mode == "basic":
             diagnostics = self._basic_diagnostics(preds, y, inputs, names, selected_alternatives, score)
+        else:
+            diagnostics = {
+                "diagnostics_mode": "score",
+                "n_features": int(len(names)),
+                "features": [],
+                "subnodes": [],
+                "alternatives": [],
+            }
         diagnostics["folds"] = {
             "score": fold_scores,
             "score_mean": float(np.mean(fold_scores)) if fold_scores else 0.0,

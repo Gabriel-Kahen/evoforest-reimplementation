@@ -330,20 +330,29 @@ def test_full_diagnostics_are_computed_only_for_the_winning_configuration(monkey
         feature_pool_diagnostics=False,
     )
     full_diagnostic_calls = 0
+    objective_diagnostic_calls = 0
     original_diagnostics = evaluator._diagnostics
+    original_objective_diagnostics = evaluator._objective_diagnostics
 
     def counted_diagnostics(*args: object, **kwargs: object) -> dict[str, object]:
         nonlocal full_diagnostic_calls
         full_diagnostic_calls += 1
         return original_diagnostics(*args, **kwargs)
 
+    def counted_objective_diagnostics(*args: object, **kwargs: object) -> dict[str, object]:
+        nonlocal objective_diagnostic_calls
+        objective_diagnostic_calls += 1
+        return original_objective_diagnostics(*args, **kwargs)
+
     monkeypatch.setattr(evaluator, "_diagnostics", counted_diagnostics)
+    monkeypatch.setattr(evaluator, "_objective_diagnostics", counted_objective_diagnostics)
     result = evaluator.evaluate(build_seed_graph(), dataset.inputs(), dataset.y)
 
     assert result.diagnostics["configuration_search"]["evaluated"] == 8
     assert full_diagnostic_calls == 1
+    assert objective_diagnostic_calls == 1
     assert result.diagnostics["evaluation_passes"] == {
-        "configuration_scoring": "basic",
+        "configuration_scoring": "score",
         "winner_diagnostics": "full",
         "winner_rerun": True,
     }
