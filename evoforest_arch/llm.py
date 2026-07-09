@@ -18,8 +18,8 @@ import numpy as np
 from evoforest_arch.agents import EngineerAgent, Hypothesis, ScientistAgent
 from evoforest_arch.evaluator import EvaluationResult
 from evoforest_arch.feedback import feedback_summary, toon_report
-from evoforest_arch.graph import Graph
-from evoforest_arch.mutations import MutationDocument, RemoveSpec
+from evoforest_arch.graph import Graph, allowed_output_contract_types, default_output_contract
+from evoforest_arch.mutations import MutationDocument, RemoveSpec, validate_mutation_document_architecture
 from evoforest_arch.primitives import PrimitiveRegistry
 
 
@@ -372,7 +372,7 @@ class PromptBuilder:
                 "hypotheses:",
                 "  - \"short hypothesis text\"",
                 "nodes:",
-                "  - {\"name\": \"optional_new_node\", \"kind\": \"intermediate\", \"description\": \"what it computes\"}",
+                "  - {\"name\": \"optional_new_node\", \"kind\": \"intermediate|callable\", \"description\": \"what it computes\"}",
                 "remove:",
                 "  - {\"target_node\": \"node\", \"alternative_id\": \"alt\", \"reason\": \"why it is safe to remove\"}",
                 "globals:",
@@ -405,7 +405,7 @@ class PromptBuilder:
                 "Available primitive names:",
                 ", ".join(sorted((self.registry or PrimitiveRegistry.default()).factories)),
                 "",
-                "Allowed new node kinds: intermediate, callable, output, fitting.",
+                "Allowed new node kinds: intermediate, callable. The single output node and optional fitting nodes already exist; extend them with alternatives.",
                 "Existing node names and newly declared nodes may be used as mutation targets or parents.",
                 "Keep the DAG valid, keep globals append-only, and avoid adding broad branching unless diagnostics justify it.",
                 "Keep the mutation small enough to evaluate quickly: usually one add/remove, or one new node/global plus its required add.",
@@ -687,9 +687,10 @@ class LLMEngineerAgent(EngineerAgent):
         )
 
     def _validate_supported_document(self, graph: Graph, document: MutationDocument) -> None:
+        validate_mutation_document_architecture(graph, document)
         known_nodes = set(graph.nodes)
         new_nodes = set()
-        allowed_kinds = {"intermediate", "callable", "output", "fitting"}
+        allowed_kinds = {"intermediate", "callable"}
         for node in document.nodes:
             if node.name in known_nodes or node.name in new_nodes:
                 raise ValueError(f"Mutation declares duplicate node {node.name!r}.")
@@ -716,6 +717,19 @@ class LLMEngineerAgent(EngineerAgent):
                     raise ValueError("Source-backed LLM mutations are disabled for this engineer agent.")
             elif add.primitive not in self.registry.factories:
                 raise ValueError(f"Unknown primitive {add.primitive!r}.")
+            else:
+                target_kind = graph.nodes[add.target_node].kind if add.target_node in graph.nodes else next(
+                    node.kind for node in document.nodes if node.name == add.target_node
+                )
+                alternative = self.registry.build(add.primitive, add.alternative_id, add.parents)
+                contract = default_output_contract(add.target_node, target_kind)
+                contract.update(alternative.output_contract)
+                allowed_types = allowed_output_contract_types(add.target_node, target_kind)
+                if allowed_types and str(contract.get("type", "")) not in allowed_types:
+                    raise ValueError(
+                        f"Primitive {add.primitive!r} returns {contract.get('type')!r}, which is incompatible "
+                        f"with {target_kind} node {add.target_node!r}."
+                    )
             for parent in add.parents:
                 if parent not in all_nodes:
                     raise ValueError(f"Parent node {parent!r} does not exist.")

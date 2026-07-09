@@ -15,7 +15,8 @@ from evoforest_arch.evaluator import RidgeEvaluator, abs_feature_correlation, ef
 from evoforest_arch.evaluation_cache import PersistentEvaluationCache, fingerprint_callable
 from evoforest_arch.evolution import EvolutionLoop
 from evoforest_arch.feedback import toon_report
-from evoforest_arch.graph import CallableFamily, EvalContext, FeatureBlock, Graph, ResidualWeightRule
+from evoforest_arch.graph import CallableFamily, EvalContext, FeatureBlock, Graph, NodeAlternative, ResidualWeightRule
+from evoforest_arch.graph_io import graph_from_dict, graph_hash
 from evoforest_arch.llm import ClaudeLLMClient, GeminiLLMClient, LLMEngineerAgent, LLMMemorandumAgent, LLMScientistAgent, OpenAILLMClient, PromptBuilder, StaticLLMClient, llm_client_from_env, llm_provider_from_env
 from evoforest_arch.maintenance import GraphMaintenance
 from evoforest_arch.metrics import FoldStrategy, RMSE_SCORER, safe_corr
@@ -65,6 +66,62 @@ def test_seed_graph_exposes_paper_architecture_motifs() -> None:
     assert "output" not in graph.configuration_space()
     assert "ridge_w" in graph.configuration_space()
     assert "ridge_g" in graph.configuration_space()
+
+
+def test_paper_graph_contract_rejects_extra_output_and_fitting_nodes() -> None:
+    graph = build_structural_break_seed_graph()
+    graph.validate_paper_architecture()
+
+    with pytest.raises(ValueError, match="logical output node must be named 'output'"):
+        Graph().add_node("predictions", "output")
+    with pytest.raises(ValueError, match="exactly one output node"):
+        graph.add_node("output", "output")
+    with pytest.raises(ValueError, match="Fitting nodes are limited"):
+        Graph().add_node("custom_fit", "fitting")
+
+
+def test_built_in_alternatives_have_typed_output_contracts() -> None:
+    graph = build_structural_break_seed_graph()
+
+    assert graph.nodes["segment_stats"].alternatives[0].output_contract == {
+        "type": "feature_block",
+        "min_columns": 1,
+    }
+    assert graph.nodes["activation"].alternatives[0].output_contract == {"type": "callable"}
+    assert graph.nodes["output"].alternatives[0].output_contract == {
+        "type": "feature_block",
+        "min_columns": 1,
+    }
+    assert graph.nodes["ridge_w"].alternatives[0].output_contract == {"type": "sample_weight"}
+    assert graph.nodes["ridge_g"].alternatives[0].output_contract == {"type": "residual_weight_rule"}
+
+
+def test_registry_graph_round_trip_preserves_serialized_output_contract() -> None:
+    graph = build_seed_graph()
+    graph.nodes["output"].alternatives[0].output_contract["n_columns"] = 123
+
+    restored = graph_from_dict(graph.to_dict())
+
+    assert restored.nodes["output"].alternatives[0].output_contract["n_columns"] == 123
+    assert graph_hash(restored) == graph_hash(graph)
+
+
+def test_custom_registry_primitive_infers_contract_from_target_node() -> None:
+    registry = PrimitiveRegistry(factories={})
+
+    def custom_factory(alternative_id: str, parents: tuple[str, ...]) -> NodeAlternative:
+        return NodeAlternative(
+            alternative_id,
+            parents,
+            lambda _ctx, _values: CallableFamily("custom", lambda values: values),
+        )
+
+    registry.register("custom_gate", custom_factory)
+    graph = build_seed_graph()
+    graph.nodes["activation"].add_alternative(registry.build("custom_gate", "custom", ()))
+
+    graph.validate_paper_architecture()
+    assert graph.nodes["activation"].alternatives[-1].output_contract == {"type": "callable"}
 
 
 def test_graph_evaluates_alternatives_callables_and_globals() -> None:
@@ -829,6 +886,63 @@ def test_mutation_engine_adds_alternative_without_mutating_parent_graph() -> Non
     assert len(output_mutated.nodes["output"].alternatives) == len(graph.nodes["output"].alternatives) + 1
 
 
+@pytest.mark.parametrize(
+    ("node", "message"),
+    [
+        (NodeSpec("second_output", "output"), "add behavior as an alternative"),
+        (NodeSpec("custom_fitter", "fitting"), "add behavior as an alternative"),
+    ],
+)
+def test_mutation_documents_reject_new_output_and_fitting_nodes_early(node: NodeSpec, message: str) -> None:
+    graph = build_structural_break_seed_graph()
+    before = graph.to_dict()
+
+    with pytest.raises(ValueError, match=message):
+        MutationEngine().apply_document(graph, MutationDocument(nodes=(node,)))
+
+    assert graph.to_dict() == before
+
+
+def test_mutation_documents_reject_alternatives_on_input_nodes() -> None:
+    graph = build_structural_break_seed_graph()
+    document = MutationDocument(
+        add=(MutationSpec(kind="add_alternative", target_node="series", alternative_id="ignored", primitive="identity_callable", parents=()),)
+    )
+
+    with pytest.raises(ValueError, match="cannot target input node"):
+        MutationEngine().apply_document(graph, document)
+
+    assert graph.nodes["series"].alternatives == []
+
+
+def test_llm_document_validation_rejects_extra_output_node() -> None:
+    graph = build_structural_break_seed_graph()
+    document = MutationDocument(nodes=(NodeSpec("predictions", "output"),))
+    engineer = LLMEngineerAgent(StaticLLMClient([]))
+
+    with pytest.raises(ValueError, match="add behavior as an alternative"):
+        engineer._validate_supported_document(graph, document)
+
+
+def test_llm_document_validation_rejects_primitive_incompatible_with_target() -> None:
+    graph = build_structural_break_seed_graph()
+    document = MutationDocument(
+        add=(MutationSpec(kind="add_alternative", target_node="output", alternative_id="weights", primitive="uniform_sample_weight", parents=()),)
+    )
+    engineer = LLMEngineerAgent(StaticLLMClient([]))
+
+    with pytest.raises(ValueError, match="incompatible with output node"):
+        engineer._validate_supported_document(graph, document)
+
+
+def test_mutation_cannot_remove_last_paper_node_alternative() -> None:
+    graph = build_structural_break_seed_graph()
+    removals = tuple(RemoveSpec("output", alternative.id) for alternative in graph.nodes["output"].alternatives)
+
+    with pytest.raises(ValueError, match="without alternatives"):
+        MutationEngine().apply_document(graph, MutationDocument(remove=removals))
+
+
 def test_registry_primitive_reintroduces_pruned_required_global() -> None:
     graph = build_structural_break_seed_graph()
     pruned = MutationEngine().apply_document(
@@ -1241,6 +1355,32 @@ def test_maintenance_prunes_unreachable_nodes_and_unused_globals() -> None:
     assert "unused" in report.removed_globals
 
 
+def test_runtime_contract_rejects_wrong_callable_return_type() -> None:
+    dataset = make_structural_break_data(n_series=20, length=50, seed=8)
+    graph = build_structural_break_seed_graph()
+    graph.nodes["activation"].alternatives[0].fn = lambda _ctx, _values: np.ones(20)
+
+    with pytest.raises(TypeError, match="must return CallableFamily"):
+        graph.evaluate_features(dataset.inputs())
+
+
+def test_torch_contract_is_scoped_to_trainable_global_paths() -> None:
+    graph = build_structural_break_seed_graph()
+    graph.add_alternative(
+        "output",
+        "numpy_only_constant",
+        ("series",),
+        lambda _ctx, values: np.asarray(values["series"])[:, :1],
+    )
+
+    graph.validate_torch_trainable_paths()
+    projection = next(alternative for alternative in graph.nodes["output"].alternatives if alternative.id == "projection")
+    projection.torch_fn = None
+
+    with pytest.raises(ValueError, match="trainable globals.*projection_vector.*output.projection"):
+        graph.validate_torch_trainable_paths()
+
+
 def test_global_refinement_phase_runs_without_mutating_parent_graph() -> None:
     dataset = make_structural_break_data(n_series=50, length=80, seed=13)
     graph = build_structural_break_seed_graph()
@@ -1260,6 +1400,8 @@ def test_global_refinement_phase_runs_without_mutating_parent_graph() -> None:
 def test_numpy_refinement_backend_can_be_requested_explicitly() -> None:
     dataset = make_structural_break_data(n_series=40, length=70, seed=17)
     graph = build_structural_break_seed_graph()
+    projection = next(alternative for alternative in graph.nodes["output"].alternatives if alternative.id == "projection")
+    projection.torch_fn = None
     result = RidgeEvaluator(
         n_splits=3,
         seed=17,

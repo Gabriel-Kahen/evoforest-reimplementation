@@ -95,6 +95,8 @@ def graph_from_dict(
                 )
             elif primitive:
                 alternative = registry.build(str(primitive), alt_id, parents)
+                if output_contract:
+                    alternative.output_contract = copy.deepcopy(output_contract)
             else:
                 raise ValueError(f"Alternative {node_name}.{alt_id} has no primitive or source to rebuild from.")
 
@@ -107,7 +109,7 @@ def graph_from_dict(
             alternative.stats = copy.deepcopy(stats) if isinstance(stats, dict) else {}
             graph.nodes[node_name].add_alternative(alternative)
 
-    graph.validate_acyclic()
+    graph.validate_paper_architecture()
     return graph
 
 

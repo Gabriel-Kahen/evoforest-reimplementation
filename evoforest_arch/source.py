@@ -11,7 +11,7 @@ from typing import Any
 
 import numpy as np
 
-from evoforest_arch.graph import CallableFamily, EvalContext, FeatureBlock, NodeAlternative, ResidualWeightRule
+from evoforest_arch.graph import CallableFamily, EvalContext, FeatureBlock, NodeAlternative, ResidualWeightRule, default_output_contract
 from evoforest_arch.globals import GlobalStore
 
 
@@ -77,7 +77,8 @@ def build_source_alternative(
     if torch_source:
         _validate_lambda_ast(torch_source, backend="torch")
     policy = sandbox_policy or SourceSandboxPolicy()
-    contract = dict(output_contract or {})
+    contract = default_output_contract("", node_kind)
+    contract.update(output_contract or {})
     if bool(contract.get("differentiable", False)) and not torch_source:
         raise ValueError("Source alternatives with output_contract.differentiable=true require torch_source.")
     if torch_source:

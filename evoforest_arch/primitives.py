@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Callable
 
@@ -11,11 +11,15 @@ from evoforest_arch.task import TaskSchema
 
 
 PrimitiveFactory = Callable[[str, tuple[str, ...]], NodeAlternative]
+CALLABLE_PRIMITIVES = frozenset({"identity_callable", "sigmoid_gate_callable", "clipped_linear_callable"})
+SAMPLE_WEIGHT_PRIMITIVES = frozenset({"uniform_sample_weight", "boundary_energy_weight", "late_energy_weight"})
+RESIDUAL_WEIGHT_PRIMITIVES = frozenset({"identity_residual_weight", "huber_residual_weight"})
 
 
 @dataclass
 class PrimitiveRegistry:
     factories: dict[str, PrimitiveFactory]
+    output_contracts: dict[str, dict[str, object]] = field(default_factory=dict)
 
     @classmethod
     def default(cls) -> "PrimitiveRegistry":
@@ -23,6 +27,7 @@ class PrimitiveRegistry:
         registry._register_tabular()
         registry._register_structural_break()
         registry._register_common()
+        registry._record_builtin_contracts()
         return registry
 
     @classmethod
@@ -36,6 +41,7 @@ class PrimitiveRegistry:
         else:
             registry._register_tabular()
         registry._register_common()
+        registry._record_builtin_contracts()
         return registry
 
     def _register_structural_break(self) -> None:
@@ -84,11 +90,25 @@ class PrimitiveRegistry:
     def register(self, name: str, factory: PrimitiveFactory) -> None:
         self.factories[name] = factory
 
+    def _record_builtin_contracts(self) -> None:
+        for primitive in self.factories:
+            if primitive in CALLABLE_PRIMITIVES:
+                contract = {"type": "callable"}
+            elif primitive in SAMPLE_WEIGHT_PRIMITIVES:
+                contract = {"type": "sample_weight"}
+            elif primitive in RESIDUAL_WEIGHT_PRIMITIVES:
+                contract = {"type": "residual_weight_rule"}
+            else:
+                contract = {"type": "feature_block", "min_columns": 1}
+            self.output_contracts[primitive] = contract
+
     def build(self, primitive: str, alternative_id: str, parents: tuple[str, ...]) -> NodeAlternative:
         if primitive not in self.factories:
             raise KeyError(f"Unknown primitive {primitive!r}.")
         alternative = self.factories[primitive](alternative_id, parents)
         alternative.primitive = primitive
+        for key, value in self.output_contracts.get(primitive, {}).items():
+            alternative.output_contract.setdefault(key, value)
         return alternative
 
 
