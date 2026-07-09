@@ -7,6 +7,7 @@ import copy
 import hashlib
 import math
 import pickle
+import sys
 import threading
 import types
 from typing import Any
@@ -32,10 +33,24 @@ def fingerprint_value(value: object) -> str:
 
 
 def fingerprint_callable(fn: object) -> str:
-    """Fingerprint executable semantics while ignoring incidental mutable counters."""
+    """Fingerprint executable semantics, including captured callable state."""
     digest = hashlib.blake2b(digest_size=20)
+    _update_callable_digest(digest, fn, set())
+    return digest.hexdigest()
+
+
+def _update_callable_digest(digest: Any, fn: object, seen: set[int]) -> None:
+    identity = id(fn)
+    if identity in seen:
+        digest.update(b"callable-cycle\0")
+        return
+    seen.add(identity)
     digest.update(str(getattr(fn, "__module__", type(fn).__module__)).encode("utf-8"))
     digest.update(str(getattr(fn, "__qualname__", type(fn).__qualname__)).encode("utf-8"))
+    if isinstance(fn, types.MethodType):
+        _update_callable_digest(digest, fn.__func__, seen)
+        _update_digest(digest, getattr(fn.__self__, "__dict__", fn.__self__))
+        return
     code = getattr(fn, "__code__", None)
     if code is not None:
         digest.update(code.co_code)
@@ -44,27 +59,18 @@ def fingerprint_callable(fn: object) -> str:
     _update_digest(digest, getattr(fn, "__defaults__", None))
     _update_digest(digest, getattr(fn, "__kwdefaults__", None))
     closure = getattr(fn, "__closure__", None) or ()
-    freevars = code.co_freevars if code is not None else ()
-    ignored_runtime_state = {"calls", "counts", "counter", "stats", "metrics", "local_callable", "torch_callable"}
-    for name, cell in zip(freevars, closure, strict=False):
+    for cell in closure:
         try:
             captured = cell.cell_contents
         except ValueError:
             continue
-        # Test/observability counters and lazily compiled source callables are
-        # operational state rather than executable semantics. Other mutable
-        # closure values are included so parameter changes invalidate the path.
-        if name in ignored_runtime_state:
-            continue
         if callable(captured):
-            digest.update(str(getattr(captured, "__module__", type(captured).__module__)).encode("utf-8"))
-            digest.update(str(getattr(captured, "__qualname__", type(captured).__qualname__)).encode("utf-8"))
-            captured_code = getattr(captured, "__code__", None)
-            if captured_code is not None:
-                _update_digest(digest, captured_code)
+            _update_callable_digest(digest, captured, seen)
         else:
             _update_digest(digest, captured)
-    return digest.hexdigest()
+    state = getattr(fn, "__dict__", None)
+    if state:
+        _update_digest(digest, state)
 
 
 def _update_digest(digest: Any, value: object) -> None:
@@ -267,12 +273,27 @@ def _estimate_nbytes(value: object, seen: set[int] | None = None) -> int:
     if identity in seen:
         return 0
     seen.add(identity)
+    shallow = int(sys.getsizeof(value))
     if isinstance(value, np.ndarray):
-        return int(value.nbytes)
+        return shallow
     if isinstance(value, dict):
-        return sum(_estimate_nbytes(key, seen) + _estimate_nbytes(item, seen) for key, item in value.items())
+        return shallow + sum(_estimate_nbytes(key, seen) + _estimate_nbytes(item, seen) for key, item in value.items())
     if isinstance(value, (list, tuple, set, frozenset)):
-        return sum(_estimate_nbytes(item, seen) for item in value)
+        return shallow + sum(_estimate_nbytes(item, seen) for item in value)
     if is_dataclass(value):
-        return sum(_estimate_nbytes(getattr(value, item.name), seen) for item in fields(value))
-    return 0
+        return shallow + sum(_estimate_nbytes(getattr(value, item.name), seen) for item in fields(value))
+    if callable(value):
+        total = shallow
+        total += _estimate_nbytes(getattr(value, "__defaults__", None), seen)
+        total += _estimate_nbytes(getattr(value, "__kwdefaults__", None), seen)
+        total += _estimate_nbytes(getattr(value, "__dict__", None), seen)
+        for cell in getattr(value, "__closure__", None) or ():
+            try:
+                total += _estimate_nbytes(cell.cell_contents, seen)
+            except ValueError:
+                continue
+        return total
+    state = getattr(value, "__dict__", None)
+    if state is not None:
+        return shallow + _estimate_nbytes(state, seen)
+    return shallow

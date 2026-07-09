@@ -168,11 +168,12 @@ class RidgeEvaluator:
     ) -> EvaluationResult:
         working_graph = graph if update_graph else graph.clone()
         y = np.asarray(y, dtype=np.float64)
-        dataset_fingerprint = fingerprint_inputs(inputs)
         if self.persistent_cache:
+            dataset_fingerprint = fingerprint_inputs(inputs)
             self.evaluation_cache.begin_evaluation()
             shared_cache: dict[object, object] = self.evaluation_cache
         else:
+            dataset_fingerprint = ""
             shared_cache = {}
         persistent_stats_before = self.evaluation_cache.stats()
         started_at = time.monotonic()
