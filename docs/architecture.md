@@ -90,8 +90,17 @@ the following modules.
 - `fitting` nodes are selected by configuration. `ridge_w` returns per-sample
   weights, and `ridge_g` returns a residual-to-weight rule used in iterative
   reweighted least squares.
-- The evaluator enumerates reachable intermediate, callable, and fitting alternatives
-  up to `max_configurations`; graph fitness is the best configured task score.
+- The evaluator enumerates reachable intermediate, callable, and fitting alternatives.
+  When the full product exceeds `max_configurations`, a seed-independent planner first
+  covers alternatives across every search axis, then greedily adds rare and
+  Hamming-distant configurations. If the resulting plan exceeds
+  `screening_finalists`, a single-fold fixed-alpha Ridge score is used only as an
+  explicitly approximate screen. Every finalist is rescored with the existing exact
+  multi-fold evaluator, and graph fitness is selected only from those exact scores.
+  The approximate screen can exclude the configuration that would have won an exact
+  evaluation of the full plan; the guarantee is exact selection among finalists, not
+  recovery of the full-plan exact optimum.
+  Diagnostics distinguish theoretical, planned, screened, and exact-evaluated counts.
 - Configuration search shares a cache across evaluated candidates. Cache keys encode
   the selected ancestor subpath for each alternative, so a reused intermediate is
   computed once when all of its ancestors agree, but recomputed when a parent

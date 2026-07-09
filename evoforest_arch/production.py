@@ -244,6 +244,7 @@ class ProductionConfig:
     stratify_bins: int = 5
     scorer: str = "variance_explained"
     max_configurations: int = 64
+    screening_finalists: int = 16
     irls_steps: int = 2
     refine_globals: bool = True
     refine_steps: int = 20
@@ -309,6 +310,7 @@ class ProductionConfig:
             "n_splits": int(self.folds),
             "seed": int(self.seed),
             "max_configurations": int(self.max_configurations),
+            "screening_finalists": int(self.screening_finalists),
             "irls_steps": int(self.irls_steps),
             "refine_globals": bool(self.refine_globals),
             "refine_steps": int(self.refine_steps),
@@ -340,6 +342,7 @@ def paper_profile_defaults() -> dict[str, Any]:
         "island_workers": PAPER_ISLAND_COUNT,
         "island_devices": PAPER_GPU_DEVICES,
         "max_configurations": 64,
+        "screening_finalists": 16,
         "refine_globals": True,
         "refine_backend": "torch",
         "promotion_policy": CV_SCORE_PROMOTION_POLICY,
@@ -2162,6 +2165,7 @@ class ProductionEvolutionRunner:
             "n_splits": int(self.evaluator.n_splits),
             "seed": int(self.evaluator.seed),
             "max_configurations": int(self.evaluator.max_configurations),
+            "screening_finalists": int(self.evaluator.screening_finalists),
             "irls_steps": int(self.evaluator.irls_steps),
             "refine_globals": bool(self.evaluator.refine_globals),
             "refine_steps": int(self.evaluator.refine_steps),
@@ -2547,6 +2551,7 @@ class ProductionEvolutionRunner:
                 "scientist_temperature_schedule": list(DEFAULT_ISLAND_TEMPERATURES),
                 "engineer_temperature": 0.0,
                 "max_configurations": 64,
+                "screening_finalists": int(self.config.screening_finalists),
                 "global_refinement": "pytorch_l_bfgs",
                 "promotion_metric": "train_cv_score",
                 "validation_gate": False,

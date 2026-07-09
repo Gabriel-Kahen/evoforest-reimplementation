@@ -63,6 +63,7 @@ PRODUCTION_CLI_DEFAULTS = {
     "steps": 4,
     "folds": 3,
     "max_configurations": 64,
+    "screening_finalists": 16,
     "irls_steps": 2,
     "refine_globals": True,
     "refine_steps": 20,
@@ -94,6 +95,7 @@ def evolve_profile_defaults(profile: str) -> dict[str, object]:
             **PRODUCTION_CLI_DEFAULTS,
             "steps": paper["steps"],
             "max_configurations": paper["max_configurations"],
+            "screening_finalists": paper["screening_finalists"],
             "refine_globals": paper["refine_globals"],
             "refine_backend": paper["refine_backend"],
             "promotion_policy": paper["promotion_policy"],
@@ -129,6 +131,7 @@ def main(argv: list[str] | None = None) -> int:
     demo.add_argument("--seed", type=int, default=17)
     demo.add_argument("--folds", type=int, default=3)
     demo.add_argument("--max-configurations", type=int, default=64)
+    demo.add_argument("--screening-finalists", type=int, default=16)
     demo.add_argument("--irls-steps", type=int, default=2)
     demo.add_argument("--refine-globals", dest="refine_globals", action="store_true", default=True)
     demo.add_argument("--no-refine-globals", dest="refine_globals", action="store_false")
@@ -195,6 +198,12 @@ def main(argv: list[str] | None = None) -> int:
     evolve.add_argument("--stratify-bins", type=int, default=None)
     evolve.add_argument("--scorer", choices=("variance_explained", "rmse", "mae"), default="variance_explained")
     evolve.add_argument("--max-configurations", type=int, default=None)
+    evolve.add_argument(
+        "--screening-finalists",
+        type=int,
+        default=None,
+        help="Configurations that pass the approximate screen into the exact CV selection gate.",
+    )
     evolve.add_argument("--irls-steps", type=int, default=None)
     evolve.add_argument("--refine-globals", dest="refine_globals", action="store_true", default=None)
     evolve.add_argument("--no-refine-globals", dest="refine_globals", action="store_false")
@@ -282,6 +291,7 @@ def run_demo(args: argparse.Namespace) -> int:
         n_splits=args.folds,
         seed=args.seed,
         max_configurations=args.max_configurations,
+        screening_finalists=args.screening_finalists,
         irls_steps=args.irls_steps,
         refine_globals=args.refine_globals,
         refine_steps=args.refine_steps,
@@ -359,6 +369,7 @@ def run_evolve(args: argparse.Namespace) -> int:
         stratify_bins=args.stratify_bins if args.stratify_bins is not None else 5,
         scorer=args.scorer,
         max_configurations=args.max_configurations,
+        screening_finalists=args.screening_finalists,
         irls_steps=args.irls_steps,
         refine_globals=args.refine_globals,
         refine_steps=args.refine_steps,

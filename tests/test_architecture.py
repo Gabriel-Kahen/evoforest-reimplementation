@@ -636,6 +636,58 @@ def test_feature_pool_contains_each_unique_matrix_once() -> None:
     assert result.diagnostics["valid_feature_pool"]["n_configurations"] < search["evaluated"]
 
 
+def test_capped_configuration_planner_is_seed_independent_and_covers_alternatives() -> None:
+    graph = build_structural_break_seed_graph()
+    first, total = RidgeEvaluator(seed=1, max_configurations=8)._configuration_candidates(graph)
+    second, second_total = RidgeEvaluator(seed=999, max_configurations=8)._configuration_candidates(graph)
+
+    assert first == second
+    assert total == second_total
+    assert len(first) == 8
+    assert first[0] == graph.default_config()
+    for node_name, alternatives in graph.configuration_space().items():
+        assert {config[node_name] for config in first} == set(alternatives)
+
+
+def test_staged_configuration_screening_uses_exact_cv_for_final_selection() -> None:
+    dataset = make_structural_break_data(n_series=72, length=70, seed=45)
+    evaluator = RidgeEvaluator(
+        n_splits=3,
+        seed=45,
+        max_configurations=64,
+        screening_finalists=5,
+        refine_globals=False,
+        diagnostics_mode="basic",
+        feature_pool_diagnostics=False,
+    )
+    result = evaluator.evaluate(build_structural_break_seed_graph(), dataset.inputs(), dataset.y)
+    search = result.diagnostics["configuration_search"]
+
+    assert search["planned"] == search["total"] == 48
+    assert search["evaluated"] == 5
+    assert search["capped"] is False
+    assert search["planner"]["method"] == "deterministic_exhaustive"
+    assert search["planner"]["coverage_fraction"] == 1.0
+    assert search["screening"]["enabled"] is True
+    assert search["screening"]["approximate"] is True
+    assert search["screening"]["screened"] == 48
+    assert search["screening"]["finalists"] == 5
+    assert search["screening"]["winner_selected_by_exact_cv"] is True
+    assert search["screening"]["full_plan_exact_best_recall_guaranteed"] is False
+    assert search["screening"]["winner_config"] == result.config
+    assert search["best_config_score"] == result.score
+    assert search["top_configs"][0]["config"] == result.config
+
+    repeated = evaluator.evaluate(build_structural_break_seed_graph(), dataset.inputs(), dataset.y)
+    assert repeated.config == result.config
+    assert repeated.score == result.score
+    repeated_screening = dict(repeated.diagnostics["configuration_search"]["screening"])
+    first_screening = dict(search["screening"])
+    repeated_screening.pop("cache_entries_added")
+    first_screening.pop("cache_entries_added")
+    assert repeated_screening == first_screening
+
+
 def test_configuration_search_reuses_fold_assignments() -> None:
     class CountingFoldStrategy(FoldStrategy):
         def __init__(self) -> None:
