@@ -780,22 +780,27 @@ class RidgeEvaluator:
         for candidate in configs:
             for key in keys:
                 counts[(key, candidate[key])] += 1
+        min_distances = [
+            min(sum(candidate[key] != selected[key] for key in keys) for selected in configs)
+            for candidate in pool
+        ]
         while len(configs) < limit and pool:
-            def priority(candidate: dict[str, str]) -> tuple[object, ...]:
+            def priority(index: int) -> tuple[object, ...]:
+                candidate = pool[index]
                 signature = tuple(candidate[key] for key in keys)
                 unseen = sum(1 for key in keys if counts[(key, candidate[key])] == 0)
                 rarity = sum(1.0 / (1.0 + counts[(key, candidate[key])]) for key in keys)
-                min_distance = min(
-                    sum(candidate[key] != selected[key] for key in keys)
-                    for selected in configs
-                )
-                return (-unseen, -min_distance, -rarity, signature)
+                return (-unseen, -min_distances[index], -rarity, signature)
 
-            best_index = min(range(len(pool)), key=lambda index: priority(pool[index]))
+            best_index = min(range(len(pool)), key=priority)
             candidate = pool.pop(best_index)
+            min_distances.pop(best_index)
             append(candidate)
             for key in keys:
                 counts[(key, candidate[key])] += 1
+            for index, remaining in enumerate(pool):
+                distance = sum(candidate[key] != remaining[key] for key in keys)
+                min_distances[index] = min(min_distances[index], distance)
 
         if len(configs) != limit:
             raise RuntimeError(f"Deterministic configuration planner produced {len(configs)} of {limit} requested candidates.")
@@ -878,7 +883,7 @@ class RidgeEvaluator:
         )
         finalists = [dict(row["config"]) for row in ranked[:limit]]
         default = graph.default_config()
-        if default not in finalists:
+        if limit > 1 and default not in finalists:
             finalists[-1] = default
         planner_order = {tuple(config[key] for key in sorted(config)): index for index, config in enumerate(configs)}
         return sorted(
@@ -899,12 +904,15 @@ class RidgeEvaluator:
         n_features = [int(row.get("n_features", 0)) for row in config_rows]
         top_rows = sorted(config_rows, key=lambda row: float(row["score"]), reverse=True)[:8]
         planned = len(config_rows) if planned_configurations is None else int(planned_configurations)
+        evaluated = len(config_rows)
         if scores.size == 0:
             return {
                 "evaluated": 0,
                 "planned": planned,
                 "total": int(total_configurations),
-                "capped": int(total_configurations) > planned,
+                "capped": int(total_configurations) > 0,
+                "planner_capped": int(total_configurations) > planned,
+                "screening_capped": planned > 0,
                 "score_range": [0.0, 0.0],
                 "score_mean": 0.0,
                 "score_std": 0.0,
@@ -914,10 +922,12 @@ class RidgeEvaluator:
                 "top_configs": [],
             }
         return {
-            "evaluated": len(config_rows),
+            "evaluated": evaluated,
             "planned": planned,
             "total": int(total_configurations),
-            "capped": int(total_configurations) > planned,
+            "capped": int(total_configurations) > evaluated,
+            "planner_capped": int(total_configurations) > planned,
+            "screening_capped": planned > evaluated,
             "score_range": [float(np.min(scores)), float(np.max(scores))],
             "score_mean": float(np.mean(scores)),
             "score_std": float(np.std(scores)),

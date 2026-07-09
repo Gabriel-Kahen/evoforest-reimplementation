@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import argparse
+import time
 import urllib.error
 
 import numpy as np
@@ -665,7 +666,9 @@ def test_staged_configuration_screening_uses_exact_cv_for_final_selection() -> N
 
     assert search["planned"] == search["total"] == 48
     assert search["evaluated"] == 5
-    assert search["capped"] is False
+    assert search["capped"] is True
+    assert search["planner_capped"] is False
+    assert search["screening_capped"] is True
     assert search["planner"]["method"] == "deterministic_exhaustive"
     assert search["planner"]["coverage_fraction"] == 1.0
     assert search["screening"]["enabled"] is True
@@ -686,6 +689,37 @@ def test_staged_configuration_screening_uses_exact_cv_for_final_selection() -> N
     repeated_screening.pop("cache_entries_added")
     first_screening.pop("cache_entries_added")
     assert repeated_screening == first_screening
+
+
+def test_single_screening_finalist_keeps_the_approximate_winner() -> None:
+    graph = build_structural_break_seed_graph()
+    evaluator = RidgeEvaluator(screening_finalists=1)
+    configs, _total = evaluator._configuration_candidates(graph)
+    default = graph.default_config()
+    challenger = next(config for config in configs if config != default)
+    rows = [
+        {"config": default, "approximate_score": 0.0, "planner_index": 0},
+        {"config": challenger, "approximate_score": 1.0, "planner_index": 1},
+    ]
+
+    assert evaluator._screening_finalists(graph, [default, challenger], rows) == [challenger]
+
+
+def test_large_configuration_plan_avoids_quadratic_distance_rescans() -> None:
+    class PlannerGraph:
+        @staticmethod
+        def configuration_space() -> dict[str, list[str]]:
+            return {f"axis_{axis}": [f"alternative_{index}" for index in range(10)] for axis in range(8)}
+
+        def default_config(self) -> dict[str, str]:
+            return {key: values[0] for key, values in self.configuration_space().items()}
+
+    started = time.monotonic()
+    configs, total = RidgeEvaluator(max_configurations=128)._configuration_candidates(PlannerGraph())  # type: ignore[arg-type]
+
+    assert len(configs) == 128
+    assert total == 100_000_000
+    assert time.monotonic() - started < 3.0
 
 
 def test_configuration_search_reuses_fold_assignments() -> None:
