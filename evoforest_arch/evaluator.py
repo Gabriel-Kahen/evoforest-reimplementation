@@ -9,7 +9,7 @@ from typing import Any, Callable
 import numpy as np
 
 from evoforest_arch.evaluation_cache import PersistentEvaluationCache, fingerprint_inputs
-from evoforest_arch.graph import EvalContext, Graph, ResidualWeightRule
+from evoforest_arch.graph import EvalContext, EvaluationKeyFingerprints, Graph, ResidualWeightRule
 from evoforest_arch.metrics import DEFAULT_SCORER, FoldStrategy, ScoreFunction, TaskScorer, coerce_fold_strategy, coerce_scorer, safe_corr
 from evoforest_arch.readout import DEFAULT_ALPHAS, RidgeModel, Standardizer, combine_sample_weights, fit_ridge, normalize_sample_weight, select_alpha_and_fit_ridge
 from evoforest_arch.task import TaskSchema
@@ -198,6 +198,7 @@ class RidgeEvaluator:
                 device=self.torch_device,
             ).refine(working_graph, inputs, y, base_config)
             refinement_diagnostics = refinement.to_dict()
+        key_fingerprints = EvaluationKeyFingerprints()
 
         if config is not None:
             selected = working_graph.default_config()
@@ -209,6 +210,7 @@ class RidgeEvaluator:
                 selected,
                 shared_cache,
                 cache_namespace=dataset_fingerprint,
+                key_fingerprints=key_fingerprints,
                 folds=folds,
                 fold_diagnostics=fold_diagnostics,
                 progress_context={
@@ -258,6 +260,7 @@ class RidgeEvaluator:
                         shared_cache,
                         folds,
                         cache_namespace=dataset_fingerprint,
+                        key_fingerprints=key_fingerprints,
                     )
                     row["planner_index"] = int(planner_index)
                     screening_rows.append(row)
@@ -272,7 +275,7 @@ class RidgeEvaluator:
                             "elapsed_seconds": time.monotonic() - started_at,
                         }
                     )
-                exact_configs = self._screening_finalists(working_graph, configs, screening_rows)
+                exact_configs = self._screening_finalists(working_graph, configs, screening_rows, key_fingerprints)
             best: EvaluationResult | None = None
             best_feature_result: tuple[np.ndarray, list[str]] | None = None
             config_rows: list[dict[str, object]] = []
@@ -285,7 +288,7 @@ class RidgeEvaluator:
             last_feature_result: tuple[np.ndarray, list[str]] | None = None
             for candidate_config in exact_configs:
                 config_index = len(config_rows) + 1
-                feature_signature = self._feature_signature(working_graph, candidate_config)
+                feature_signature = self._feature_signature(working_graph, candidate_config, key_fingerprints)
                 seen_feature_signatures.add(feature_signature)
                 precomputed_features = (
                     feature_results_by_signature.get(feature_signature)
@@ -301,6 +304,7 @@ class RidgeEvaluator:
                     candidate_config,
                     shared_cache,
                     cache_namespace=dataset_fingerprint,
+                    key_fingerprints=key_fingerprints,
                     precomputed_features=precomputed_features,
                     folds=folds,
                     fold_diagnostics=fold_diagnostics,
@@ -357,6 +361,7 @@ class RidgeEvaluator:
                     best.config,
                     shared_cache,
                     cache_namespace=dataset_fingerprint,
+                    key_fingerprints=key_fingerprints,
                     precomputed_features=best_feature_result,
                     folds=folds,
                     fold_diagnostics=fold_diagnostics,
@@ -481,6 +486,7 @@ class RidgeEvaluator:
         config: dict[str, str],
         shared_cache: dict[object, object] | None = None,
         cache_namespace: str = "",
+        key_fingerprints: EvaluationKeyFingerprints | None = None,
         precomputed_features: tuple[np.ndarray, list[str]] | None = None,
         folds: list[tuple[np.ndarray, np.ndarray]] | None = None,
         fold_diagnostics: dict[str, object] | None = None,
@@ -490,7 +496,13 @@ class RidgeEvaluator:
         progress_context = dict(progress_context or {})
         resolved_diagnostics_mode = diagnostics_mode or self.diagnostics_mode
         if precomputed_features is None:
-            x, names, ctx = graph.evaluate_features(inputs, config=config, cache=shared_cache, cache_namespace=cache_namespace)
+            x, names, ctx = graph.evaluate_features(
+                inputs,
+                config=config,
+                cache=shared_cache,
+                cache_namespace=cache_namespace,
+                key_fingerprints=key_fingerprints,
+            )
             feature_matrix_reused = False
         else:
             x, names = precomputed_features
@@ -499,6 +511,7 @@ class RidgeEvaluator:
                 globals=graph.globals.clone(),
                 cache=shared_cache if shared_cache is not None else {},
                 cache_namespace=cache_namespace,
+                key_fingerprints=key_fingerprints,
             )
             feature_matrix_reused = True
         self._emit_progress(
@@ -632,11 +645,22 @@ class RidgeEvaluator:
             feature_matrix=x,
         )
 
-    def _feature_signature(self, graph: Graph, config: dict[str, str]) -> tuple[object, ...]:
+    def _feature_signature(
+        self,
+        graph: Graph,
+        config: dict[str, str],
+        key_fingerprints: EvaluationKeyFingerprints | None = None,
+    ) -> tuple[object, ...]:
         selected = graph.selected_config(config)
         memo: dict[tuple[str, str], tuple[object, ...]] = {}
         return tuple(
-            graph.alternative_cache_key(node_name, alternative.id, selected, memo=memo)
+            graph.alternative_cache_key(
+                node_name,
+                alternative.id,
+                selected,
+                memo=memo,
+                key_fingerprints=key_fingerprints,
+            )
             for node_name in graph.output_nodes()
             for alternative in graph.nodes[node_name].alternatives
         )
@@ -844,12 +868,14 @@ class RidgeEvaluator:
         shared_cache: dict[object, object],
         folds: list[tuple[np.ndarray, np.ndarray]],
         cache_namespace: str = "",
+        key_fingerprints: EvaluationKeyFingerprints | None = None,
     ) -> dict[str, object]:
         x, names, ctx = graph.evaluate_features(
             inputs,
             config=config,
             cache=shared_cache,
             cache_namespace=cache_namespace,
+            key_fingerprints=key_fingerprints,
         )
         sample_weight, _residual_rule, _fitting = self._evaluate_fitting_rules(graph, inputs, y, config, ctx)
         train_idx, validation_idx = folds[0]
@@ -875,6 +901,7 @@ class RidgeEvaluator:
         graph: Graph,
         configs: list[dict[str, str]],
         screening_rows: list[dict[str, object]],
+        key_fingerprints: EvaluationKeyFingerprints | None = None,
     ) -> list[dict[str, str]]:
         limit = min(self.screening_finalists, len(configs))
         ranked = sorted(
@@ -889,7 +916,7 @@ class RidgeEvaluator:
         return sorted(
             finalists,
             key=lambda config: (
-                repr(self._feature_signature(graph, config)),
+                repr(self._feature_signature(graph, config, key_fingerprints)),
                 planner_order[tuple(config[key] for key in sorted(config))],
             ),
         )

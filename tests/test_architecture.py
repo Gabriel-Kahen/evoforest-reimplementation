@@ -9,14 +9,14 @@ import urllib.error
 import numpy as np
 import pytest
 
-from evoforest_arch import llm as llm_module
+from evoforest_arch import graph as graph_module, llm as llm_module
 from evoforest_arch.agents import EngineerAgent, ScientistAgent
 from evoforest_arch.cli import build_llm_agents
 from evoforest_arch.evaluator import RidgeEvaluator, abs_feature_correlation, effective_rank, feature_correlation_summary, max_correlation_scores, most_correlated_names, safe_corr_columns
 from evoforest_arch.evaluation_cache import PersistentEvaluationCache, fingerprint_callable
 from evoforest_arch.evolution import EvolutionLoop
 from evoforest_arch.feedback import toon_report
-from evoforest_arch.graph import CallableFamily, EvalContext, FeatureBlock, Graph, NodeAlternative, ResidualWeightRule
+from evoforest_arch.graph import CallableFamily, EvalContext, EvaluationKeyFingerprints, FeatureBlock, Graph, NodeAlternative, ResidualWeightRule
 from evoforest_arch.graph_io import graph_from_dict, graph_hash
 from evoforest_arch.llm import ClaudeLLMClient, GeminiLLMClient, LLMEngineerAgent, LLMMemorandumAgent, LLMScientistAgent, OpenAILLMClient, PromptBuilder, StaticLLMClient, llm_client_from_env, llm_provider_from_env
 from evoforest_arch.maintenance import GraphMaintenance
@@ -163,6 +163,75 @@ def test_alternative_cache_key_memo_preserves_key_format() -> None:
 
     assert cached == uncached
     assert memo
+
+
+def test_evaluation_key_fingerprints_hash_each_callable_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    graph = build_structural_break_seed_graph()
+    selected = graph.selected_config(graph.default_config())
+    fingerprints = EvaluationKeyFingerprints()
+    calls = 0
+    original = graph_module.fingerprint_callable
+
+    def counting_fingerprint(fn: object) -> str:
+        nonlocal calls
+        calls += 1
+        return original(fn)
+
+    monkeypatch.setattr(graph_module, "fingerprint_callable", counting_fingerprint)
+    for _ in range(4):
+        graph.alternative_cache_key("output", "raw_concat", selected, key_fingerprints=fingerprints)
+    first_pass_calls = calls
+    assert first_pass_calls > 0
+    assert calls == len(fingerprints.alternatives)
+
+    graph.alternative_cache_key("output", "raw_concat", selected, key_fingerprints=EvaluationKeyFingerprints())
+    assert calls > first_pass_calls
+
+
+def test_evaluation_key_fingerprints_do_not_cross_mutation_boundary() -> None:
+    graph = Graph("evaluation_fingerprint_boundary")
+    graph.add_input("x")
+    graph.add_node("output", "output")
+    scale = [1.0]
+
+    def output_fn(_ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
+        return FeatureBlock(np.asarray(values["x"], dtype=np.float64)[:, :1] * scale[0], ["value"])
+
+    graph.add_alternative("output", "scaled", ("x",), output_fn)
+    inputs = {"x": np.arange(12, dtype=np.float64).reshape(6, 2)}
+    shared_cache: dict[object, object] = {}
+    first, _, _ = graph.evaluate_features(inputs, cache=shared_cache, key_fingerprints=EvaluationKeyFingerprints())
+
+    scale[0] = -1.0
+    second, _, ctx = graph.evaluate_features(inputs, cache=shared_cache, key_fingerprints=EvaluationKeyFingerprints())
+
+    np.testing.assert_allclose(second, -first)
+    assert ctx.cache_hits == 0
+
+
+def test_assembled_feature_bundle_reuses_frozen_snapshot_within_evaluation() -> None:
+    graph = Graph("assembled_feature_bundle")
+    graph.add_input("x")
+    graph.add_node("output", "output")
+    calls = [0]
+
+    def output_fn(_ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
+        calls[0] += 1
+        return FeatureBlock(np.asarray(values["x"], dtype=np.float64)[:, :1], ["value"])
+
+    graph.add_alternative("output", "base", ("x",), output_fn)
+    inputs = {"x": np.arange(12, dtype=np.float64).reshape(6, 2)}
+    cache = PersistentEvaluationCache(max_entries=8, max_bytes=1_000_000)
+    cache.begin_evaluation()
+    fingerprints = EvaluationKeyFingerprints()
+    first, first_names, _ = graph.evaluate_features(inputs, cache=cache, key_fingerprints=fingerprints)
+    second, second_names, ctx = graph.evaluate_features(inputs, cache=cache, key_fingerprints=fingerprints)
+
+    assert calls == [1]
+    np.testing.assert_array_equal(second, first)
+    assert second_names == first_names
+    assert ctx.cache_hits == 1
+    assert second.flags.writeable is False
 
 
 def test_configuration_search_uses_ancestor_conditioned_shared_cache() -> None:
