@@ -20,7 +20,7 @@ from evoforest_arch.graph import CallableFamily, EvalContext, EvaluationKeyFinge
 from evoforest_arch.graph_io import graph_from_dict, graph_hash
 from evoforest_arch.llm import ClaudeLLMClient, GeminiLLMClient, LLMEngineerAgent, LLMMemorandumAgent, LLMScientistAgent, OpenAILLMClient, PromptBuilder, StaticLLMClient, llm_client_from_env, llm_provider_from_env
 from evoforest_arch.maintenance import GraphMaintenance
-from evoforest_arch.metrics import FoldStrategy, RMSE_SCORER, safe_corr
+from evoforest_arch.metrics import FoldStrategy, RMSE_SCORER, TaskScorer, safe_corr
 from evoforest_arch.mutations import GlobalSpec, MutationDocument, MutationEngine, MutationSpec, NodeSpec, RemoveSpec
 from evoforest_arch.primitives import PrimitiveRegistry
 from evoforest_arch.rank_readout import fit_rank_feature_expansion, select_rank_ensemble
@@ -859,6 +859,91 @@ def test_reused_configuration_work_matches_independent_evaluation() -> None:
     cache = reused.diagnostics["configuration_search"]["cache"]
     assert 0 < cache["prepared_fold_entries"] <= 3
     assert 0 < cache["initial_ridge_entries"] <= 6
+
+
+def test_screening_reuse_respects_ridge_g_dependencies() -> None:
+    graph = Graph("screening_ridge_g_dependency")
+    graph.add_input("x")
+    graph.add_node("output", "output")
+    graph.add_node("ridge_g", "fitting")
+    graph.add_node("ridge_w", "fitting")
+    graph.add_alternative(
+        "output",
+        "base",
+        ("x",),
+        lambda _ctx, values: FeatureBlock(np.asarray(values["x"], dtype=np.float64), ["x"]),
+    )
+    for name in ("hi", "lo"):
+        graph.add_alternative(
+            "ridge_g",
+            name,
+            (),
+            lambda _ctx, _values, rule_name=name: ResidualWeightRule(
+                rule_name,
+                lambda residual: np.ones_like(residual),
+            ),
+        )
+
+    def dependent_weight(_ctx: EvalContext, values: dict[str, object]) -> np.ndarray:
+        x = np.asarray(values["x"], dtype=np.float64)[:, 0]
+        rule = values["ridge_g"]
+        assert isinstance(rule, ResidualWeightRule)
+        positive_weight, negative_weight = (10.0, 0.1) if rule.name == "hi" else (0.1, 10.0)
+        return np.where(x > 0.0, positive_weight, negative_weight)
+
+    graph.add_alternative("ridge_w", "dependent", ("x", "ridge_g"), dependent_weight)
+    rng = np.random.default_rng(10)
+    x = np.linspace(-2.0, 2.0, 60)[:, None]
+    y = np.where(x[:, 0] > 0.0, 5.0 * x[:, 0] + rng.normal(0.0, 0.2, 60), rng.normal(0.0, 5.0, 60))
+    evaluator = RidgeEvaluator(
+        n_splits=3,
+        max_configurations=2,
+        screening_finalists=1,
+        refine_globals=False,
+        persistent_cache=False,
+        diagnostics_mode="basic",
+        feature_pool_diagnostics=False,
+    )
+    configs, _ = evaluator._configuration_candidates(graph)
+
+    assert evaluator._screening_work_key(graph, configs[0]) != evaluator._screening_work_key(graph, configs[1])
+    result = evaluator.evaluate(graph, {"x": x}, y)
+
+    assert result.config["ridge_g"] == "lo"
+    assert result.diagnostics["configuration_search"]["screening"]["unique_work_units"] == 2
+
+
+def test_grouped_exact_evaluation_preserves_planner_winner_for_nan_scores() -> None:
+    graph = Graph("nan_score_planner_order")
+    graph.add_input("x")
+    graph.add_node("mid", "intermediate")
+    graph.add_node("output", "output")
+    for name, scale in (("z", 1.0), ("a", 2.0), ("m", 3.0)):
+        graph.add_alternative(
+            "mid",
+            name,
+            ("x",),
+            lambda _ctx, values, factor=scale, feature_name=name: FeatureBlock(
+                np.asarray(values["x"], dtype=np.float64) * factor,
+                [feature_name],
+            ),
+        )
+    graph.add_alternative("output", "base", ("mid",), lambda _ctx, values: values["mid"])
+    x = np.linspace(-1.0, 1.0, 36)[:, None]
+    scorer = TaskScorer("nan", "Always returns NaN.", lambda _y, _predictions: float("nan"))
+
+    result = RidgeEvaluator(
+        n_splits=3,
+        max_configurations=3,
+        screening_finalists=3,
+        refine_globals=False,
+        persistent_cache=False,
+        diagnostics_mode="basic",
+        feature_pool_diagnostics=False,
+        scorer=scorer,
+    ).evaluate(graph, {"x": x}, x[:, 0])
+
+    assert result.config["mid"] == "z"
 
 
 def test_single_screening_finalist_keeps_the_approximate_winner() -> None:

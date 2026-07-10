@@ -262,9 +262,9 @@ class RidgeEvaluator:
             initial_ridge_cache: dict[tuple[object, int, bytes | None], tuple[float, RidgeModel]] = {}
             feature_signatures: dict[tuple[tuple[str, str], ...], tuple[object, ...]] = {}
             if screening_enabled:
-                screening_work: dict[tuple[tuple[str, str], ...], dict[str, object]] = {}
+                screening_work: dict[tuple[object, ...], dict[str, object]] = {}
                 for planner_index, candidate_config in enumerate(configs):
-                    work_key = self._screening_work_key(working_graph, candidate_config)
+                    work_key = self._screening_work_key(working_graph, candidate_config, key_fingerprints)
                     cached_row = screening_work.get(work_key)
                     if cached_row is None:
                         row = self._screen_single_config(
@@ -280,6 +280,15 @@ class RidgeEvaluator:
                         screening_work[work_key] = dict(row)
                         row["work_reused"] = False
                     else:
+                        validation_ctx = EvalContext(
+                            inputs=inputs,
+                            globals=working_graph.globals.clone(),
+                            cache=shared_cache,
+                            alternative_lookup=working_graph._alternative_lookup(),
+                            cache_namespace=dataset_fingerprint,
+                            key_fingerprints=key_fingerprints,
+                        )
+                        self._evaluate_fitting_rules(working_graph, inputs, y, candidate_config, validation_ctx)
                         row = {**cached_row, "config": dict(candidate_config), "work_reused": True}
                     row["planner_index"] = int(planner_index)
                     screening_rows.append(row)
@@ -317,7 +326,11 @@ class RidgeEvaluator:
                     feature_signatures[config_key] = signature
                 scheduled_configs.append((planner_index, candidate_config, signature))
             scheduled_configs.sort(key=lambda row: (repr(row[2]), row[0]))
-            best_planner_index = len(exact_configs)
+            first_planner_result: EvaluationResult | None = None
+            first_planner_features: tuple[np.ndarray, list[str]] | None = None
+            best_numeric_result: EvaluationResult | None = None
+            best_numeric_features: tuple[np.ndarray, list[str]] | None = None
+            best_numeric_planner_index = len(exact_configs)
             for planner_index, candidate_config, feature_signature in scheduled_configs:
                 config_index = len(config_rows) + 1
                 seen_feature_signatures.add(feature_signature)
@@ -368,6 +381,18 @@ class RidgeEvaluator:
                         "planner_index": int(planner_index),
                     }
                 )
+                result_features = (result.feature_matrix, result.feature_names) if result.feature_matrix is not None else None
+                if planner_index == 0:
+                    first_planner_result = result
+                    first_planner_features = result_features
+                if not math.isnan(result.score) and (
+                    best_numeric_result is None
+                    or result.score > best_numeric_result.score
+                    or (result.score == best_numeric_result.score and planner_index < best_numeric_planner_index)
+                ):
+                    best_numeric_result = result
+                    best_numeric_features = result_features
+                    best_numeric_planner_index = planner_index
                 self._emit_progress(
                     {
                         "phase": "configuration_evaluated",
@@ -380,10 +405,12 @@ class RidgeEvaluator:
                         "elapsed_seconds": time.monotonic() - started_at,
                     }
                 )
-                if best is None or result.score > best.score or (result.score == best.score and planner_index < best_planner_index):
-                    best = result
-                    best_planner_index = planner_index
-                    best_feature_result = (result.feature_matrix, result.feature_names) if result.feature_matrix is not None else None
+            if first_planner_result is not None and math.isnan(first_planner_result.score):
+                best = first_planner_result
+                best_feature_result = first_planner_features
+            else:
+                best = best_numeric_result
+                best_feature_result = best_numeric_features
             if best is None:
                 raise ValueError("No graph configurations were available for evaluation.")
             if self.diagnostics_mode == "full":
@@ -740,10 +767,24 @@ class RidgeEvaluator:
     def _config_key(config: dict[str, str]) -> tuple[tuple[str, str], ...]:
         return tuple(sorted(config.items()))
 
-    @staticmethod
-    def _screening_work_key(graph: Graph, config: dict[str, str]) -> tuple[tuple[str, str], ...]:
+    def _screening_work_key(
+        self,
+        graph: Graph,
+        config: dict[str, str],
+        key_fingerprints: EvaluationKeyFingerprints | None = None,
+    ) -> tuple[object, ...]:
         selected = graph.selected_config(config)
-        return tuple((name, selected[name]) for name in sorted(graph.configuration_space()) if name != "ridge_g")
+        signature = list(self._feature_signature(graph, config, key_fingerprints))
+        if "ridge_w" in graph.nodes:
+            signature.append(
+                graph.alternative_cache_key(
+                    "ridge_w",
+                    selected["ridge_w"],
+                    selected,
+                    key_fingerprints=key_fingerprints,
+                )
+            )
+        return tuple(signature)
 
     @staticmethod
     def _prepare_fold(x: np.ndarray, train_idx: np.ndarray, validation_idx: np.ndarray) -> PreparedFold:
@@ -987,10 +1028,7 @@ class RidgeEvaluator:
             key_fingerprints=key_fingerprints,
             copy_cached_bundle=False,
         )
-        sample_weight = None
-        if "ridge_w" in graph.nodes:
-            raw_weight = graph.evaluate_node("ridge_w", config, ctx)
-            sample_weight = normalize_sample_weight(np.asarray(raw_weight, dtype=np.float64), y.shape[0])
+        sample_weight, _residual_rule, _fitting = self._evaluate_fitting_rules(graph, inputs, y, config, ctx)
         train_idx, validation_idx = folds[0]
         prepared = self._prepare_fold(x, train_idx, validation_idx)
         train_weight = sample_weight[train_idx] if sample_weight is not None else None

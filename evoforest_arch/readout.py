@@ -7,6 +7,7 @@ import numpy as np
 
 DEFAULT_ALPHAS = np.logspace(-4, 4, 17)
 EPS = 1e-8
+_ALPHA_SELECTION_MAX_ELEMENTS = 1_000_000
 
 
 @dataclass
@@ -119,20 +120,30 @@ def _select_alpha_from_svd(
 ) -> float:
     alpha_values = np.asarray(alphas, dtype=np.float64)
     spectral_power = decomp.s * decomp.s
-    shrinkage = spectral_power[:, None] / (spectral_power[:, None] + alpha_values[None, :])
-    centered_pred = decomp.u @ (shrinkage * decomp.uy[:, None])
-    pred = decomp.y_mean + centered_pred / np.maximum(decomp.sqrt_w[:, None], EPS)
-    leverage = (decomp.u * decomp.u) @ shrinkage
-    residual = (y[:, None] - pred) / np.maximum(1.0 - leverage, EPS)
-    mse_values = np.average(residual * residual, axis=0, weights=decomp.weights)
-
-    # Keep the original strict comparison so equal scores select the first alpha.
+    u_squared = decomp.u * decomp.u
+    elements_per_alpha = max(2 * y.shape[0] + spectral_power.shape[0], 1)
+    chunk_size = max(1, _ALPHA_SELECTION_MAX_ELEMENTS // elements_per_alpha)
     best_alpha = float(alpha_values[0])
     best_mse = float("inf")
-    for alpha, mse in zip(alpha_values, mse_values, strict=True):
-        if mse < best_mse:
-            best_mse = float(mse)
-            best_alpha = float(alpha)
+    for start in range(0, alpha_values.shape[0], chunk_size):
+        alpha_chunk = alpha_values[start : start + chunk_size]
+        shrinkage = spectral_power[:, None] / (spectral_power[:, None] + alpha_chunk[None, :])
+        residual = decomp.u @ (shrinkage * decomp.uy[:, None])
+        residual /= np.maximum(decomp.sqrt_w[:, None], EPS)
+        residual += decomp.y_mean
+        np.subtract(y[:, None], residual, out=residual)
+        leverage = u_squared @ shrinkage
+        np.subtract(1.0, leverage, out=leverage)
+        np.maximum(leverage, EPS, out=leverage)
+        residual /= leverage
+        np.square(residual, out=residual)
+        mse_values = np.average(residual, axis=0, weights=decomp.weights)
+
+        # Keep the original strict comparison so equal scores select the first alpha.
+        for alpha, mse in zip(alpha_chunk, mse_values, strict=True):
+            if mse < best_mse:
+                best_mse = float(mse)
+                best_alpha = float(alpha)
     return best_alpha
 
 

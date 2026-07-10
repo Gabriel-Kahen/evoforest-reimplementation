@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from evoforest_arch import readout as readout_module
 from evoforest_arch.readout import EPS, _select_alpha_from_svd, _weighted_svd, select_alpha_and_fit_ridge
 
 
@@ -78,3 +79,16 @@ def test_vectorized_selection_keeps_fitted_model_equivalent_to_selected_svd_mode
     expected_intercept = decomp.y_mean - float(decomp.x_mean @ expected_coef)
     np.testing.assert_allclose(model.coef, expected_coef, rtol=1e-13, atol=1e-13)
     assert model.intercept == pytest.approx(expected_intercept, rel=1e-13, abs=1e-13)
+
+
+def test_vectorized_alpha_selection_chunks_large_working_sets(monkeypatch: pytest.MonkeyPatch) -> None:
+    rng = np.random.default_rng(7400)
+    x = rng.normal(size=(96, 12))
+    y = rng.normal(size=x.shape[0])
+    alphas = np.logspace(-8, 8, 37)
+    decomp = _weighted_svd(x, y, None)
+    monkeypatch.setattr(readout_module, "_ALPHA_SELECTION_MAX_ELEMENTS", 400)
+
+    selected = _select_alpha_from_svd(decomp, y, alphas)
+
+    assert selected == _reference_select_alpha(decomp, y, alphas)
