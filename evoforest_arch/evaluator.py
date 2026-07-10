@@ -93,6 +93,17 @@ class PreparedFold:
     x_validation: np.ndarray
 
 
+@dataclass(frozen=True)
+class _ImmutableDatasetRecord:
+    token: int
+    inputs: dict[str, object]
+    target: object
+    input_fingerprint: str
+    folds: list[tuple[np.ndarray, np.ndarray]]
+    fold_diagnostics: dict[str, object]
+    fold_signature: tuple[object, ...]
+
+
 def _score_and_raw(scorer: TaskScorer, y: np.ndarray, preds: np.ndarray) -> tuple[float, float]:
     raw_score = float(scorer.raw_score(y, preds))
     if type(scorer) is TaskScorer:
@@ -158,12 +169,82 @@ class RidgeEvaluator:
         self.progress_callback = progress_callback
         self.persistent_cache = bool(persistent_cache)
         self.evaluation_cache = PersistentEvaluationCache(max_entries=cache_max_entries, max_bytes=cache_max_bytes)
+        self._immutable_datasets: dict[tuple[int, int], _ImmutableDatasetRecord] = {}
+        self._immutable_dataset_keys: dict[int, tuple[int, int]] = {}
+        self._next_immutable_dataset_token = 1
+        self._immutable_dataset_hits = 0
 
     def clear_evaluation_cache(self) -> None:
         self.evaluation_cache.clear()
 
     def evaluation_cache_diagnostics(self) -> dict[str, int | bool]:
-        return {"enabled": self.persistent_cache, **self.evaluation_cache.stats()}
+        return {
+            "enabled": self.persistent_cache,
+            **self.evaluation_cache.stats(),
+            "immutable_dataset_registrations": len(self._immutable_datasets),
+            "immutable_dataset_hits": self._immutable_dataset_hits,
+        }
+
+    def register_immutable_dataset(self, inputs: dict[str, object], y: object) -> int:
+        """Precompute dataset identity and folds for an explicitly immutable input/target pair.
+
+        The registration matches only these exact ``inputs`` and ``y`` objects. Strong
+        references prevent Python object-id reuse from selecting a stale registration.
+        Callers must not mutate either object until the returned token is unregistered.
+        Unregistered and non-identical datasets retain the default content-hashing path.
+        """
+        y_array = np.asarray(y, dtype=np.float64)
+        folds, fold_diagnostics = self._folds(inputs, y_array)
+        key = (id(inputs), id(y))
+        previous = self._immutable_datasets.get(key)
+        if previous is not None and previous.inputs is inputs and previous.target is y:
+            self._immutable_dataset_keys.pop(previous.token, None)
+        token = self._next_immutable_dataset_token
+        self._next_immutable_dataset_token += 1
+        self._immutable_datasets[key] = _ImmutableDatasetRecord(
+            token=token,
+            inputs=inputs,
+            target=y,
+            input_fingerprint=fingerprint_inputs(inputs),
+            folds=folds,
+            fold_diagnostics=fold_diagnostics,
+            fold_signature=self._fold_signature(),
+        )
+        self._immutable_dataset_keys[token] = key
+        return token
+
+    def unregister_immutable_dataset(self, token: int) -> bool:
+        """Remove an immutable-dataset registration by its opaque token."""
+        key = self._immutable_dataset_keys.pop(int(token), None)
+        if key is None:
+            return False
+        record = self._immutable_datasets.get(key)
+        if record is not None and record.token == int(token):
+            del self._immutable_datasets[key]
+        return True
+
+    def clear_immutable_datasets(self) -> None:
+        """Remove all immutable-dataset registrations without clearing feature caches."""
+        self._immutable_datasets.clear()
+        self._immutable_dataset_keys.clear()
+
+    def _registered_dataset(self, inputs: dict[str, object], y: object) -> _ImmutableDatasetRecord | None:
+        record = self._immutable_datasets.get((id(inputs), id(y)))
+        if record is None or record.inputs is not inputs or record.target is not y:
+            return None
+        self._immutable_dataset_hits += 1
+        return record
+
+    def _fold_signature(self) -> tuple[object, ...]:
+        return (
+            self.n_splits,
+            self.seed,
+            type(self.fold_strategy),
+            self.fold_strategy.name,
+            self.fold_strategy.group_key,
+            self.fold_strategy.time_key,
+            self.fold_strategy.stratify_bins,
+        )
 
     def _emit_progress(self, payload: dict[str, Any]) -> None:
         if self.progress_callback is not None:
@@ -178,9 +259,10 @@ class RidgeEvaluator:
         update_graph: bool = False,
     ) -> EvaluationResult:
         working_graph = graph if update_graph else graph.clone()
+        registered_dataset = self._registered_dataset(inputs, y)
         y = np.asarray(y, dtype=np.float64)
         if self.persistent_cache:
-            dataset_fingerprint = fingerprint_inputs(inputs)
+            dataset_fingerprint = registered_dataset.input_fingerprint if registered_dataset is not None else fingerprint_inputs(inputs)
             self.evaluation_cache.begin_evaluation()
             shared_cache: dict[object, object] = self.evaluation_cache
         else:
@@ -191,7 +273,10 @@ class RidgeEvaluator:
         search_cache_hits = 0
         search_cache_misses = 0
         feature_matrix_reuse_hits = 0
-        folds, fold_diagnostics = self._folds(inputs, y)
+        if registered_dataset is not None and registered_dataset.fold_signature == self._fold_signature():
+            folds, fold_diagnostics = registered_dataset.folds, registered_dataset.fold_diagnostics
+        else:
+            folds, fold_diagnostics = self._folds(inputs, y)
         refinement_diagnostics: dict[str, object] = {"enabled": False}
         if self.refine_globals and working_graph.globals.trainable_names():
             from evoforest_arch.refinement import GlobalRefiner

@@ -20,6 +20,7 @@ from evoforest_arch.production import (
     ProductionConfig,
     ProductionContext,
     ProductionEvolutionRunner,
+    ProductionIslandWorker,
     RunState,
     export_best_graph,
     inspect_run,
@@ -78,7 +79,8 @@ def dummy_result(score: float) -> EvaluationResult:
 
 def test_production_can_run_generic_tabular_task(tmp_path) -> None:
     config = small_config(tmp_path, steps=1, seed=52, dataset_name="synthetic-tabular", n_features=8)
-    summary = ProductionEvolutionRunner(config).run()
+    runner = ProductionEvolutionRunner(config)
+    summary = runner.run()
     manifest = json.loads((config.output_dir / "run_manifest.json").read_text(encoding="utf-8"))
     best = graph_from_path(config.output_dir / "best_graph.json")
 
@@ -89,6 +91,52 @@ def test_production_can_run_generic_tabular_task(tmp_path) -> None:
     assert best.task_schema["kind"] == "tabular"
     assert "x" in best.nodes
     assert "series" not in best.nodes
+    cache = runner.evaluator.evaluation_cache_diagnostics()
+    assert cache["immutable_dataset_registrations"] == 2
+    assert cache["immutable_dataset_hits"] >= 2
+
+
+def test_production_island_worker_registers_actor_owned_splits() -> None:
+    rng = np.random.default_rng(152)
+    train_inputs = {"x": rng.normal(size=(24, 4))}
+    train_y = rng.normal(size=24)
+    validation_inputs = {"x": rng.normal(size=(12, 4))}
+    validation_y = rng.normal(size=12)
+    worker = ProductionIslandWorker(
+        island=0,
+        device="cpu",
+        evaluator_config={"n_splits": 2, "refine_globals": False},
+        allow_source_mutations=False,
+        scientist=None,
+        engineer=None,
+        memorandum_agent=None,
+        task_context="",
+        task_sources=(),
+        seed=152,
+        train_inputs=train_inputs,
+        train_y=train_y,
+        validation_inputs=validation_inputs,
+        validation_y=validation_y,
+    )
+
+    assert worker.evaluator.evaluation_cache_diagnostics()["immutable_dataset_registrations"] == 2
+
+
+def test_production_split_registration_replaces_stale_strong_references(tmp_path) -> None:
+    evaluator = ProductionEvolutionRunner(small_config(tmp_path, steps=0, dataset_name="synthetic-tabular")).evaluator
+    stale_inputs = {"x": np.zeros((8, 2))}
+    stale_y = np.zeros(8)
+    stale_token = evaluator.register_immutable_dataset(stale_inputs, stale_y)
+    rng = np.random.default_rng(153)
+    splits = {
+        "train": ({"x": rng.normal(size=(12, 2))}, rng.normal(size=12)),
+        "validation": ({"x": rng.normal(size=(8, 2))}, rng.normal(size=8)),
+    }
+
+    ProductionEvolutionRunner._register_fixed_splits(evaluator, splits)
+
+    assert evaluator.evaluation_cache_diagnostics()["immutable_dataset_registrations"] == 2
+    assert evaluator.unregister_immutable_dataset(stale_token) is False
 
 
 def test_production_loads_external_manifest_with_grouped_task_splits(tmp_path) -> None:

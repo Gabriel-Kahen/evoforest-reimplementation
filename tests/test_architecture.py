@@ -1001,6 +1001,116 @@ def test_configuration_search_reuses_fold_assignments() -> None:
     assert fold_strategy.calls == 1
 
 
+def test_registered_immutable_dataset_reuses_fingerprint_and_folds(monkeypatch: pytest.MonkeyPatch) -> None:
+    class CountingFoldStrategy(FoldStrategy):
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def split(self, inputs: dict[str, object], y: np.ndarray, n_splits: int, seed: int):
+            self.calls += 1
+            return super().split(inputs, y, n_splits, seed)
+
+    dataset = make_tabular_data(n_samples=64, n_features=5, seed=146)
+    inputs = dataset.inputs()
+    graph = build_seed_graph()
+    fold_strategy = CountingFoldStrategy()
+    fingerprint_calls = 0
+    original_fingerprint = evaluator_module.fingerprint_inputs
+
+    def counting_fingerprint(values: dict[str, object]) -> str:
+        nonlocal fingerprint_calls
+        fingerprint_calls += 1
+        return original_fingerprint(values)
+
+    monkeypatch.setattr(evaluator_module, "fingerprint_inputs", counting_fingerprint)
+    evaluator = RidgeEvaluator(
+        n_splits=2,
+        seed=146,
+        max_configurations=1,
+        refine_globals=False,
+        fold_strategy=fold_strategy,
+        diagnostics_mode="basic",
+        feature_pool_diagnostics=False,
+    )
+    token = evaluator.register_immutable_dataset(inputs, dataset.y)
+    first = evaluator.evaluate(graph, inputs, dataset.y, config=graph.default_config())
+    second = evaluator.evaluate(graph, inputs, dataset.y, config=graph.default_config())
+
+    assert token > 0
+    assert fingerprint_calls == 1
+    assert fold_strategy.calls == 1
+    assert evaluator.evaluation_cache_diagnostics()["immutable_dataset_hits"] == 2
+    assert first.config == second.config
+    assert first.score == second.score
+    np.testing.assert_array_equal(first.predictions, second.predictions)
+
+
+def test_immutable_dataset_registration_is_identity_scoped_and_revocable(monkeypatch: pytest.MonkeyPatch) -> None:
+    dataset = make_tabular_data(n_samples=48, n_features=4, seed=147)
+    inputs = dataset.inputs()
+    copied_inputs = {key: np.array(value, copy=True) for key, value in inputs.items()}
+    copied_y = np.array(dataset.y, copy=True)
+    graph = build_seed_graph()
+    fingerprint_calls = 0
+    original_fingerprint = evaluator_module.fingerprint_inputs
+
+    def counting_fingerprint(values: dict[str, object]) -> str:
+        nonlocal fingerprint_calls
+        fingerprint_calls += 1
+        return original_fingerprint(values)
+
+    monkeypatch.setattr(evaluator_module, "fingerprint_inputs", counting_fingerprint)
+    evaluator = RidgeEvaluator(
+        n_splits=2,
+        seed=147,
+        max_configurations=1,
+        refine_globals=False,
+        diagnostics_mode="basic",
+        feature_pool_diagnostics=False,
+    )
+    token = evaluator.register_immutable_dataset(inputs, dataset.y)
+    evaluator.evaluate(graph, copied_inputs, copied_y, config=graph.default_config())
+    assert fingerprint_calls == 2
+    assert evaluator.evaluation_cache_diagnostics()["immutable_dataset_hits"] == 0
+
+    assert evaluator.unregister_immutable_dataset(token) is True
+    assert evaluator.unregister_immutable_dataset(token) is False
+    inputs["x"][0, 0] += 10.0
+    evaluator.evaluate(graph, inputs, dataset.y, config=graph.default_config())
+    assert fingerprint_calls == 3
+    assert evaluator.evaluation_cache_diagnostics()["immutable_dataset_registrations"] == 0
+
+
+def test_registered_dataset_recomputes_folds_after_fold_configuration_change() -> None:
+    class CountingFoldStrategy(FoldStrategy):
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def split(self, inputs: dict[str, object], y: np.ndarray, n_splits: int, seed: int):
+            self.calls += 1
+            return super().split(inputs, y, n_splits, seed)
+
+    dataset = make_tabular_data(n_samples=48, n_features=4, seed=148)
+    inputs = dataset.inputs()
+    strategy = CountingFoldStrategy()
+    evaluator = RidgeEvaluator(
+        n_splits=2,
+        seed=148,
+        max_configurations=1,
+        refine_globals=False,
+        fold_strategy=strategy,
+        diagnostics_mode="basic",
+        feature_pool_diagnostics=False,
+    )
+    evaluator.register_immutable_dataset(inputs, dataset.y)
+    evaluator.n_splits = 3
+    graph = build_seed_graph()
+    result = evaluator.evaluate(graph, inputs, dataset.y, config=graph.default_config())
+
+    assert strategy.calls == 2
+    assert len(result.diagnostics["folds"]["score"]) == 3
+
+
 def test_blockwise_correlation_summary_matches_full_matrix_helper() -> None:
     rng = np.random.default_rng(48)
     x = rng.normal(size=(80, 11))
