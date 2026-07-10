@@ -8,6 +8,8 @@ import numpy as np
 DEFAULT_ALPHAS = np.logspace(-4, 4, 17)
 EPS = 1e-8
 _ALPHA_SELECTION_MAX_ELEMENTS = 1_000_000
+_NORMAL_EQUATION_MAX_CONDITION_BOUND = 1e10
+_NORMAL_EQUATION_MAX_GRAM_ELEMENTS = 4_000_000
 
 
 @dataclass
@@ -90,9 +92,14 @@ def _empty_ridge_model(x: np.ndarray, y: np.ndarray, alpha: float, sample_weight
 
 def _weighted_svd(x: np.ndarray, y: np.ndarray, sample_weight: np.ndarray | None) -> _WeightedSVD:
     xc, yc, x_mean, y_mean, weights = _weighted_center(x, y, sample_weight)
-    sqrt_w = np.sqrt(weights)
-    xw = xc * sqrt_w[:, None]
-    yw = yc * sqrt_w
+    if np.all(weights == 1.0):
+        sqrt_w = weights
+        xw = xc
+        yw = yc
+    else:
+        sqrt_w = np.sqrt(weights)
+        xw = xc * sqrt_w[:, None]
+        yw = yc * sqrt_w
     u, s, vt = np.linalg.svd(xw, full_matrices=False)
     return _WeightedSVD(
         u=u,
@@ -151,6 +158,49 @@ def fit_ridge(x: np.ndarray, y: np.ndarray, alpha: float, sample_weight: np.ndar
     if x.size == 0:
         return _empty_ridge_model(x, y, alpha, sample_weight=sample_weight)
     return _model_from_svd(_weighted_svd(x, y, sample_weight), float(alpha))
+
+
+def fit_ridge_screening(x: np.ndarray, y: np.ndarray, alpha: float, sample_weight: np.ndarray | None = None) -> RidgeModel:
+    """Fit a fixed-alpha screening model, falling back to SVD when numerically unsafe."""
+    if x.size == 0:
+        return _empty_ridge_model(x, y, alpha, sample_weight=sample_weight)
+    alpha = float(alpha)
+    if not np.isfinite(alpha) or alpha <= 0.0:
+        return fit_ridge(x, y, alpha, sample_weight=sample_weight)
+    n_rows, n_features = x.shape
+    if n_features > 3 * n_rows or n_features * n_features > _NORMAL_EQUATION_MAX_GRAM_ELEMENTS:
+        return fit_ridge(x, y, alpha, sample_weight=sample_weight)
+
+    xc, yc, x_mean, y_mean, weights = _weighted_center(x, y, sample_weight)
+    if np.all(weights == 1.0):
+        gram = xc.T @ xc
+        rhs = xc.T @ yc
+    else:
+        weighted_x = xc * weights[:, None]
+        gram = xc.T @ weighted_x
+        rhs = weighted_x.T @ yc
+
+    trace = float(np.trace(gram))
+    condition_bound = (max(trace, 0.0) + alpha) / alpha
+    if (
+        not np.isfinite(condition_bound)
+        or condition_bound > _NORMAL_EQUATION_MAX_CONDITION_BOUND
+        or not np.all(np.isfinite(gram))
+        or not np.all(np.isfinite(rhs))
+    ):
+        return fit_ridge(x, y, alpha, sample_weight=sample_weight)
+
+    gram.flat[:: gram.shape[0] + 1] += alpha
+    try:
+        coef = np.linalg.solve(gram, rhs)
+    except np.linalg.LinAlgError:
+        return fit_ridge(x, y, alpha, sample_weight=sample_weight)
+    if not np.all(np.isfinite(coef)):
+        return fit_ridge(x, y, alpha, sample_weight=sample_weight)
+    intercept = y_mean - float(x_mean @ coef)
+    if not np.isfinite(intercept):
+        return fit_ridge(x, y, alpha, sample_weight=sample_weight)
+    return RidgeModel(coef=coef, intercept=float(intercept), alpha=alpha)
 
 
 def select_alpha(

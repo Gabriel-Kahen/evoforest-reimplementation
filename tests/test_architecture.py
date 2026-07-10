@@ -9,7 +9,7 @@ import urllib.error
 import numpy as np
 import pytest
 
-from evoforest_arch import graph as graph_module, llm as llm_module
+from evoforest_arch import evaluator as evaluator_module, graph as graph_module, llm as llm_module
 from evoforest_arch.agents import EngineerAgent, ScientistAgent
 from evoforest_arch.cli import build_llm_agents
 from evoforest_arch.evaluator import RidgeEvaluator, abs_feature_correlation, effective_rank, feature_correlation_summary, max_correlation_scores, most_correlated_names, safe_corr_columns
@@ -1136,6 +1136,38 @@ def test_ridge_g_runs_iterative_reweighted_least_squares() -> None:
     assert result.diagnostics["global_ridge"]["residual_reweighted"] is True
     assert result.diagnostics["global_ridge"]["irls_steps_used"] == 3
     assert len(result.diagnostics["global_ridge"]["irls_iterations"]) == 3
+
+
+def test_ridge_g_skips_only_exact_normalized_weight_noops(monkeypatch: pytest.MonkeyPatch) -> None:
+    rng = np.random.default_rng(1616)
+    x = rng.normal(size=(72, 9))
+    y = rng.normal(size=x.shape[0])
+    evaluator = RidgeEvaluator(irls_steps=3)
+    apply_calls = 0
+    fit_calls = 0
+    original_fit = evaluator_module.select_alpha_and_fit_ridge
+
+    def constant_weights(residual: np.ndarray) -> np.ndarray:
+        nonlocal apply_calls
+        apply_calls += 1
+        return np.full_like(residual, 7.0)
+
+    def counted_fit(*args: object, **kwargs: object) -> tuple[float, object]:
+        nonlocal fit_calls
+        fit_calls += 1
+        return original_fit(*args, **kwargs)
+
+    monkeypatch.setattr(evaluator_module, "select_alpha_and_fit_ridge", counted_fit)
+    result = evaluator._fit_reweighted_ridge(x, y, None, ResidualWeightRule("constant", constant_weights))
+
+    assert apply_calls == 3
+    assert fit_calls == 1
+    assert len(result.irls_iterations) == 3
+    assert [row["step"] for row in result.irls_iterations] == [1, 2, 3]
+    assert all(row["alpha"] == result.initial_alpha for row in result.irls_iterations)
+    assert all(row["weight_min"] == row["weight_max"] == row["weight_mean"] == 1.0 for row in result.irls_iterations)
+    assert all(row["weight_std"] == 0.0 for row in result.irls_iterations)
+    np.testing.assert_array_equal(result.model.coef, result.initial_model.coef)
 
 
 def test_rank_interaction_readout_selects_oof_features() -> None:

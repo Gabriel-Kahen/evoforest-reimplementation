@@ -11,7 +11,7 @@ import numpy as np
 from evoforest_arch.evaluation_cache import PersistentEvaluationCache, fingerprint_inputs
 from evoforest_arch.graph import EvalContext, EvaluationKeyFingerprints, Graph, ResidualWeightRule
 from evoforest_arch.metrics import DEFAULT_SCORER, FoldStrategy, ScoreFunction, TaskScorer, coerce_fold_strategy, coerce_scorer, safe_corr
-from evoforest_arch.readout import DEFAULT_ALPHAS, RidgeModel, Standardizer, combine_sample_weights, fit_ridge, normalize_sample_weight, select_alpha_and_fit_ridge
+from evoforest_arch.readout import DEFAULT_ALPHAS, RidgeModel, Standardizer, combine_sample_weights, fit_ridge_screening, normalize_sample_weight, select_alpha_and_fit_ridge
 from evoforest_arch.task import TaskSchema
 
 
@@ -873,8 +873,14 @@ class RidgeEvaluator:
         for step in range(1, self.irls_steps + 1):
             residual = y - model.predict(x)
             residual_weight = normalize_sample_weight(residual_rule.apply(residual), y.shape[0])
-            current_weight = combine_sample_weights(base_weight, residual_weight)
-            alpha, model = select_alpha_and_fit_ridge(x, y, self.alphas, sample_weight=current_weight)
+            next_weight = combine_sample_weights(base_weight, residual_weight)
+            weights_unchanged = np.array_equal(
+                normalize_sample_weight(current_weight, y.shape[0]),
+                normalize_sample_weight(next_weight, y.shape[0]),
+            )
+            current_weight = next_weight
+            if not weights_unchanged:
+                alpha, model = select_alpha_and_fit_ridge(x, y, self.alphas, sample_weight=current_weight)
             irls_iterations.append(
                 {
                     "step": int(step),
@@ -1033,7 +1039,7 @@ class RidgeEvaluator:
         prepared = self._prepare_fold(x, train_idx, validation_idx)
         train_weight = sample_weight[train_idx] if sample_weight is not None else None
         fixed_alpha = float(self.alphas[len(self.alphas) // 2])
-        model = fit_ridge(prepared.x_train, y[train_idx], fixed_alpha, sample_weight=train_weight)
+        model = fit_ridge_screening(prepared.x_train, y[train_idx], fixed_alpha, sample_weight=train_weight)
         approximate_score, approximate_raw_score = _score_and_raw(self.scorer, y[validation_idx], model.predict(prepared.x_validation))
         return {
             "config": dict(config),
