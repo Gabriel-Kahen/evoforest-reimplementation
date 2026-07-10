@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from itertools import product
 import math
 import time
@@ -9,7 +9,7 @@ from typing import Any, Callable
 
 import numpy as np
 
-from evoforest_arch.evaluation_cache import PersistentEvaluationCache, fingerprint_inputs
+from evoforest_arch.evaluation_cache import PersistentEvaluationCache, fingerprint_inputs, fingerprint_value
 from evoforest_arch.graph import EvalContext, EvaluationKeyFingerprints, Graph, ResidualWeightRule
 from evoforest_arch.metrics import DEFAULT_SCORER, FoldStrategy, ScoreFunction, TaskScorer, coerce_fold_strategy, coerce_scorer, safe_corr
 from evoforest_arch.readout import DEFAULT_ALPHAS, RidgeModel, Standardizer, combine_sample_weights, fit_ridge_screening, normalize_sample_weight, select_alpha_and_fit_ridge
@@ -245,14 +245,20 @@ class RidgeEvaluator:
         return record
 
     def _fold_signature(self) -> tuple[object, ...]:
+        split = self.fold_strategy.split
+        split_fn = getattr(split, "__func__", split)
+        code = getattr(split_fn, "__code__", None)
+        state = dict(getattr(self.fold_strategy, "__dict__", {}))
+        try:
+            state_fingerprint = fingerprint_value(state)
+        except TypeError:
+            state_fingerprint = repr(state)
         return (
             self.n_splits,
             self.seed,
             type(self.fold_strategy),
-            self.fold_strategy.name,
-            self.fold_strategy.group_key,
-            self.fold_strategy.time_key,
-            self.fold_strategy.stratify_bins,
+            fingerprint_value(code) if code is not None else repr(split_fn),
+            state_fingerprint,
         )
 
     def _emit_progress(self, payload: dict[str, Any]) -> None:
@@ -286,6 +292,14 @@ class RidgeEvaluator:
             folds, fold_diagnostics = registered_dataset.folds, registered_dataset.fold_diagnostics
         else:
             folds, fold_diagnostics = self._folds(inputs, y)
+            if registered_dataset is not None:
+                registered_dataset = replace(
+                    registered_dataset,
+                    folds=folds,
+                    fold_diagnostics=fold_diagnostics,
+                    fold_signature=self._fold_signature(),
+                )
+                self._immutable_datasets[self._immutable_dataset_keys[registered_dataset.token]] = registered_dataset
         refinement_diagnostics: dict[str, object] = {"enabled": False}
         if self.refine_globals and working_graph.globals.trainable_names():
             from evoforest_arch.refinement import GlobalRefiner

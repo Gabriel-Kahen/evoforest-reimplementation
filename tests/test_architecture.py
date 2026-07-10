@@ -1192,6 +1192,45 @@ def test_registered_dataset_recomputes_folds_after_fold_configuration_change() -
     assert len(result.diagnostics["folds"]["score"]) == 3
 
 
+def test_registered_dataset_recomputes_folds_after_custom_strategy_state_change() -> None:
+    class OffsetFoldStrategy(FoldStrategy):
+        def __init__(self) -> None:
+            object.__setattr__(self, "offset", 0)
+            object.__setattr__(self, "calls", 0)
+
+        def split(self, inputs: dict[str, object], y: np.ndarray, n_splits: int, seed: int):
+            del inputs, seed
+            object.__setattr__(self, "calls", self.calls + 1)
+            indices = np.roll(np.arange(y.shape[0]), self.offset)
+            validation_blocks = np.array_split(indices, n_splits)
+            folds = []
+            for validation in validation_blocks:
+                train = np.setdiff1d(indices, validation, assume_unique=True)
+                folds.append((train, validation))
+            return folds, {"method": "offset", "offset": self.offset}
+
+    dataset = make_tabular_data(n_samples=48, n_features=4, seed=149)
+    inputs = dataset.inputs()
+    strategy = OffsetFoldStrategy()
+    evaluator = RidgeEvaluator(
+        n_splits=3,
+        seed=149,
+        max_configurations=1,
+        refine_globals=False,
+        fold_strategy=strategy,
+        diagnostics_mode="basic",
+        feature_pool_diagnostics=False,
+    )
+    evaluator.register_immutable_dataset(inputs, dataset.y)
+    object.__setattr__(strategy, "offset", 1)
+
+    result = evaluator.evaluate(build_seed_graph(), inputs, dataset.y, config=build_seed_graph().default_config())
+    evaluator.evaluate(build_seed_graph(), inputs, dataset.y, config=build_seed_graph().default_config())
+
+    assert strategy.calls == 2
+    assert result.diagnostics["folds"]["offset"] == 1
+
+
 def test_blockwise_correlation_summary_matches_full_matrix_helper() -> None:
     rng = np.random.default_rng(48)
     x = rng.normal(size=(80, 11))
