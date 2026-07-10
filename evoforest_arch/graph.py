@@ -601,6 +601,7 @@ class Graph:
         cache: dict[object, Any] | None = None,
         cache_namespace: str = "",
         key_fingerprints: EvaluationKeyFingerprints | None = None,
+        copy_cached_bundle: bool = True,
     ) -> tuple[np.ndarray, list[str], EvalContext]:
         self.validate_paper_architecture()
         selected = self.selected_config(config)
@@ -636,6 +637,9 @@ class Graph:
         if bundle_key in ctx.cache:
             ctx.cache_hits += 1
             values, names = ctx.cache[bundle_key]
+            if copy_cached_bundle:
+                values = np.array(values, copy=True)
+                names = list(names)
             return values, names, ctx
         blocks: list[FeatureBlock] = []
         for node_name, alternative in output_alternatives:

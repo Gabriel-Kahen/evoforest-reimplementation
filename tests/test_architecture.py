@@ -231,7 +231,34 @@ def test_assembled_feature_bundle_reuses_frozen_snapshot_within_evaluation() -> 
     np.testing.assert_array_equal(second, first)
     assert second_names == first_names
     assert ctx.cache_hits == 1
-    assert second.flags.writeable is False
+    assert second.flags.writeable is True
+    second[0, 0] = -1.0
+    third, _, _ = graph.evaluate_features(inputs, cache=cache, key_fingerprints=fingerprints)
+    np.testing.assert_array_equal(third, first)
+
+
+def test_assembled_feature_bundle_can_be_borrowed_read_only_internally() -> None:
+    graph = Graph("borrowed_assembled_feature_bundle")
+    graph.add_input("x")
+    graph.add_node("output", "output")
+
+    def output_fn(_ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
+        return FeatureBlock(np.asarray(values["x"], dtype=np.float64)[:, :1], ["value"])
+
+    graph.add_alternative("output", "base", ("x",), output_fn)
+    inputs = {"x": np.arange(12, dtype=np.float64).reshape(6, 2)}
+    cache = PersistentEvaluationCache(max_entries=8, max_bytes=1_000_000)
+    cache.begin_evaluation()
+    fingerprints = EvaluationKeyFingerprints()
+    graph.evaluate_features(inputs, cache=cache, key_fingerprints=fingerprints)
+    borrowed, _, _ = graph.evaluate_features(
+        inputs,
+        cache=cache,
+        key_fingerprints=fingerprints,
+        copy_cached_bundle=False,
+    )
+
+    assert borrowed.flags.writeable is False
 
 
 def test_configuration_search_uses_ancestor_conditioned_shared_cache() -> None:

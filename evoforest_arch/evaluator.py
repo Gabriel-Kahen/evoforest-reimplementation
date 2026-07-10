@@ -530,6 +530,8 @@ class RidgeEvaluator:
         result.diagnostics["alternative_stats"] = working_graph.alternative_statistics_snapshot()
         if not self.retain_feature_matrix:
             result.feature_matrix = None
+        elif result.feature_matrix is not None and not result.feature_matrix.flags.writeable:
+            result.feature_matrix = result.feature_matrix.copy()
         return result
 
     def _evaluate_single_config(
@@ -559,6 +561,7 @@ class RidgeEvaluator:
                 cache=shared_cache,
                 cache_namespace=cache_namespace,
                 key_fingerprints=key_fingerprints,
+                copy_cached_bundle=False,
             )
             feature_matrix_reused = False
         else:
@@ -982,6 +985,7 @@ class RidgeEvaluator:
             cache=shared_cache,
             cache_namespace=cache_namespace,
             key_fingerprints=key_fingerprints,
+            copy_cached_bundle=False,
         )
         sample_weight = None
         if "ridge_w" in graph.nodes:
