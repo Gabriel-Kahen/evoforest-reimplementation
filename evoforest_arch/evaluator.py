@@ -9,7 +9,7 @@ from typing import Any, Callable
 
 import numpy as np
 
-from evoforest_arch.evaluation_cache import PersistentEvaluationCache, fingerprint_inputs, fingerprint_value
+from evoforest_arch.evaluation_cache import PersistentEvaluationCache, fingerprint_callable, fingerprint_inputs, fingerprint_value
 from evoforest_arch.graph import EvalContext, EvaluationKeyFingerprints, Graph, ResidualWeightRule
 from evoforest_arch.metrics import DEFAULT_SCORER, FoldStrategy, ScoreFunction, TaskScorer, coerce_fold_strategy, coerce_scorer, safe_corr
 from evoforest_arch.readout import DEFAULT_ALPHAS, RidgeModel, Standardizer, combine_sample_weights, fit_ridge_screening, normalize_sample_weight, select_alpha_and_fit_ridge
@@ -246,19 +246,27 @@ class RidgeEvaluator:
 
     def _fold_signature(self) -> tuple[object, ...]:
         split = self.fold_strategy.split
-        split_fn = getattr(split, "__func__", split)
-        code = getattr(split_fn, "__code__", None)
-        state = dict(getattr(self.fold_strategy, "__dict__", {}))
         try:
-            state_fingerprint = fingerprint_value(state)
+            strategy_fingerprint = fingerprint_callable(split)
         except TypeError:
-            state_fingerprint = repr(state)
+            split_fn = getattr(split, "__func__", split)
+            code = getattr(split_fn, "__code__", None)
+            state = dict(getattr(self.fold_strategy, "__dict__", {}))
+            try:
+                state_fingerprint = fingerprint_value(state)
+            except TypeError:
+                state_fingerprint = repr(state)
+            strategy_fingerprint = fingerprint_value(
+                (
+                    fingerprint_value(code) if code is not None else repr(split_fn),
+                    state_fingerprint,
+                )
+            )
         return (
             self.n_splits,
             self.seed,
             type(self.fold_strategy),
-            fingerprint_value(code) if code is not None else repr(split_fn),
-            state_fingerprint,
+            strategy_fingerprint,
         )
 
     def _emit_progress(self, payload: dict[str, Any]) -> None:

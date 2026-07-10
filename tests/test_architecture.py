@@ -1231,6 +1231,44 @@ def test_registered_dataset_recomputes_folds_after_custom_strategy_state_change(
     assert result.diagnostics["folds"]["offset"] == 1
 
 
+def test_registered_dataset_recomputes_folds_after_custom_strategy_closure_change() -> None:
+    def make_split(mode: int):
+        def split(self: FoldStrategy, inputs: dict[str, object], y: np.ndarray, n_splits: int, seed: int):
+            del self, inputs, seed
+            indices = np.roll(np.arange(y.shape[0]), mode)
+            validation_blocks = np.array_split(indices, n_splits)
+            folds = []
+            for validation in validation_blocks:
+                train = np.setdiff1d(indices, validation, assume_unique=True)
+                folds.append((train, validation))
+            return folds, {"method": "closure", "mode": mode}
+
+        return split
+
+    class ClosureFoldStrategy(FoldStrategy):
+        pass
+
+    ClosureFoldStrategy.split = make_split(0)  # type: ignore[method-assign]
+    dataset = make_tabular_data(n_samples=48, n_features=4, seed=150)
+    inputs = dataset.inputs()
+    strategy = ClosureFoldStrategy()
+    evaluator = RidgeEvaluator(
+        n_splits=3,
+        seed=150,
+        max_configurations=1,
+        refine_globals=False,
+        fold_strategy=strategy,
+        diagnostics_mode="basic",
+        feature_pool_diagnostics=False,
+    )
+    evaluator.register_immutable_dataset(inputs, dataset.y)
+    ClosureFoldStrategy.split = make_split(1)  # type: ignore[method-assign]
+
+    result = evaluator.evaluate(build_seed_graph(), inputs, dataset.y, config=build_seed_graph().default_config())
+
+    assert result.diagnostics["folds"]["mode"] == 1
+
+
 def test_blockwise_correlation_summary_matches_full_matrix_helper() -> None:
     rng = np.random.default_rng(48)
     x = rng.normal(size=(80, 11))

@@ -182,8 +182,8 @@ def fit_ridge_screening(x: np.ndarray, y: np.ndarray, alpha: float, sample_weigh
         gram = xc.T @ weighted_x
         rhs = weighted_x.T @ yc
 
-    trace = float(np.trace(gram))
-    condition_bound = (max(trace, 0.0) + alpha) / alpha
+    spectral_bound = float(np.linalg.norm(gram, ord=np.inf))
+    condition_bound = (max(spectral_bound, 0.0) + alpha) / alpha
     if (
         not np.isfinite(condition_bound)
         or condition_bound > _NORMAL_EQUATION_MAX_CONDITION_BOUND
