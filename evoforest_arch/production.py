@@ -568,6 +568,10 @@ class ProductionIslandWorker:
         self.best_validation_result = best_validation_result
         self._prepared_jobs: dict[str, dict[str, Any]] = {}
         self.evaluator = RidgeEvaluator(**self.evaluator_config)
+        if self.train_inputs is not None and self.train_y is not None:
+            self.evaluator.register_immutable_dataset(self.train_inputs, self.train_y)
+        if self.validation_inputs is not None and self.validation_y is not None:
+            self.evaluator.register_immutable_dataset(self.validation_inputs, self.validation_y)
 
     def run_candidate(
         self,
@@ -1506,6 +1510,16 @@ class ProductionEvolutionRunner:
                 config["fold_strategy"] = "time_blocked"
         return config
 
+    @staticmethod
+    def _register_fixed_splits(
+        evaluator: RidgeEvaluator,
+        splits: dict[str, tuple[dict[str, object], np.ndarray]],
+    ) -> None:
+        evaluator.clear_immutable_datasets()
+        for split_name in ("train", "validation"):
+            split_inputs, split_y = splits[split_name]
+            evaluator.register_immutable_dataset(split_inputs, split_y)
+
     def _split_group_key(self) -> str | None:
         return self.config.split_group_key or self.config.group_key or self.task_schema.input_name_with_role("group", "unit", "engine", "entity")
 
@@ -2385,6 +2399,7 @@ class ProductionEvolutionRunner:
         )
         write_split_manifest(run_dir / "splits.json", split_manifest)
         splits = split_dataset(inputs, y, split_manifest)
+        self._register_fixed_splits(self.evaluator, splits)
         train_inputs, train_y = splits["train"]
         validation_inputs, validation_y = splits["validation"]
         current_graph = self.graph.clone()
@@ -2483,6 +2498,7 @@ class ProductionEvolutionRunner:
         split_manifest = read_split_manifest(run_dir / "splits.json")
         inputs, y = load_dataset(dict(manifest["dataset"]))
         splits = split_dataset(inputs, y, split_manifest)
+        self._register_fixed_splits(self.evaluator, splits)
         state = self._read_state(run_dir)
         current_graph = graph_from_path(run_dir / state.current_graph_path, registry=registry, allow_source=allow_source)
         best_graph = graph_from_path(run_dir / state.best_graph_path, registry=registry, allow_source=allow_source)

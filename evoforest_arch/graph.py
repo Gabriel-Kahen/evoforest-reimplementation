@@ -142,6 +142,7 @@ class EvalContext:
     cache_hits: int = 0
     cache_misses: int = 0
     key_cache: dict[tuple[str, str], tuple[object, ...]] = field(default_factory=dict)
+    key_fingerprints: "EvaluationKeyFingerprints | None" = None
     alternative_lookup: dict[str, dict[str, NodeAlternative]] | None = None
     cache_namespace: str = ""
 
@@ -149,6 +150,14 @@ class EvalContext:
         if name not in self.inputs:
             raise KeyError(f"Input {name!r} was not supplied.")
         return self.inputs[name]
+
+
+@dataclass
+class EvaluationKeyFingerprints:
+    """Content fingerprints shared only within one top-level evaluation."""
+
+    alternatives: dict[tuple[str, str], str] = field(default_factory=dict)
+    globals: dict[str, str] = field(default_factory=dict)
 
 
 class Graph:
@@ -495,6 +504,7 @@ class Graph:
             alternative_id,
             config,
             memo=ctx.key_cache,
+            key_fingerprints=ctx.key_fingerprints,
             alternative_lookup=ctx.alternative_lookup,
             cache_namespace=ctx.cache_namespace,
             globals_store=ctx.globals,
@@ -520,6 +530,7 @@ class Graph:
         alternative_lookup: dict[str, dict[str, NodeAlternative]] | None = None,
         cache_namespace: str = "",
         globals_store: GlobalStore | None = None,
+        key_fingerprints: EvaluationKeyFingerprints | None = None,
     ) -> tuple[object, ...]:
         memo_key = (node_name, alternative_id)
         if memo is not None and memo_key in memo:
@@ -542,25 +553,41 @@ class Graph:
                     alternative_lookup=alternative_lookup,
                     cache_namespace=cache_namespace,
                     globals_store=globals_store,
+                    key_fingerprints=key_fingerprints,
                 )
             )
         global_store = globals_store or self.globals
-        global_values = tuple((name, fingerprint_value(global_store.get(name))) for name in alternative.global_refs)
-        semantics = (
-            alternative.primitive,
-            alternative.source,
-            tuple(alternative.parents),
-            tuple(alternative.global_refs),
-            alternative.output_contract,
-            fingerprint_callable(alternative.fn),
-        )
+        global_values = []
+        for name in alternative.global_refs:
+            if key_fingerprints is None:
+                global_fingerprint = fingerprint_value(global_store.get(name))
+            else:
+                global_fingerprint = key_fingerprints.globals.get(name)
+                if global_fingerprint is None:
+                    global_fingerprint = fingerprint_value(global_store.get(name))
+                    key_fingerprints.globals[name] = global_fingerprint
+            global_values.append((name, global_fingerprint))
+        semantic_key = (node_name, alternative_id)
+        semantic_fingerprint = key_fingerprints.alternatives.get(semantic_key) if key_fingerprints is not None else None
+        if semantic_fingerprint is None:
+            semantics = (
+                alternative.primitive,
+                alternative.source,
+                tuple(alternative.parents),
+                tuple(alternative.global_refs),
+                alternative.output_contract,
+                fingerprint_callable(alternative.fn),
+            )
+            semantic_fingerprint = fingerprint_value(semantics)
+            if key_fingerprints is not None:
+                key_fingerprints.alternatives[semantic_key] = semantic_fingerprint
         key = (
             "ancestor_conditioned_subpath_v2",
             cache_namespace,
             node_name,
             alternative_id,
-            fingerprint_value(semantics),
-            global_values,
+            semantic_fingerprint,
+            tuple(global_values),
             tuple(parent_keys),
         )
         if memo is not None:
@@ -573,6 +600,8 @@ class Graph:
         config: dict[str, str] | None = None,
         cache: dict[object, Any] | None = None,
         cache_namespace: str = "",
+        key_fingerprints: EvaluationKeyFingerprints | None = None,
+        copy_cached_bundle: bool = True,
     ) -> tuple[np.ndarray, list[str], EvalContext]:
         self.validate_paper_architecture()
         selected = self.selected_config(config)
@@ -582,17 +611,48 @@ class Graph:
             cache=cache if cache is not None else {},
             alternative_lookup=self._alternative_lookup(),
             cache_namespace=cache_namespace,
+            key_fingerprints=key_fingerprints,
         )
+        output_alternatives = [
+            (node_name, alternative)
+            for node_name in self.output_nodes()
+            for alternative in self.nodes[node_name].alternatives
+        ]
+        bundle_key = (
+            "assembled_feature_bundle_v1",
+            tuple(
+                self.alternative_cache_key(
+                    node_name,
+                    alternative.id,
+                    selected,
+                    memo=ctx.key_cache,
+                    alternative_lookup=ctx.alternative_lookup,
+                    cache_namespace=cache_namespace,
+                    globals_store=ctx.globals,
+                    key_fingerprints=key_fingerprints,
+                )
+                for node_name, alternative in output_alternatives
+            ),
+        )
+        if bundle_key in ctx.cache:
+            ctx.cache_hits += 1
+            values, names = ctx.cache[bundle_key]
+            if copy_cached_bundle:
+                values = np.array(values, copy=True)
+                names = list(names)
+            return values, names, ctx
         blocks: list[FeatureBlock] = []
-        for node_name in self.output_nodes():
-            output = self.nodes[node_name]
-            for alternative in output.alternatives:
-                value = self.evaluate_alternative(node_name, alternative.id, selected, ctx)
-                blocks.append(as_feature_block(value, prefix=f"{node_name}.{alternative.id}"))
+        for node_name, alternative in output_alternatives:
+            value = self.evaluate_alternative(node_name, alternative.id, selected, ctx)
+            blocks.append(as_feature_block(value, prefix=f"{node_name}.{alternative.id}"))
         if not blocks:
             raise ValueError("Graph has no output nodes.")
         values = blocks[0].values if len(blocks) == 1 else np.column_stack([block.values for block in blocks])
         names = [name for block in blocks for name in block.names]
+        if copy_cached_bundle:
+            ctx.cache[bundle_key] = (np.array(values, copy=True), list(names))
+        else:
+            ctx.cache[bundle_key] = (values, names)
         return values, names, ctx
 
     def clone(self) -> "Graph":

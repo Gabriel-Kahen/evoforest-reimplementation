@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import OrderedDict
 import io
 import json
 import argparse
@@ -9,18 +10,18 @@ import urllib.error
 import numpy as np
 import pytest
 
-from evoforest_arch import llm as llm_module
+from evoforest_arch import evaluator as evaluator_module, graph as graph_module, llm as llm_module
 from evoforest_arch.agents import EngineerAgent, ScientistAgent
 from evoforest_arch.cli import build_llm_agents
-from evoforest_arch.evaluator import RidgeEvaluator, abs_feature_correlation, effective_rank, feature_correlation_summary, max_correlation_scores, most_correlated_names, safe_corr_columns
+from evoforest_arch.evaluator import _SCREENING_PREPARED_FOLD_CACHE_MAX_ENTRIES, PreparedFold, RidgeEvaluator, abs_feature_correlation, effective_rank, feature_correlation_summary, max_correlation_scores, most_correlated_names, safe_corr_columns
 from evoforest_arch.evaluation_cache import PersistentEvaluationCache, fingerprint_callable
 from evoforest_arch.evolution import EvolutionLoop
 from evoforest_arch.feedback import toon_report
-from evoforest_arch.graph import CallableFamily, EvalContext, FeatureBlock, Graph, NodeAlternative, ResidualWeightRule
+from evoforest_arch.graph import CallableFamily, EvalContext, EvaluationKeyFingerprints, FeatureBlock, Graph, NodeAlternative, ResidualWeightRule
 from evoforest_arch.graph_io import graph_from_dict, graph_hash
 from evoforest_arch.llm import ClaudeLLMClient, GeminiLLMClient, LLMEngineerAgent, LLMMemorandumAgent, LLMScientistAgent, OpenAILLMClient, PromptBuilder, StaticLLMClient, llm_client_from_env, llm_provider_from_env
 from evoforest_arch.maintenance import GraphMaintenance
-from evoforest_arch.metrics import FoldStrategy, RMSE_SCORER, safe_corr
+from evoforest_arch.metrics import FoldStrategy, RMSE_SCORER, TaskScorer, safe_corr
 from evoforest_arch.mutations import GlobalSpec, MutationDocument, MutationEngine, MutationSpec, NodeSpec, RemoveSpec
 from evoforest_arch.primitives import PrimitiveRegistry
 from evoforest_arch.rank_readout import fit_rank_feature_expansion, select_rank_ensemble
@@ -163,6 +164,124 @@ def test_alternative_cache_key_memo_preserves_key_format() -> None:
 
     assert cached == uncached
     assert memo
+
+
+def test_evaluation_key_fingerprints_hash_each_callable_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    graph = build_structural_break_seed_graph()
+    selected = graph.selected_config(graph.default_config())
+    fingerprints = EvaluationKeyFingerprints()
+    calls = 0
+    original = graph_module.fingerprint_callable
+
+    def counting_fingerprint(fn: object) -> str:
+        nonlocal calls
+        calls += 1
+        return original(fn)
+
+    monkeypatch.setattr(graph_module, "fingerprint_callable", counting_fingerprint)
+    for _ in range(4):
+        graph.alternative_cache_key("output", "raw_concat", selected, key_fingerprints=fingerprints)
+    first_pass_calls = calls
+    assert first_pass_calls > 0
+    assert calls == len(fingerprints.alternatives)
+
+    graph.alternative_cache_key("output", "raw_concat", selected, key_fingerprints=EvaluationKeyFingerprints())
+    assert calls > first_pass_calls
+
+
+def test_evaluation_key_fingerprints_do_not_cross_mutation_boundary() -> None:
+    graph = Graph("evaluation_fingerprint_boundary")
+    graph.add_input("x")
+    graph.add_node("output", "output")
+    scale = [1.0]
+
+    def output_fn(_ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
+        return FeatureBlock(np.asarray(values["x"], dtype=np.float64)[:, :1] * scale[0], ["value"])
+
+    graph.add_alternative("output", "scaled", ("x",), output_fn)
+    inputs = {"x": np.arange(12, dtype=np.float64).reshape(6, 2)}
+    shared_cache: dict[object, object] = {}
+    first, _, _ = graph.evaluate_features(inputs, cache=shared_cache, key_fingerprints=EvaluationKeyFingerprints())
+
+    scale[0] = -1.0
+    second, _, ctx = graph.evaluate_features(inputs, cache=shared_cache, key_fingerprints=EvaluationKeyFingerprints())
+
+    np.testing.assert_allclose(second, -first)
+    assert ctx.cache_hits == 0
+
+
+def test_assembled_feature_bundle_reuses_frozen_snapshot_within_evaluation() -> None:
+    graph = Graph("assembled_feature_bundle")
+    graph.add_input("x")
+    graph.add_node("output", "output")
+    calls = [0]
+
+    def output_fn(_ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
+        calls[0] += 1
+        return FeatureBlock(np.asarray(values["x"], dtype=np.float64)[:, :1], ["value"])
+
+    graph.add_alternative("output", "base", ("x",), output_fn)
+    inputs = {"x": np.arange(12, dtype=np.float64).reshape(6, 2)}
+    cache = PersistentEvaluationCache(max_entries=8, max_bytes=1_000_000)
+    cache.begin_evaluation()
+    fingerprints = EvaluationKeyFingerprints()
+    first, first_names, _ = graph.evaluate_features(inputs, cache=cache, key_fingerprints=fingerprints)
+    second, second_names, ctx = graph.evaluate_features(inputs, cache=cache, key_fingerprints=fingerprints)
+
+    assert calls == [1]
+    np.testing.assert_array_equal(second, first)
+    assert second_names == first_names
+    assert ctx.cache_hits == 1
+    assert second.flags.writeable is True
+    second[0, 0] = -1.0
+    third, _, _ = graph.evaluate_features(inputs, cache=cache, key_fingerprints=fingerprints)
+    np.testing.assert_array_equal(third, first)
+
+
+def test_assembled_feature_bundle_can_be_borrowed_read_only_internally() -> None:
+    graph = Graph("borrowed_assembled_feature_bundle")
+    graph.add_input("x")
+    graph.add_node("output", "output")
+
+    def output_fn(_ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
+        return FeatureBlock(np.asarray(values["x"], dtype=np.float64)[:, :1], ["value"])
+
+    graph.add_alternative("output", "base", ("x",), output_fn)
+    inputs = {"x": np.arange(12, dtype=np.float64).reshape(6, 2)}
+    cache = PersistentEvaluationCache(max_entries=8, max_bytes=1_000_000)
+    cache.begin_evaluation()
+    fingerprints = EvaluationKeyFingerprints()
+    graph.evaluate_features(inputs, cache=cache, key_fingerprints=fingerprints)
+    borrowed, _, _ = graph.evaluate_features(
+        inputs,
+        cache=cache,
+        key_fingerprints=fingerprints,
+        copy_cached_bundle=False,
+    )
+
+    assert borrowed.flags.writeable is False
+
+
+def test_assembled_feature_bundle_isolated_from_public_plain_dict_results() -> None:
+    graph = Graph("plain_dict_assembled_feature_bundle")
+    graph.add_input("x")
+    graph.add_node("output", "output")
+
+    def output_fn(_ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
+        return FeatureBlock(np.asarray(values["x"], dtype=np.float64)[:, :1], ["value"])
+
+    graph.add_alternative("output", "base", ("x",), output_fn)
+    inputs = {"x": np.arange(12, dtype=np.float64).reshape(6, 2)}
+    cache: dict[object, object] = {}
+    expected, expected_names, _ = graph.evaluate_features(inputs)
+    first, first_names, _ = graph.evaluate_features(inputs, cache=cache)
+    first[0, 0] = -1.0
+    first_names[0] = "corrupted"
+
+    second, second_names, _ = graph.evaluate_features(inputs, cache=cache)
+
+    np.testing.assert_array_equal(second, expected)
+    assert second_names == expected_names
 
 
 def test_configuration_search_uses_ancestor_conditioned_shared_cache() -> None:
@@ -674,6 +793,8 @@ def test_staged_configuration_screening_uses_exact_cv_for_final_selection() -> N
     assert search["screening"]["enabled"] is True
     assert search["screening"]["approximate"] is True
     assert search["screening"]["screened"] == 48
+    assert search["screening"]["unique_work_units"] == 24
+    assert search["screening"]["work_reuse_hits"] == 24
     assert search["screening"]["finalists"] == 5
     assert search["screening"]["winner_selected_by_exact_cv"] is True
     assert search["screening"]["full_plan_exact_best_recall_guaranteed"] is False
@@ -689,6 +810,317 @@ def test_staged_configuration_screening_uses_exact_cv_for_final_selection() -> N
     repeated_screening.pop("cache_entries_added")
     first_screening.pop("cache_entries_added")
     assert repeated_screening == first_screening
+
+
+def test_reused_configuration_work_matches_independent_evaluation() -> None:
+    dataset = make_structural_break_data(n_series=48, length=55, seed=145)
+    inputs = dataset.inputs()
+    graph = build_structural_break_seed_graph()
+    kwargs = {
+        "n_splits": 3,
+        "seed": 145,
+        "max_configurations": 64,
+        "screening_finalists": 6,
+        "refine_globals": False,
+        "diagnostics_mode": "basic",
+        "feature_pool_diagnostics": False,
+        "persistent_cache": False,
+    }
+    reference = RidgeEvaluator(**kwargs)
+    folds, fold_diagnostics = reference._folds(inputs, dataset.y)
+    configs, _total = reference._configuration_candidates(graph)
+    screening_rows = []
+    for planner_index, candidate in enumerate(configs):
+        row = reference._screen_single_config(graph, inputs, dataset.y, candidate, {}, folds)
+        row["planner_index"] = planner_index
+        screening_rows.append(row)
+    finalists = reference._screening_finalists(graph, configs, screening_rows)
+    independent = [
+        reference._evaluate_single_config(
+            graph,
+            inputs,
+            dataset.y,
+            candidate,
+            {},
+            folds=folds,
+            fold_diagnostics=fold_diagnostics,
+            diagnostics_mode="score",
+        )
+        for candidate in finalists
+    ]
+    expected = max(independent, key=lambda result: result.score)
+
+    reused = RidgeEvaluator(**kwargs).evaluate(graph, inputs, dataset.y)
+
+    assert reused.config == expected.config
+    assert reused.score == expected.score
+    assert reused.alphas == expected.alphas
+    np.testing.assert_array_equal(reused.predictions, expected.predictions)
+    assert reused.diagnostics["configuration_search"]["screening"]["unique_work_units"] == 24
+    search = reused.diagnostics["configuration_search"]
+    cache = search["cache"]
+    assert 0 < cache["prepared_fold_entries"] <= kwargs["n_splits"] * search["unique_feature_matrices"]
+    assert 0 < cache["initial_ridge_entries"] <= kwargs["n_splits"] * search["evaluated"]
+
+
+def test_exact_work_caches_respect_tiny_byte_budget() -> None:
+    dataset = make_tabular_data(n_samples=64, n_features=5, seed=245)
+    graph = build_seed_graph()
+    kwargs = {
+        "n_splits": 3,
+        "seed": 245,
+        "max_configurations": 8,
+        "screening_finalists": 8,
+        "refine_globals": False,
+        "diagnostics_mode": "basic",
+        "feature_pool_diagnostics": False,
+        "persistent_cache": False,
+    }
+    expected = RidgeEvaluator(**kwargs).evaluate(graph, dataset.inputs(), dataset.y)
+    bounded = RidgeEvaluator(**kwargs, cache_max_bytes=1).evaluate(graph, dataset.inputs(), dataset.y)
+
+    assert bounded.score == expected.score
+    assert bounded.config == expected.config
+    np.testing.assert_array_equal(bounded.predictions, expected.predictions)
+    cache = bounded.diagnostics["configuration_search"]["cache"]
+    assert cache["prepared_fold_entries"] == 0
+    assert cache["initial_ridge_entries"] == 0
+
+
+def test_exact_work_reports_progress_in_planner_order() -> None:
+    dataset = make_tabular_data(n_samples=64, n_features=5, seed=246)
+    graph = build_seed_graph()
+    kwargs = {
+        "n_splits": 2,
+        "seed": 246,
+        "max_configurations": 8,
+        "screening_finalists": 8,
+        "refine_globals": False,
+        "diagnostics_mode": "basic",
+        "feature_pool_diagnostics": False,
+        "persistent_cache": False,
+    }
+    reference = RidgeEvaluator(**kwargs)
+    folds, fold_diagnostics = reference._folds(dataset.inputs(), dataset.y)
+    configs, _ = reference._configuration_candidates(graph)
+    expected_scores = [
+        reference._evaluate_single_config(
+            graph,
+            dataset.inputs(),
+            dataset.y,
+            config,
+            {},
+            folds=folds,
+            fold_diagnostics=fold_diagnostics,
+            diagnostics_mode="score",
+        ).score
+        for config in configs
+    ]
+    events: list[dict[str, object]] = []
+    RidgeEvaluator(**kwargs, progress_callback=events.append).evaluate(graph, dataset.inputs(), dataset.y)
+    configuration_events = [event for event in events if event.get("phase") == "configuration_evaluated"]
+
+    assert [event["config_index"] for event in configuration_events] == list(range(1, len(configs) + 1))
+    assert [event["score"] for event in configuration_events] == expected_scores
+
+
+def test_exact_progress_callback_can_interrupt_before_fold_fits(monkeypatch: pytest.MonkeyPatch) -> None:
+    dataset = make_tabular_data(n_samples=64, n_features=5, seed=247)
+    fold_fit_calls = 0
+
+    def stop_on_features(payload: dict[str, object]) -> None:
+        if payload.get("phase") == "features_evaluated":
+            raise RuntimeError("stop before folds")
+
+    evaluator = RidgeEvaluator(
+        n_splits=3,
+        seed=247,
+        max_configurations=8,
+        screening_finalists=8,
+        refine_globals=False,
+        diagnostics_mode="basic",
+        feature_pool_diagnostics=False,
+        persistent_cache=False,
+        progress_callback=stop_on_features,
+    )
+    original_fit = evaluator._fit_reweighted_ridge
+
+    def counted_fit(*args: object, **kwargs: object):
+        nonlocal fold_fit_calls
+        fold_fit_calls += 1
+        return original_fit(*args, **kwargs)
+
+    monkeypatch.setattr(evaluator, "_fit_reweighted_ridge", counted_fit)
+
+    with pytest.raises(RuntimeError, match="stop before folds"):
+        evaluator.evaluate(build_seed_graph(), dataset.inputs(), dataset.y)
+
+    assert fold_fit_calls == 0
+
+
+def test_screening_reuses_prepared_fold_by_feature_signature(monkeypatch: pytest.MonkeyPatch) -> None:
+    dataset = make_structural_break_data(n_series=48, length=55, seed=146)
+    inputs = dataset.inputs()
+    graph = build_structural_break_seed_graph()
+    evaluator = RidgeEvaluator(
+        n_splits=3,
+        max_configurations=64,
+        screening_finalists=6,
+        refine_globals=False,
+        persistent_cache=False,
+        diagnostics_mode="basic",
+        feature_pool_diagnostics=False,
+    )
+    folds, _fold_diagnostics = evaluator._folds(inputs, dataset.y)
+    configs, _total = evaluator._configuration_candidates(graph)
+    signatures = [evaluator._feature_signature(graph, config) for config in configs]
+    prepared_cache: OrderedDict[tuple[object, ...], PreparedFold] = OrderedDict()
+    prepare_calls = 0
+    original_prepare_fold = evaluator._prepare_fold
+
+    def counted_prepare_fold(x: np.ndarray, train_idx: np.ndarray, validation_idx: np.ndarray) -> PreparedFold:
+        nonlocal prepare_calls
+        prepare_calls += 1
+        return original_prepare_fold(x, train_idx, validation_idx)
+
+    monkeypatch.setattr(evaluator, "_prepare_fold", counted_prepare_fold)
+    cached_rows = [
+        evaluator._screen_single_config(
+            graph,
+            inputs,
+            dataset.y,
+            config,
+            {},
+            folds,
+            prepared_fold_cache=prepared_cache,
+            prepared_cache_key=signature,
+        )
+        for config, signature in zip(configs, signatures, strict=True)
+    ]
+
+    assert prepare_calls == len(set(signatures)) == 12
+    assert len(prepared_cache) == 12
+    uncached_rows = [
+        evaluator._screen_single_config(graph, inputs, dataset.y, config, {}, folds)
+        for config in configs
+    ]
+    assert [row["approximate_score"] for row in cached_rows] == [row["approximate_score"] for row in uncached_rows]
+    assert [row["approximate_raw_score"] for row in cached_rows] == [row["approximate_raw_score"] for row in uncached_rows]
+
+
+def test_screening_prepared_fold_cache_is_bounded() -> None:
+    dataset = make_structural_break_data(n_series=24, length=32, seed=147)
+    inputs = dataset.inputs()
+    graph = build_structural_break_seed_graph()
+    evaluator = RidgeEvaluator(n_splits=2, refine_globals=False, persistent_cache=False)
+    folds, _fold_diagnostics = evaluator._folds(inputs, dataset.y)
+    config = graph.default_config()
+    prepared_cache: OrderedDict[tuple[object, ...], PreparedFold] = OrderedDict()
+    byte_budget = 10_000
+
+    for index in range(_SCREENING_PREPARED_FOLD_CACHE_MAX_ENTRIES + 5):
+        evaluator._screen_single_config(
+            graph,
+            inputs,
+            dataset.y,
+            config,
+            {},
+            folds,
+            prepared_fold_cache=prepared_cache,
+            prepared_cache_key=(("synthetic_signature", index),),
+            prepared_cache_max_bytes=byte_budget,
+        )
+
+    retained_bytes = sum(fold.x_train.nbytes + fold.x_validation.nbytes for fold in prepared_cache.values())
+    assert 0 < len(prepared_cache) <= _SCREENING_PREPARED_FOLD_CACHE_MAX_ENTRIES
+    assert retained_bytes <= byte_budget
+    assert (("synthetic_signature", 0),) not in prepared_cache
+    assert (("synthetic_signature", _SCREENING_PREPARED_FOLD_CACHE_MAX_ENTRIES + 4),) in prepared_cache
+
+
+def test_screening_reuse_respects_ridge_g_dependencies() -> None:
+    graph = Graph("screening_ridge_g_dependency")
+    graph.add_input("x")
+    graph.add_node("output", "output")
+    graph.add_node("ridge_g", "fitting")
+    graph.add_node("ridge_w", "fitting")
+    graph.add_alternative(
+        "output",
+        "base",
+        ("x",),
+        lambda _ctx, values: FeatureBlock(np.asarray(values["x"], dtype=np.float64), ["x"]),
+    )
+    for name in ("hi", "lo"):
+        graph.add_alternative(
+            "ridge_g",
+            name,
+            (),
+            lambda _ctx, _values, rule_name=name: ResidualWeightRule(
+                rule_name,
+                lambda residual: np.ones_like(residual),
+            ),
+        )
+
+    def dependent_weight(_ctx: EvalContext, values: dict[str, object]) -> np.ndarray:
+        x = np.asarray(values["x"], dtype=np.float64)[:, 0]
+        rule = values["ridge_g"]
+        assert isinstance(rule, ResidualWeightRule)
+        positive_weight, negative_weight = (10.0, 0.1) if rule.name == "hi" else (0.1, 10.0)
+        return np.where(x > 0.0, positive_weight, negative_weight)
+
+    graph.add_alternative("ridge_w", "dependent", ("x", "ridge_g"), dependent_weight)
+    rng = np.random.default_rng(10)
+    x = np.linspace(-2.0, 2.0, 60)[:, None]
+    y = np.where(x[:, 0] > 0.0, 5.0 * x[:, 0] + rng.normal(0.0, 0.2, 60), rng.normal(0.0, 5.0, 60))
+    evaluator = RidgeEvaluator(
+        n_splits=3,
+        max_configurations=2,
+        screening_finalists=1,
+        refine_globals=False,
+        persistent_cache=False,
+        diagnostics_mode="basic",
+        feature_pool_diagnostics=False,
+    )
+    configs, _ = evaluator._configuration_candidates(graph)
+
+    assert evaluator._screening_work_key(graph, configs[0]) != evaluator._screening_work_key(graph, configs[1])
+    result = evaluator.evaluate(graph, {"x": x}, y)
+
+    assert result.config["ridge_g"] == "lo"
+    assert result.diagnostics["configuration_search"]["screening"]["unique_work_units"] == 2
+
+
+def test_grouped_exact_evaluation_preserves_planner_winner_for_nan_scores() -> None:
+    graph = Graph("nan_score_planner_order")
+    graph.add_input("x")
+    graph.add_node("mid", "intermediate")
+    graph.add_node("output", "output")
+    for name, scale in (("z", 1.0), ("a", 2.0), ("m", 3.0)):
+        graph.add_alternative(
+            "mid",
+            name,
+            ("x",),
+            lambda _ctx, values, factor=scale, feature_name=name: FeatureBlock(
+                np.asarray(values["x"], dtype=np.float64) * factor,
+                [feature_name],
+            ),
+        )
+    graph.add_alternative("output", "base", ("mid",), lambda _ctx, values: values["mid"])
+    x = np.linspace(-1.0, 1.0, 36)[:, None]
+    scorer = TaskScorer("nan", "Always returns NaN.", lambda _y, _predictions: float("nan"))
+
+    result = RidgeEvaluator(
+        n_splits=3,
+        max_configurations=3,
+        screening_finalists=3,
+        refine_globals=False,
+        persistent_cache=False,
+        diagnostics_mode="basic",
+        feature_pool_diagnostics=False,
+        scorer=scorer,
+    ).evaluate(graph, {"x": x}, x[:, 0])
+
+    assert result.config["mid"] == "z"
 
 
 def test_single_screening_finalist_keeps_the_approximate_winner() -> None:
@@ -744,6 +1176,249 @@ def test_configuration_search_reuses_fold_assignments() -> None:
 
     assert result.diagnostics["configuration_search"]["evaluated"] == 4
     assert fold_strategy.calls == 1
+
+
+def test_registered_immutable_dataset_reuses_fingerprint_and_folds(monkeypatch: pytest.MonkeyPatch) -> None:
+    dataset = make_tabular_data(n_samples=64, n_features=5, seed=146)
+    inputs = dataset.inputs()
+    graph = build_seed_graph()
+    fingerprint_calls = 0
+    fold_calls = 0
+    original_fingerprint = evaluator_module.fingerprint_inputs
+
+    def counting_fingerprint(values: dict[str, object]) -> str:
+        nonlocal fingerprint_calls
+        fingerprint_calls += 1
+        return original_fingerprint(values)
+
+    monkeypatch.setattr(evaluator_module, "fingerprint_inputs", counting_fingerprint)
+    evaluator = RidgeEvaluator(
+        n_splits=2,
+        seed=146,
+        max_configurations=1,
+        refine_globals=False,
+        fold_strategy=FoldStrategy(),
+        diagnostics_mode="basic",
+        feature_pool_diagnostics=False,
+    )
+    original_folds = evaluator._folds
+
+    def counting_folds(values: dict[str, object], target: np.ndarray):
+        nonlocal fold_calls
+        fold_calls += 1
+        return original_folds(values, target)
+
+    monkeypatch.setattr(evaluator, "_folds", counting_folds)
+    token = evaluator.register_immutable_dataset(inputs, dataset.y)
+    first = evaluator.evaluate(graph, inputs, dataset.y, config=graph.default_config())
+    second = evaluator.evaluate(graph, inputs, dataset.y, config=graph.default_config())
+
+    assert token > 0
+    assert fingerprint_calls == 1
+    assert fold_calls == 1
+    assert evaluator.evaluation_cache_diagnostics()["immutable_dataset_hits"] == 2
+    assert first.config == second.config
+    assert first.score == second.score
+    np.testing.assert_array_equal(first.predictions, second.predictions)
+
+
+def test_immutable_dataset_registration_is_identity_scoped_and_revocable(monkeypatch: pytest.MonkeyPatch) -> None:
+    dataset = make_tabular_data(n_samples=48, n_features=4, seed=147)
+    inputs = dataset.inputs()
+    copied_inputs = {key: np.array(value, copy=True) for key, value in inputs.items()}
+    copied_y = np.array(dataset.y, copy=True)
+    graph = build_seed_graph()
+    fingerprint_calls = 0
+    original_fingerprint = evaluator_module.fingerprint_inputs
+
+    def counting_fingerprint(values: dict[str, object]) -> str:
+        nonlocal fingerprint_calls
+        fingerprint_calls += 1
+        return original_fingerprint(values)
+
+    monkeypatch.setattr(evaluator_module, "fingerprint_inputs", counting_fingerprint)
+    evaluator = RidgeEvaluator(
+        n_splits=2,
+        seed=147,
+        max_configurations=1,
+        refine_globals=False,
+        diagnostics_mode="basic",
+        feature_pool_diagnostics=False,
+    )
+    token = evaluator.register_immutable_dataset(inputs, dataset.y)
+    evaluator.evaluate(graph, copied_inputs, copied_y, config=graph.default_config())
+    assert fingerprint_calls == 2
+    assert evaluator.evaluation_cache_diagnostics()["immutable_dataset_hits"] == 0
+
+    assert evaluator.unregister_immutable_dataset(token) is True
+    assert evaluator.unregister_immutable_dataset(token) is False
+    inputs["x"][0, 0] += 10.0
+    evaluator.evaluate(graph, inputs, dataset.y, config=graph.default_config())
+    assert fingerprint_calls == 3
+    assert evaluator.evaluation_cache_diagnostics()["immutable_dataset_registrations"] == 0
+
+
+def test_registered_dataset_recomputes_folds_after_fold_configuration_change() -> None:
+    class CountingFoldStrategy(FoldStrategy):
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def split(self, inputs: dict[str, object], y: np.ndarray, n_splits: int, seed: int):
+            self.calls += 1
+            return super().split(inputs, y, n_splits, seed)
+
+    dataset = make_tabular_data(n_samples=48, n_features=4, seed=148)
+    inputs = dataset.inputs()
+    strategy = CountingFoldStrategy()
+    evaluator = RidgeEvaluator(
+        n_splits=2,
+        seed=148,
+        max_configurations=1,
+        refine_globals=False,
+        fold_strategy=strategy,
+        diagnostics_mode="basic",
+        feature_pool_diagnostics=False,
+    )
+    evaluator.register_immutable_dataset(inputs, dataset.y)
+    evaluator.n_splits = 3
+    graph = build_seed_graph()
+    result = evaluator.evaluate(graph, inputs, dataset.y, config=graph.default_config())
+
+    assert strategy.calls == 2
+    assert len(result.diagnostics["folds"]["score"]) == 3
+
+
+def test_registered_dataset_recomputes_folds_after_custom_strategy_state_change() -> None:
+    class OffsetFoldStrategy(FoldStrategy):
+        def __init__(self) -> None:
+            object.__setattr__(self, "offset", 0)
+            object.__setattr__(self, "calls", 0)
+
+        def split(self, inputs: dict[str, object], y: np.ndarray, n_splits: int, seed: int):
+            del inputs, seed
+            object.__setattr__(self, "calls", self.calls + 1)
+            indices = np.roll(np.arange(y.shape[0]), self.offset)
+            validation_blocks = np.array_split(indices, n_splits)
+            folds = []
+            for validation in validation_blocks:
+                train = np.setdiff1d(indices, validation, assume_unique=True)
+                folds.append((train, validation))
+            return folds, {"method": "offset", "offset": self.offset}
+
+    dataset = make_tabular_data(n_samples=48, n_features=4, seed=149)
+    inputs = dataset.inputs()
+    strategy = OffsetFoldStrategy()
+    evaluator = RidgeEvaluator(
+        n_splits=3,
+        seed=149,
+        max_configurations=1,
+        refine_globals=False,
+        fold_strategy=strategy,
+        diagnostics_mode="basic",
+        feature_pool_diagnostics=False,
+    )
+    evaluator.register_immutable_dataset(inputs, dataset.y)
+    object.__setattr__(strategy, "offset", 1)
+
+    result = evaluator.evaluate(build_seed_graph(), inputs, dataset.y, config=build_seed_graph().default_config())
+    evaluator.evaluate(build_seed_graph(), inputs, dataset.y, config=build_seed_graph().default_config())
+
+    assert strategy.calls == 3
+    assert result.diagnostics["folds"]["offset"] == 1
+
+
+def test_registered_dataset_recomputes_folds_after_custom_strategy_closure_change() -> None:
+    def make_split(mode: int):
+        def split(self: FoldStrategy, inputs: dict[str, object], y: np.ndarray, n_splits: int, seed: int):
+            del self, inputs, seed
+            indices = np.roll(np.arange(y.shape[0]), mode)
+            validation_blocks = np.array_split(indices, n_splits)
+            folds = []
+            for validation in validation_blocks:
+                train = np.setdiff1d(indices, validation, assume_unique=True)
+                folds.append((train, validation))
+            return folds, {"method": "closure", "mode": mode}
+
+        return split
+
+    class ClosureFoldStrategy(FoldStrategy):
+        pass
+
+    ClosureFoldStrategy.split = make_split(0)  # type: ignore[method-assign]
+    dataset = make_tabular_data(n_samples=48, n_features=4, seed=150)
+    inputs = dataset.inputs()
+    strategy = ClosureFoldStrategy()
+    evaluator = RidgeEvaluator(
+        n_splits=3,
+        seed=150,
+        max_configurations=1,
+        refine_globals=False,
+        fold_strategy=strategy,
+        diagnostics_mode="basic",
+        feature_pool_diagnostics=False,
+    )
+    evaluator.register_immutable_dataset(inputs, dataset.y)
+    ClosureFoldStrategy.split = make_split(1)  # type: ignore[method-assign]
+
+    result = evaluator.evaluate(build_seed_graph(), inputs, dataset.y, config=build_seed_graph().default_config())
+
+    assert result.diagnostics["folds"]["mode"] == 1
+
+
+def test_registered_dataset_recomputes_custom_folds_that_depend_on_module_state() -> None:
+    class GlobalStateFoldStrategy(FoldStrategy):
+        def split(self, inputs: dict[str, object], y: np.ndarray, n_splits: int, seed: int):
+            del self, inputs, seed
+            mode = _PERSISTENT_CACHE_CALLS["fold_mode"]
+            indices = np.roll(np.arange(y.shape[0]), mode)
+            validation_blocks = np.array_split(indices, n_splits)
+            folds = []
+            for validation in validation_blocks:
+                train = np.setdiff1d(indices, validation, assume_unique=True)
+                folds.append((train, validation))
+            return folds, {"method": "global_state", "mode": mode}
+
+    dataset = make_tabular_data(n_samples=48, n_features=4, seed=151)
+    inputs = dataset.inputs()
+    _PERSISTENT_CACHE_CALLS["fold_mode"] = 0
+    evaluator = RidgeEvaluator(
+        n_splits=3,
+        seed=151,
+        max_configurations=1,
+        refine_globals=False,
+        fold_strategy=GlobalStateFoldStrategy(),
+        diagnostics_mode="basic",
+        feature_pool_diagnostics=False,
+    )
+    evaluator.register_immutable_dataset(inputs, dataset.y)
+    _PERSISTENT_CACHE_CALLS["fold_mode"] = 1
+
+    result = evaluator.evaluate(build_seed_graph(), inputs, dataset.y, config=build_seed_graph().default_config())
+
+    assert result.diagnostics["folds"]["mode"] == 1
+
+
+def test_registered_fold_diagnostics_are_snapshot_isolated() -> None:
+    dataset = make_tabular_data(n_samples=48, n_features=4, seed=152)
+    inputs = {**dataset.inputs(), "group": np.repeat(np.arange(12), 4)}
+    graph = build_seed_graph()
+    evaluator = RidgeEvaluator(
+        n_splits=3,
+        seed=152,
+        max_configurations=1,
+        refine_globals=False,
+        fold_strategy=FoldStrategy(name="group_random", group_key="group"),
+        diagnostics_mode="basic",
+        feature_pool_diagnostics=False,
+    )
+    evaluator.register_immutable_dataset(inputs, dataset.y)
+    first = evaluator.evaluate(graph, inputs, dataset.y, config=graph.default_config())
+    expected_counts = list(first.diagnostics["folds"]["validation_group_counts"])
+    first.diagnostics["folds"]["validation_group_counts"][0] = 999
+
+    second = evaluator.evaluate(graph, inputs, dataset.y, config=graph.default_config())
+
+    assert second.diagnostics["folds"]["validation_group_counts"] == expected_counts
 
 
 def test_blockwise_correlation_summary_matches_full_matrix_helper() -> None:
@@ -881,6 +1556,38 @@ def test_ridge_g_runs_iterative_reweighted_least_squares() -> None:
     assert result.diagnostics["global_ridge"]["residual_reweighted"] is True
     assert result.diagnostics["global_ridge"]["irls_steps_used"] == 3
     assert len(result.diagnostics["global_ridge"]["irls_iterations"]) == 3
+
+
+def test_ridge_g_skips_only_exact_normalized_weight_noops(monkeypatch: pytest.MonkeyPatch) -> None:
+    rng = np.random.default_rng(1616)
+    x = rng.normal(size=(72, 9))
+    y = rng.normal(size=x.shape[0])
+    evaluator = RidgeEvaluator(irls_steps=3)
+    apply_calls = 0
+    fit_calls = 0
+    original_fit = evaluator_module.select_alpha_and_fit_ridge
+
+    def constant_weights(residual: np.ndarray) -> np.ndarray:
+        nonlocal apply_calls
+        apply_calls += 1
+        return np.full_like(residual, 7.0)
+
+    def counted_fit(*args: object, **kwargs: object) -> tuple[float, object]:
+        nonlocal fit_calls
+        fit_calls += 1
+        return original_fit(*args, **kwargs)
+
+    monkeypatch.setattr(evaluator_module, "select_alpha_and_fit_ridge", counted_fit)
+    result = evaluator._fit_reweighted_ridge(x, y, None, ResidualWeightRule("constant", constant_weights))
+
+    assert apply_calls == 3
+    assert fit_calls == 1
+    assert len(result.irls_iterations) == 3
+    assert [row["step"] for row in result.irls_iterations] == [1, 2, 3]
+    assert all(row["alpha"] == result.initial_alpha for row in result.irls_iterations)
+    assert all(row["weight_min"] == row["weight_max"] == row["weight_mean"] == 1.0 for row in result.irls_iterations)
+    assert all(row["weight_std"] == 0.0 for row in result.irls_iterations)
+    np.testing.assert_array_equal(result.model.coef, result.initial_model.coef)
 
 
 def test_rank_interaction_readout_selects_oof_features() -> None:
