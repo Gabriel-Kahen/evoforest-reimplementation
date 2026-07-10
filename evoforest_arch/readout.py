@@ -117,19 +117,21 @@ def _select_alpha_from_svd(
     y: np.ndarray,
     alphas: np.ndarray,
 ) -> float:
-    best_alpha = float(alphas[0])
-    best_mse = float("inf")
+    alpha_values = np.asarray(alphas, dtype=np.float64)
     spectral_power = decomp.s * decomp.s
-    u_squared = decomp.u * decomp.u
-    for alpha in alphas:
-        shrinkage = spectral_power / (spectral_power + alpha)
-        centered_pred = decomp.u @ (shrinkage * decomp.uy)
-        pred = decomp.y_mean + centered_pred / np.maximum(decomp.sqrt_w, EPS)
-        leverage = u_squared @ shrinkage
-        residual = (y - pred) / np.maximum(1.0 - leverage, EPS)
-        mse = float(np.average(residual**2, weights=decomp.weights))
+    shrinkage = spectral_power[:, None] / (spectral_power[:, None] + alpha_values[None, :])
+    centered_pred = decomp.u @ (shrinkage * decomp.uy[:, None])
+    pred = decomp.y_mean + centered_pred / np.maximum(decomp.sqrt_w[:, None], EPS)
+    leverage = (decomp.u * decomp.u) @ shrinkage
+    residual = (y[:, None] - pred) / np.maximum(1.0 - leverage, EPS)
+    mse_values = np.average(residual * residual, axis=0, weights=decomp.weights)
+
+    # Keep the original strict comparison so equal scores select the first alpha.
+    best_alpha = float(alpha_values[0])
+    best_mse = float("inf")
+    for alpha, mse in zip(alpha_values, mse_values, strict=True):
         if mse < best_mse:
-            best_mse = mse
+            best_mse = float(mse)
             best_alpha = float(alpha)
     return best_alpha
 
