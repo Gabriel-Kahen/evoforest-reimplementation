@@ -857,9 +857,105 @@ def test_reused_configuration_work_matches_independent_evaluation() -> None:
     assert reused.alphas == expected.alphas
     np.testing.assert_array_equal(reused.predictions, expected.predictions)
     assert reused.diagnostics["configuration_search"]["screening"]["unique_work_units"] == 24
-    cache = reused.diagnostics["configuration_search"]["cache"]
-    assert 0 < cache["prepared_fold_entries"] <= 3
-    assert 0 < cache["initial_ridge_entries"] <= 6
+    search = reused.diagnostics["configuration_search"]
+    cache = search["cache"]
+    assert 0 < cache["prepared_fold_entries"] <= kwargs["n_splits"] * search["unique_feature_matrices"]
+    assert 0 < cache["initial_ridge_entries"] <= kwargs["n_splits"] * search["evaluated"]
+
+
+def test_exact_work_caches_respect_tiny_byte_budget() -> None:
+    dataset = make_tabular_data(n_samples=64, n_features=5, seed=245)
+    graph = build_seed_graph()
+    kwargs = {
+        "n_splits": 3,
+        "seed": 245,
+        "max_configurations": 8,
+        "screening_finalists": 8,
+        "refine_globals": False,
+        "diagnostics_mode": "basic",
+        "feature_pool_diagnostics": False,
+        "persistent_cache": False,
+    }
+    expected = RidgeEvaluator(**kwargs).evaluate(graph, dataset.inputs(), dataset.y)
+    bounded = RidgeEvaluator(**kwargs, cache_max_bytes=1).evaluate(graph, dataset.inputs(), dataset.y)
+
+    assert bounded.score == expected.score
+    assert bounded.config == expected.config
+    np.testing.assert_array_equal(bounded.predictions, expected.predictions)
+    cache = bounded.diagnostics["configuration_search"]["cache"]
+    assert cache["prepared_fold_entries"] == 0
+    assert cache["initial_ridge_entries"] == 0
+
+
+def test_exact_work_reports_progress_in_planner_order() -> None:
+    dataset = make_tabular_data(n_samples=64, n_features=5, seed=246)
+    graph = build_seed_graph()
+    kwargs = {
+        "n_splits": 2,
+        "seed": 246,
+        "max_configurations": 8,
+        "screening_finalists": 8,
+        "refine_globals": False,
+        "diagnostics_mode": "basic",
+        "feature_pool_diagnostics": False,
+        "persistent_cache": False,
+    }
+    reference = RidgeEvaluator(**kwargs)
+    folds, fold_diagnostics = reference._folds(dataset.inputs(), dataset.y)
+    configs, _ = reference._configuration_candidates(graph)
+    expected_scores = [
+        reference._evaluate_single_config(
+            graph,
+            dataset.inputs(),
+            dataset.y,
+            config,
+            {},
+            folds=folds,
+            fold_diagnostics=fold_diagnostics,
+            diagnostics_mode="score",
+        ).score
+        for config in configs
+    ]
+    events: list[dict[str, object]] = []
+    RidgeEvaluator(**kwargs, progress_callback=events.append).evaluate(graph, dataset.inputs(), dataset.y)
+    configuration_events = [event for event in events if event.get("phase") == "configuration_evaluated"]
+
+    assert [event["config_index"] for event in configuration_events] == list(range(1, len(configs) + 1))
+    assert [event["score"] for event in configuration_events] == expected_scores
+
+
+def test_exact_progress_callback_can_interrupt_before_fold_fits(monkeypatch: pytest.MonkeyPatch) -> None:
+    dataset = make_tabular_data(n_samples=64, n_features=5, seed=247)
+    fold_fit_calls = 0
+
+    def stop_on_features(payload: dict[str, object]) -> None:
+        if payload.get("phase") == "features_evaluated":
+            raise RuntimeError("stop before folds")
+
+    evaluator = RidgeEvaluator(
+        n_splits=3,
+        seed=247,
+        max_configurations=8,
+        screening_finalists=8,
+        refine_globals=False,
+        diagnostics_mode="basic",
+        feature_pool_diagnostics=False,
+        persistent_cache=False,
+        progress_callback=stop_on_features,
+    )
+    original_fit = evaluator._fit_reweighted_ridge
+
+    def counted_fit(*args: object, **kwargs: object):
+        nonlocal fold_fit_calls
+        fold_fit_calls += 1
+        return original_fit(*args, **kwargs)
+
+    monkeypatch.setattr(evaluator, "_fit_reweighted_ridge", counted_fit)
+
+    with pytest.raises(RuntimeError, match="stop before folds"):
+        evaluator.evaluate(build_seed_graph(), dataset.inputs(), dataset.y)
+
+    assert fold_fit_calls == 0
 
 
 def test_screening_reuses_prepared_fold_by_feature_signature(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1083,19 +1179,11 @@ def test_configuration_search_reuses_fold_assignments() -> None:
 
 
 def test_registered_immutable_dataset_reuses_fingerprint_and_folds(monkeypatch: pytest.MonkeyPatch) -> None:
-    class CountingFoldStrategy(FoldStrategy):
-        def __init__(self) -> None:
-            self.calls = 0
-
-        def split(self, inputs: dict[str, object], y: np.ndarray, n_splits: int, seed: int):
-            self.calls += 1
-            return super().split(inputs, y, n_splits, seed)
-
     dataset = make_tabular_data(n_samples=64, n_features=5, seed=146)
     inputs = dataset.inputs()
     graph = build_seed_graph()
-    fold_strategy = CountingFoldStrategy()
     fingerprint_calls = 0
+    fold_calls = 0
     original_fingerprint = evaluator_module.fingerprint_inputs
 
     def counting_fingerprint(values: dict[str, object]) -> str:
@@ -1109,17 +1197,25 @@ def test_registered_immutable_dataset_reuses_fingerprint_and_folds(monkeypatch: 
         seed=146,
         max_configurations=1,
         refine_globals=False,
-        fold_strategy=fold_strategy,
+        fold_strategy=FoldStrategy(),
         diagnostics_mode="basic",
         feature_pool_diagnostics=False,
     )
+    original_folds = evaluator._folds
+
+    def counting_folds(values: dict[str, object], target: np.ndarray):
+        nonlocal fold_calls
+        fold_calls += 1
+        return original_folds(values, target)
+
+    monkeypatch.setattr(evaluator, "_folds", counting_folds)
     token = evaluator.register_immutable_dataset(inputs, dataset.y)
     first = evaluator.evaluate(graph, inputs, dataset.y, config=graph.default_config())
     second = evaluator.evaluate(graph, inputs, dataset.y, config=graph.default_config())
 
     assert token > 0
     assert fingerprint_calls == 1
-    assert fold_strategy.calls == 1
+    assert fold_calls == 1
     assert evaluator.evaluation_cache_diagnostics()["immutable_dataset_hits"] == 2
     assert first.config == second.config
     assert first.score == second.score
@@ -1227,7 +1323,7 @@ def test_registered_dataset_recomputes_folds_after_custom_strategy_state_change(
     result = evaluator.evaluate(build_seed_graph(), inputs, dataset.y, config=build_seed_graph().default_config())
     evaluator.evaluate(build_seed_graph(), inputs, dataset.y, config=build_seed_graph().default_config())
 
-    assert strategy.calls == 2
+    assert strategy.calls == 3
     assert result.diagnostics["folds"]["offset"] == 1
 
 
@@ -1267,6 +1363,62 @@ def test_registered_dataset_recomputes_folds_after_custom_strategy_closure_chang
     result = evaluator.evaluate(build_seed_graph(), inputs, dataset.y, config=build_seed_graph().default_config())
 
     assert result.diagnostics["folds"]["mode"] == 1
+
+
+def test_registered_dataset_recomputes_custom_folds_that_depend_on_module_state() -> None:
+    class GlobalStateFoldStrategy(FoldStrategy):
+        def split(self, inputs: dict[str, object], y: np.ndarray, n_splits: int, seed: int):
+            del self, inputs, seed
+            mode = _PERSISTENT_CACHE_CALLS["fold_mode"]
+            indices = np.roll(np.arange(y.shape[0]), mode)
+            validation_blocks = np.array_split(indices, n_splits)
+            folds = []
+            for validation in validation_blocks:
+                train = np.setdiff1d(indices, validation, assume_unique=True)
+                folds.append((train, validation))
+            return folds, {"method": "global_state", "mode": mode}
+
+    dataset = make_tabular_data(n_samples=48, n_features=4, seed=151)
+    inputs = dataset.inputs()
+    _PERSISTENT_CACHE_CALLS["fold_mode"] = 0
+    evaluator = RidgeEvaluator(
+        n_splits=3,
+        seed=151,
+        max_configurations=1,
+        refine_globals=False,
+        fold_strategy=GlobalStateFoldStrategy(),
+        diagnostics_mode="basic",
+        feature_pool_diagnostics=False,
+    )
+    evaluator.register_immutable_dataset(inputs, dataset.y)
+    _PERSISTENT_CACHE_CALLS["fold_mode"] = 1
+
+    result = evaluator.evaluate(build_seed_graph(), inputs, dataset.y, config=build_seed_graph().default_config())
+
+    assert result.diagnostics["folds"]["mode"] == 1
+
+
+def test_registered_fold_diagnostics_are_snapshot_isolated() -> None:
+    dataset = make_tabular_data(n_samples=48, n_features=4, seed=152)
+    inputs = {**dataset.inputs(), "group": np.repeat(np.arange(12), 4)}
+    graph = build_seed_graph()
+    evaluator = RidgeEvaluator(
+        n_splits=3,
+        seed=152,
+        max_configurations=1,
+        refine_globals=False,
+        fold_strategy=FoldStrategy(name="group_random", group_key="group"),
+        diagnostics_mode="basic",
+        feature_pool_diagnostics=False,
+    )
+    evaluator.register_immutable_dataset(inputs, dataset.y)
+    first = evaluator.evaluate(graph, inputs, dataset.y, config=graph.default_config())
+    expected_counts = list(first.diagnostics["folds"]["validation_group_counts"])
+    first.diagnostics["folds"]["validation_group_counts"][0] = 999
+
+    second = evaluator.evaluate(graph, inputs, dataset.y, config=graph.default_config())
+
+    assert second.diagnostics["folds"]["validation_group_counts"] == expected_counts
 
 
 def test_blockwise_correlation_summary_matches_full_matrix_helper() -> None:
