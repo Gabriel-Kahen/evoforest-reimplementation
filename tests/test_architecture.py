@@ -743,6 +743,8 @@ def test_staged_configuration_screening_uses_exact_cv_for_final_selection() -> N
     assert search["screening"]["enabled"] is True
     assert search["screening"]["approximate"] is True
     assert search["screening"]["screened"] == 48
+    assert search["screening"]["unique_work_units"] == 24
+    assert search["screening"]["work_reuse_hits"] == 24
     assert search["screening"]["finalists"] == 5
     assert search["screening"]["winner_selected_by_exact_cv"] is True
     assert search["screening"]["full_plan_exact_best_recall_guaranteed"] is False
@@ -758,6 +760,56 @@ def test_staged_configuration_screening_uses_exact_cv_for_final_selection() -> N
     repeated_screening.pop("cache_entries_added")
     first_screening.pop("cache_entries_added")
     assert repeated_screening == first_screening
+
+
+def test_reused_configuration_work_matches_independent_evaluation() -> None:
+    dataset = make_structural_break_data(n_series=48, length=55, seed=145)
+    inputs = dataset.inputs()
+    graph = build_structural_break_seed_graph()
+    kwargs = {
+        "n_splits": 3,
+        "seed": 145,
+        "max_configurations": 64,
+        "screening_finalists": 6,
+        "refine_globals": False,
+        "diagnostics_mode": "basic",
+        "feature_pool_diagnostics": False,
+        "persistent_cache": False,
+    }
+    reference = RidgeEvaluator(**kwargs)
+    folds, fold_diagnostics = reference._folds(inputs, dataset.y)
+    configs, _total = reference._configuration_candidates(graph)
+    screening_rows = []
+    for planner_index, candidate in enumerate(configs):
+        row = reference._screen_single_config(graph, inputs, dataset.y, candidate, {}, folds)
+        row["planner_index"] = planner_index
+        screening_rows.append(row)
+    finalists = reference._screening_finalists(graph, configs, screening_rows)
+    independent = [
+        reference._evaluate_single_config(
+            graph,
+            inputs,
+            dataset.y,
+            candidate,
+            {},
+            folds=folds,
+            fold_diagnostics=fold_diagnostics,
+            diagnostics_mode="score",
+        )
+        for candidate in finalists
+    ]
+    expected = max(independent, key=lambda result: result.score)
+
+    reused = RidgeEvaluator(**kwargs).evaluate(graph, inputs, dataset.y)
+
+    assert reused.config == expected.config
+    assert reused.score == expected.score
+    assert reused.alphas == expected.alphas
+    np.testing.assert_array_equal(reused.predictions, expected.predictions)
+    assert reused.diagnostics["configuration_search"]["screening"]["unique_work_units"] == 24
+    cache = reused.diagnostics["configuration_search"]["cache"]
+    assert 0 < cache["prepared_fold_entries"] <= 3
+    assert 0 < cache["initial_ridge_entries"] <= 6
 
 
 def test_single_screening_finalist_keeps_the_approximate_winner() -> None:
