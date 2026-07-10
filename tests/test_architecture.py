@@ -261,6 +261,28 @@ def test_assembled_feature_bundle_can_be_borrowed_read_only_internally() -> None
     assert borrowed.flags.writeable is False
 
 
+def test_assembled_feature_bundle_isolated_from_public_plain_dict_results() -> None:
+    graph = Graph("plain_dict_assembled_feature_bundle")
+    graph.add_input("x")
+    graph.add_node("output", "output")
+
+    def output_fn(_ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
+        return FeatureBlock(np.asarray(values["x"], dtype=np.float64)[:, :1], ["value"])
+
+    graph.add_alternative("output", "base", ("x",), output_fn)
+    inputs = {"x": np.arange(12, dtype=np.float64).reshape(6, 2)}
+    cache: dict[object, object] = {}
+    expected, expected_names, _ = graph.evaluate_features(inputs)
+    first, first_names, _ = graph.evaluate_features(inputs, cache=cache)
+    first[0, 0] = -1.0
+    first_names[0] = "corrupted"
+
+    second, second_names, _ = graph.evaluate_features(inputs, cache=cache)
+
+    np.testing.assert_array_equal(second, expected)
+    assert second_names == expected_names
+
+
 def test_configuration_search_uses_ancestor_conditioned_shared_cache() -> None:
     dataset = make_structural_break_data(n_series=48, length=60, seed=9)
     graph = Graph("cache_test")

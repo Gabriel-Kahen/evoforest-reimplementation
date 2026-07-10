@@ -649,7 +649,10 @@ class Graph:
             raise ValueError("Graph has no output nodes.")
         values = blocks[0].values if len(blocks) == 1 else np.column_stack([block.values for block in blocks])
         names = [name for block in blocks for name in block.names]
-        ctx.cache[bundle_key] = (values, names)
+        if copy_cached_bundle:
+            ctx.cache[bundle_key] = (np.array(values, copy=True), list(names))
+        else:
+            ctx.cache[bundle_key] = (values, names)
         return values, names, ctx
 
     def clone(self) -> "Graph":
