@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from evoforest_arch import readout as readout_module
-from evoforest_arch.readout import EPS, _select_alpha_from_svd, _weighted_svd, fit_ridge, fit_ridge_screening, select_alpha_and_fit_ridge
+from evoforest_arch.readout import EPS, Standardizer, _select_alpha_from_svd, _weighted_svd, fit_ridge, fit_ridge_screening, select_alpha_and_fit_ridge
 
 
 def _reference_select_alpha(decomp: object, y: np.ndarray, alphas: np.ndarray) -> float:
@@ -208,3 +208,23 @@ def test_screening_normal_equation_preserves_a_near_tie_ordering() -> None:
 
     assert abs(svd_losses[0] - svd_losses[1]) < 1e-10
     assert int(np.argmin(fast_losses)) == int(np.argmin(svd_losses))
+
+
+def test_standardizer_transform_returns_an_owned_writable_sanitized_array() -> None:
+    x = np.array([[1.0, np.nan, np.inf], [3.0, -np.inf, 5.0]])
+    original = x.copy()
+    standardizer = Standardizer(
+        mean=np.array([2.0, 0.0, 1.0]),
+        scale=np.array([2.0, 4.0, 2.0]),
+    )
+
+    transformed = standardizer.transform(x)
+
+    expected = np.nan_to_num((x - standardizer.mean) / standardizer.scale, nan=0.0, posinf=0.0, neginf=0.0)
+    np.testing.assert_array_equal(transformed, expected)
+    assert np.array_equal(x, original, equal_nan=True)
+    assert transformed.flags.owndata
+    assert transformed.flags.writeable
+    assert not np.shares_memory(transformed, x)
+    transformed[0, 0] = 100.0
+    assert x[0, 0] == 1.0

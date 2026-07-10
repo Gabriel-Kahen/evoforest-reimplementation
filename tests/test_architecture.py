@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import OrderedDict
 import io
 import json
 import argparse
@@ -12,7 +13,7 @@ import pytest
 from evoforest_arch import evaluator as evaluator_module, graph as graph_module, llm as llm_module
 from evoforest_arch.agents import EngineerAgent, ScientistAgent
 from evoforest_arch.cli import build_llm_agents
-from evoforest_arch.evaluator import RidgeEvaluator, abs_feature_correlation, effective_rank, feature_correlation_summary, max_correlation_scores, most_correlated_names, safe_corr_columns
+from evoforest_arch.evaluator import _SCREENING_PREPARED_FOLD_CACHE_MAX_ENTRIES, PreparedFold, RidgeEvaluator, abs_feature_correlation, effective_rank, feature_correlation_summary, max_correlation_scores, most_correlated_names, safe_corr_columns
 from evoforest_arch.evaluation_cache import PersistentEvaluationCache, fingerprint_callable
 from evoforest_arch.evolution import EvolutionLoop
 from evoforest_arch.feedback import toon_report
@@ -859,6 +860,86 @@ def test_reused_configuration_work_matches_independent_evaluation() -> None:
     cache = reused.diagnostics["configuration_search"]["cache"]
     assert 0 < cache["prepared_fold_entries"] <= 3
     assert 0 < cache["initial_ridge_entries"] <= 6
+
+
+def test_screening_reuses_prepared_fold_by_feature_signature(monkeypatch: pytest.MonkeyPatch) -> None:
+    dataset = make_structural_break_data(n_series=48, length=55, seed=146)
+    inputs = dataset.inputs()
+    graph = build_structural_break_seed_graph()
+    evaluator = RidgeEvaluator(
+        n_splits=3,
+        max_configurations=64,
+        screening_finalists=6,
+        refine_globals=False,
+        persistent_cache=False,
+        diagnostics_mode="basic",
+        feature_pool_diagnostics=False,
+    )
+    folds, _fold_diagnostics = evaluator._folds(inputs, dataset.y)
+    configs, _total = evaluator._configuration_candidates(graph)
+    signatures = [evaluator._feature_signature(graph, config) for config in configs]
+    prepared_cache: OrderedDict[tuple[object, ...], PreparedFold] = OrderedDict()
+    prepare_calls = 0
+    original_prepare_fold = evaluator._prepare_fold
+
+    def counted_prepare_fold(x: np.ndarray, train_idx: np.ndarray, validation_idx: np.ndarray) -> PreparedFold:
+        nonlocal prepare_calls
+        prepare_calls += 1
+        return original_prepare_fold(x, train_idx, validation_idx)
+
+    monkeypatch.setattr(evaluator, "_prepare_fold", counted_prepare_fold)
+    cached_rows = [
+        evaluator._screen_single_config(
+            graph,
+            inputs,
+            dataset.y,
+            config,
+            {},
+            folds,
+            prepared_fold_cache=prepared_cache,
+            prepared_cache_key=signature,
+        )
+        for config, signature in zip(configs, signatures, strict=True)
+    ]
+
+    assert prepare_calls == len(set(signatures)) == 12
+    assert len(prepared_cache) == 12
+    uncached_rows = [
+        evaluator._screen_single_config(graph, inputs, dataset.y, config, {}, folds)
+        for config in configs
+    ]
+    assert [row["approximate_score"] for row in cached_rows] == [row["approximate_score"] for row in uncached_rows]
+    assert [row["approximate_raw_score"] for row in cached_rows] == [row["approximate_raw_score"] for row in uncached_rows]
+
+
+def test_screening_prepared_fold_cache_is_bounded() -> None:
+    dataset = make_structural_break_data(n_series=24, length=32, seed=147)
+    inputs = dataset.inputs()
+    graph = build_structural_break_seed_graph()
+    evaluator = RidgeEvaluator(n_splits=2, refine_globals=False, persistent_cache=False)
+    folds, _fold_diagnostics = evaluator._folds(inputs, dataset.y)
+    config = graph.default_config()
+    prepared_cache: OrderedDict[tuple[object, ...], PreparedFold] = OrderedDict()
+    byte_budget = 10_000
+
+    for index in range(_SCREENING_PREPARED_FOLD_CACHE_MAX_ENTRIES + 5):
+        evaluator._screen_single_config(
+            graph,
+            inputs,
+            dataset.y,
+            config,
+            {},
+            folds,
+            prepared_fold_cache=prepared_cache,
+            prepared_cache_key=(("synthetic_signature", index),),
+            prepared_cache_max_bytes=byte_budget,
+        )
+
+    retained_bytes = sum(fold.x_train.nbytes + fold.x_validation.nbytes for fold in prepared_cache.values())
+    assert 0 < len(prepared_cache) <= _SCREENING_PREPARED_FOLD_CACHE_MAX_ENTRIES
+    assert retained_bytes <= byte_budget
+    assert (("synthetic_signature", 0),) not in prepared_cache
+    assert (("synthetic_signature", _SCREENING_PREPARED_FOLD_CACHE_MAX_ENTRIES + 4),) in prepared_cache
 
 
 def test_screening_reuse_respects_ridge_g_dependencies() -> None:

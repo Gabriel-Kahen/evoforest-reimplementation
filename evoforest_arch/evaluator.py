@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass
 from itertools import product
 import math
@@ -104,6 +105,10 @@ class _ImmutableDatasetRecord:
     fold_signature: tuple[object, ...]
 
 
+_SCREENING_PREPARED_FOLD_CACHE_MAX_ENTRIES = 16
+_SCREENING_PREPARED_FOLD_CACHE_MAX_BYTES = 134_217_728
+
+
 def _score_and_raw(scorer: TaskScorer, y: np.ndarray, preds: np.ndarray) -> tuple[float, float]:
     raw_score = float(scorer.raw_score(y, preds))
     if type(scorer) is TaskScorer:
@@ -173,6 +178,10 @@ class RidgeEvaluator:
         self._immutable_dataset_keys: dict[int, tuple[int, int]] = {}
         self._next_immutable_dataset_token = 1
         self._immutable_dataset_hits = 0
+        self._screening_prepared_fold_cache_max_bytes = min(
+            _SCREENING_PREPARED_FOLD_CACHE_MAX_BYTES,
+            max(1, int(cache_max_bytes) // 4),
+        )
 
     def clear_evaluation_cache(self) -> None:
         self.evaluation_cache.clear()
@@ -348,8 +357,19 @@ class RidgeEvaluator:
             feature_signatures: dict[tuple[tuple[str, str], ...], tuple[object, ...]] = {}
             if screening_enabled:
                 screening_work: dict[tuple[object, ...], dict[str, object]] = {}
+                screening_prepared_folds: OrderedDict[tuple[object, ...], PreparedFold] = OrderedDict()
                 for planner_index, candidate_config in enumerate(configs):
-                    work_key = self._screening_work_key(working_graph, candidate_config, key_fingerprints)
+                    config_key = self._config_key(candidate_config)
+                    feature_signature = feature_signatures.get(config_key)
+                    if feature_signature is None:
+                        feature_signature = self._feature_signature(working_graph, candidate_config, key_fingerprints)
+                        feature_signatures[config_key] = feature_signature
+                    work_key = self._screening_work_key(
+                        working_graph,
+                        candidate_config,
+                        key_fingerprints,
+                        feature_signature=feature_signature,
+                    )
                     cached_row = screening_work.get(work_key)
                     if cached_row is None:
                         row = self._screen_single_config(
@@ -361,6 +381,9 @@ class RidgeEvaluator:
                             folds,
                             cache_namespace=dataset_fingerprint,
                             key_fingerprints=key_fingerprints,
+                            prepared_fold_cache=screening_prepared_folds,
+                            prepared_cache_key=feature_signature,
+                            prepared_cache_max_bytes=self._screening_prepared_fold_cache_max_bytes,
                         )
                         screening_work[work_key] = dict(row)
                         row["work_reused"] = False
@@ -857,9 +880,15 @@ class RidgeEvaluator:
         graph: Graph,
         config: dict[str, str],
         key_fingerprints: EvaluationKeyFingerprints | None = None,
+        feature_signature: tuple[object, ...] | None = None,
     ) -> tuple[object, ...]:
         selected = graph.selected_config(config)
-        signature = list(self._feature_signature(graph, config, key_fingerprints))
+        resolved_feature_signature = (
+            feature_signature
+            if feature_signature is not None
+            else self._feature_signature(graph, config, key_fingerprints)
+        )
+        signature = list(resolved_feature_signature)
         if "ridge_w" in graph.nodes:
             signature.append(
                 graph.alternative_cache_key(
@@ -1110,6 +1139,9 @@ class RidgeEvaluator:
         folds: list[tuple[np.ndarray, np.ndarray]],
         cache_namespace: str = "",
         key_fingerprints: EvaluationKeyFingerprints | None = None,
+        prepared_fold_cache: OrderedDict[tuple[object, ...], PreparedFold] | None = None,
+        prepared_cache_key: tuple[object, ...] | None = None,
+        prepared_cache_max_bytes: int = _SCREENING_PREPARED_FOLD_CACHE_MAX_BYTES,
     ) -> dict[str, object]:
         x, names, ctx = graph.evaluate_features(
             inputs,
@@ -1121,7 +1153,21 @@ class RidgeEvaluator:
         )
         sample_weight, _residual_rule, _fitting = self._evaluate_fitting_rules(graph, inputs, y, config, ctx)
         train_idx, validation_idx = folds[0]
-        prepared = self._prepare_fold(x, train_idx, validation_idx)
+        prepared = None
+        if prepared_fold_cache is not None and prepared_cache_key is not None:
+            prepared = prepared_fold_cache.pop(prepared_cache_key, None)
+            if prepared is not None:
+                prepared_fold_cache[prepared_cache_key] = prepared
+        if prepared is None:
+            prepared = self._prepare_fold(x, train_idx, validation_idx)
+            if prepared_fold_cache is not None and prepared_cache_key is not None:
+                prepared_fold_cache[prepared_cache_key] = prepared
+                # Screening storage is evaluation-local and capped by both entry count and bytes.
+                while len(prepared_fold_cache) > _SCREENING_PREPARED_FOLD_CACHE_MAX_ENTRIES or sum(
+                    fold.x_train.nbytes + fold.x_validation.nbytes
+                    for fold in prepared_fold_cache.values()
+                ) > prepared_cache_max_bytes:
+                    prepared_fold_cache.popitem(last=False)
         train_weight = sample_weight[train_idx] if sample_weight is not None else None
         fixed_alpha = float(self.alphas[len(self.alphas) // 2])
         model = fit_ridge_screening(prepared.x_train, y[train_idx], fixed_alpha, sample_weight=train_weight)

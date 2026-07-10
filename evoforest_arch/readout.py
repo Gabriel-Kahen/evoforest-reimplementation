@@ -25,7 +25,9 @@ class Standardizer:
         return cls(mean=mean, scale=scale)
 
     def transform(self, x: np.ndarray) -> np.ndarray:
-        return np.nan_to_num((x - self.mean) / self.scale, nan=0.0, posinf=0.0, neginf=0.0)
+        transformed = (x - self.mean) / self.scale
+        np.nan_to_num(transformed, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
+        return transformed
 
 
 @dataclass
