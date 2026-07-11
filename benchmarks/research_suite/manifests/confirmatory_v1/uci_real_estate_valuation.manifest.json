@@ -1,0 +1,75 @@
+{
+  "version": 1,
+  "dataset_id": "confirmatory-v1/uci_real_estate_valuation",
+  "data": "uci_real_estate_valuation.npz",
+  "feature_key": "X",
+  "target_key": "y",
+  "feature_names": [
+    "x0",
+    "x1",
+    "x2",
+    "x3",
+    "x4",
+    "x5"
+  ],
+  "split_file": "uci_real_estate_valuation.splits.json",
+  "sha256": "4d4631862946becbfb649aca0f0868806de94cca4d54828d964ee495d59f5191",
+  "metadata": {
+    "study_role": "external_real_regression_confirmatory",
+    "display_name": "Real Estate Valuation",
+    "source_repository": "UCI Machine Learning Repository",
+    "source_dataset_id": 477,
+    "source_url": "https://archive.ics.uci.edu/dataset/477/real+estate+valuation+data+set",
+    "source_download_url": "https://archive.ics.uci.edu/static/public/477/data.csv",
+    "source_doi": "10.24432/C5J30W",
+    "source_retrieved_utc": "2026-07-10",
+    "source_download_sha256": "0730a5687ec285a3c2f9921a808855bd1bde21fc53e6377561cbdce2dda9cbb1",
+    "source_archive_member_sha256": null,
+    "derived_npz_sha256": "4d4631862946becbfb649aca0f0868806de94cca4d54828d964ee495d59f5191",
+    "split_file_sha256": "aaa2589d6eef5422e6e64506cfc53b7616687b119f9057029c63593112243dca",
+    "license": "CC BY 4.0",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "license_evidence": "UCI dataset repository page license field at retrieval date",
+    "attribution": "Real Estate Valuation, UCI Machine Learning Repository, DOI 10.24432/C5J30W",
+    "target": "Y house price of unit area",
+    "original_feature_names": [
+      "X1 transaction date",
+      "X2 house age",
+      "X3 distance to the nearest MRT station",
+      "X4 number of convenience stores",
+      "X5 latitude",
+      "X6 longitude"
+    ],
+    "encoded_feature_names": [
+      "X1 transaction date",
+      "X2 house age",
+      "X3 distance to the nearest MRT station",
+      "X4 number of convenience stores",
+      "X5 latitude",
+      "X6 longitude"
+    ],
+    "excluded_columns": [
+      "No"
+    ],
+    "categorical_encoding_fit_on_training_only": false,
+    "encoding_details": {
+      "categorical_encoding": {}
+    },
+    "agent_feature_names_blinded": true,
+    "rows": 414,
+    "features": 6,
+    "raw_feature_count": 6,
+    "split_counts": {
+      "train": 248,
+      "validation": 83,
+      "test": 83
+    },
+    "group_count": 394,
+    "split_method": "seeded exact-feature-group random 60/20/20",
+    "missing_values_after_derivation": false,
+    "source_filter": null,
+    "date_range": null,
+    "preprocessing": "documented column exclusion/filtering and training-only categorical one-hot encoding; no scaling, imputation, target transformation, outlier filtering, or row deletion beyond the preregistered white-wine filter",
+    "source_last_updated": "Mon Feb 26 2024"
+  }
+}

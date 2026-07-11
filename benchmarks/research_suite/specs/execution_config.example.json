@@ -1,0 +1,37 @@
+{
+  "name": "replace-with-frozen-confirmatory-config",
+  "version": 1,
+  "schema_version": 1,
+  "llm": {
+    "provider": "gemini",
+    "model_identifier": "gemini-3.1-flash-lite",
+    "temperature": 0.0,
+    "call_budget": 1000,
+    "token_budget": 5000000,
+    "input_price_usd_per_million_tokens": 0.25,
+    "output_price_usd_per_million_tokens": 1.50,
+    "credential_env_names": ["GEMINI_API_KEY"]
+  },
+  "aide": {
+    "fit_command": [
+      "aide",
+      "fit",
+      "--dataset",
+      "{dataset}",
+      "--output",
+      "{artifact_dir}"
+    ],
+    "predict_command": [
+      "aide",
+      "predict",
+      "--input",
+      "{input}",
+      "--output",
+      "{predictions}",
+      "--artifacts",
+      "{artifact_dir}"
+    ],
+    "timeout_seconds": 3600.0,
+    "credential_env_names": []
+  }
+}

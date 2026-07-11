@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "datasets": [
+    {
+      "dataset_id": "srsd-easy/feynman-ii.8.31",
+      "manifest": "feynman-ii_8_31.manifest.json",
+      "rows": 10000,
+      "features": 1
+    },
+    {
+      "dataset_id": "srsd-easy/feynman-i.12.1",
+      "manifest": "feynman-i_12_1.manifest.json",
+      "rows": 10000,
+      "features": 2
+    },
+    {
+      "dataset_id": "srsd-easy/feynman-i.18.12",
+      "manifest": "feynman-i_18_12.manifest.json",
+      "rows": 10000,
+      "features": 3
+    },
+    {
+      "dataset_id": "srsd-easy/feynman-i.27.6",
+      "manifest": "feynman-i_27_6.manifest.json",
+      "rows": 10000,
+      "features": 3
+    },
+    {
+      "dataset_id": "srsd-easy/feynman-i.18.16",
+      "manifest": "feynman-i_18_16.manifest.json",
+      "rows": 10000,
+      "features": 4
+    },
+    {
+      "dataset_id": "srsd-easy/feynman-ii.2.42",
+      "manifest": "feynman-ii_2_42.manifest.json",
+      "rows": 10000,
+      "features": 5
+    }
+  ]
+}

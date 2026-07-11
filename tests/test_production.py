@@ -6,6 +6,7 @@ import json
 import numpy as np
 import pytest
 
+from evoforest_arch import cli as cli_module
 from evoforest_arch.cli import main as cli_main, task_schema_for_evolve_run
 from evoforest_arch.datasets import load_dataset_bundle
 from evoforest_arch.evaluator import EvaluationResult
@@ -26,6 +27,7 @@ from evoforest_arch.production import (
     inspect_run,
     recheck_run,
 )
+from tests.paper_test_support import PaperTestClient, paper_test_agents
 
 
 def small_config(tmp_path, *, steps: int = 1, seed: int = 41, **kwargs: object) -> ProductionConfig:
@@ -40,6 +42,16 @@ def small_config(tmp_path, *, steps: int = 1, seed: int = 41, **kwargs: object) 
         max_configurations=4,
         irls_steps=1,
         **production_kwargs,
+    )
+
+
+def paper_runner(config: ProductionConfig) -> ProductionEvolutionRunner:
+    agents = paper_test_agents()
+    return ProductionEvolutionRunner(
+        config,
+        scientist=agents.scientist,
+        engineer=agents.engineer,
+        memorandum_agent=agents.memorandum,
     )
 
 
@@ -79,7 +91,7 @@ def dummy_result(score: float) -> EvaluationResult:
 
 def test_production_can_run_generic_tabular_task(tmp_path) -> None:
     config = small_config(tmp_path, steps=1, seed=52, dataset_name="synthetic-tabular", n_features=8)
-    runner = ProductionEvolutionRunner(config)
+    runner = paper_runner(config)
     summary = runner.run()
     manifest = json.loads((config.output_dir / "run_manifest.json").read_text(encoding="utf-8"))
     best = graph_from_path(config.output_dir / "best_graph.json")
@@ -94,6 +106,11 @@ def test_production_can_run_generic_tabular_task(tmp_path) -> None:
     cache = runner.evaluator.evaluation_cache_diagnostics()
     assert cache["immutable_dataset_registrations"] == 2
     assert cache["immutable_dataset_hits"] >= 2
+
+
+def test_production_runner_rejects_missing_llm_pipeline(tmp_path) -> None:
+    with pytest.raises(ValueError, match="LLM scientist, LLM engineer, and LLM memorandum"):
+        ProductionEvolutionRunner(small_config(tmp_path, steps=1))
 
 
 def test_production_island_worker_registers_actor_owned_splits() -> None:
@@ -123,7 +140,7 @@ def test_production_island_worker_registers_actor_owned_splits() -> None:
 
 
 def test_production_split_registration_replaces_stale_strong_references(tmp_path) -> None:
-    evaluator = ProductionEvolutionRunner(small_config(tmp_path, steps=0, dataset_name="synthetic-tabular")).evaluator
+    evaluator = paper_runner(small_config(tmp_path, steps=0, dataset_name="synthetic-tabular")).evaluator
     stale_inputs = {"x": np.zeros((8, 2))}
     stale_y = np.zeros(8)
     stale_token = evaluator.register_immutable_dataset(stale_inputs, stale_y)
@@ -193,7 +210,7 @@ def test_production_loads_external_manifest_with_grouped_task_splits(tmp_path) -
         dataset_manifest_path=manifest_path,
     )
 
-    summary = ProductionEvolutionRunner(config).run()
+    summary = paper_runner(config).run()
     run_manifest = json.loads((config.output_dir / "run_manifest.json").read_text(encoding="utf-8"))
     splits = json.loads((config.output_dir / "splits.json").read_text(encoding="utf-8"))
     best = graph_from_path(config.output_dir / "best_graph.json")
@@ -215,7 +232,7 @@ def test_production_loads_external_manifest_with_grouped_task_splits(tmp_path) -
 
     resume_config = ProductionConfig(output_dir=config.output_dir, steps=0)
     assert task_schema_for_evolve_run(resume_config, resume=True).default_input == "features"
-    resumed = ProductionEvolutionRunner(resume_config).run(resume=True)
+    resumed = paper_runner(resume_config).run(resume=True)
     assert resumed["dataset"]["name"] == "external-manifest"
     assert resumed["step"] == summary["step"]
 
@@ -318,7 +335,7 @@ def test_inferred_regime_and_fault_ids_are_not_split_group_keys(tmp_path) -> Non
 
 def test_production_evolve_writes_fixed_splits_and_resumes(tmp_path) -> None:
     config = small_config(tmp_path, steps=1, seed=41)
-    summary = ProductionEvolutionRunner(config).run()
+    summary = paper_runner(config).run()
 
     run_dir = config.output_dir
     assert summary["step"] == 1
@@ -344,7 +361,7 @@ def test_production_evolve_writes_fixed_splits_and_resumes(tmp_path) -> None:
     assert not (validation & test)
     assert train | validation | test == set(range(splits["n_samples"]))
 
-    resumed = ProductionEvolutionRunner(replace(config, steps=1)).run(resume=True)
+    resumed = paper_runner(replace(config, steps=1)).run(resume=True)
     assert resumed["step"] == 2
     events = (run_dir / "events.jsonl").read_text(encoding="utf-8").strip().splitlines()
     assert len(events) == 2
@@ -366,7 +383,7 @@ def test_candidate_rss_guard_fails_candidate_and_persists_progress(tmp_path) -> 
         candidate_max_rss_mb=1,
         candidate_progress_interval_seconds=0,
     )
-    summary = ProductionEvolutionRunner(config).run()
+    summary = paper_runner(config).run()
     run_dir = config.output_dir
     events = read_jsonl(run_dir / "events.jsonl")
     jobs = read_jsonl(run_dir / "jobs.jsonl")
@@ -392,6 +409,7 @@ def test_production_records_proposal_parse_failure_and_continues(tmp_path, monke
         config,
         scientist=LLMScientistAgent(client),
         engineer=LLMEngineerAgent(client),
+        memorandum_agent=LLMMemorandumAgent(PaperTestClient()),
     ).run()
     run_dir = config.output_dir
     events = read_jsonl(run_dir / "events.jsonl")
@@ -407,7 +425,7 @@ def test_production_records_proposal_parse_failure_and_continues(tmp_path, monke
 
 def test_export_inspect_and_recheck_keep_test_explicit(tmp_path) -> None:
     config = small_config(tmp_path, steps=1, seed=43)
-    ProductionEvolutionRunner(config).run()
+    paper_runner(config).run()
     run_dir = config.output_dir
 
     inspected = inspect_run(run_dir)
@@ -437,7 +455,7 @@ def test_strict_production_promotion_does_not_archive_ties_or_small_deltas(tmp_p
         min_train_improvement=10.0,
         min_validation_improvement=10.0,
     )
-    ProductionEvolutionRunner(config).run()
+    paper_runner(config).run()
     run_dir = config.output_dir
 
     events = [json.loads(line) for line in (run_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()]
@@ -523,7 +541,7 @@ def test_production_async_islands_write_durable_artifacts_and_resume(tmp_path) -
         min_train_improvement=-1.0,
         min_validation_improvement=-1.0,
     )
-    summary = ProductionEvolutionRunner(config).run()
+    summary = paper_runner(config).run()
     run_dir = config.output_dir
 
     assert summary["step"] == 4
@@ -580,7 +598,7 @@ def test_production_async_islands_write_durable_artifacts_and_resume(tmp_path) -
             assert {str(row["worker_execution"]) for row in island_migrations} == {"process_actor"}
             assert all(int(row["target_actor_pid"]) > 0 for row in island_migrations)
 
-    resumed = ProductionEvolutionRunner(ProductionConfig(output_dir=run_dir, steps=1)).run(resume=True)
+    resumed = paper_runner(ProductionConfig(output_dir=run_dir, steps=1)).run(resume=True)
     assert resumed["step"] == 5
     assert resumed["event_count"] == 5
     assert resumed["islands"]["mode"] == "async"
@@ -606,7 +624,7 @@ def test_production_defaults_to_paper_four_gpu_island_topology(tmp_path) -> None
         irls_steps=1,
         refine_globals=False,
     )
-    summary = ProductionEvolutionRunner(config).run()
+    summary = paper_runner(config).run()
 
     assert summary["islands"]["mode"] == "async"
     assert summary["islands"]["topology"] == "paper_dedicated_gpu"
@@ -634,8 +652,14 @@ def test_paper_profile_constructor_encodes_long_run_contract(tmp_path) -> None:
     assert config.min_train_improvement == 0.0
 
 
-def test_cli_paper_profile_writes_paper_manifest_without_long_run(tmp_path) -> None:
+def test_cli_paper_profile_writes_paper_manifest_without_long_run(tmp_path, monkeypatch) -> None:
     output = tmp_path / "paper_profile_cli"
+    agents = paper_test_agents()
+    monkeypatch.setattr(
+        cli_module,
+        "build_llm_agents",
+        lambda *args, **kwargs: (agents.scientist, agents.engineer, agents.memorandum),
+    )
     result = cli_main(
         [
             "evolve",
@@ -679,7 +703,7 @@ def test_cli_paper_profile_writes_paper_manifest_without_long_run(tmp_path) -> N
 
 
 def test_paper_profile_promotion_uses_cv_score_not_validation_gate(tmp_path) -> None:
-    runner = ProductionEvolutionRunner(
+    runner = paper_runner(
         ProductionConfig.paper_profile(
             tmp_path / "unused",
             steps=0,
@@ -763,15 +787,15 @@ def test_production_islands_require_async_mode(tmp_path) -> None:
     config = small_config(tmp_path, steps=1, islands=2, async_islands=False)
 
     with pytest.raises(ValueError, match="async_islands=True"):
-        ProductionEvolutionRunner(config).run()
+        paper_runner(config).run()
 
 
 def test_production_island_native_topology_requires_four_dedicated_devices(tmp_path) -> None:
     with pytest.raises(ValueError, match="exactly 4 islands"):
-        ProductionEvolutionRunner(small_config(tmp_path, steps=1, islands=2, async_islands=True)).run()
+        paper_runner(small_config(tmp_path, steps=1, islands=2, async_islands=True)).run()
 
     with pytest.raises(ValueError, match="unique dedicated devices"):
-        ProductionEvolutionRunner(
+        paper_runner(
             small_config(
                 tmp_path,
                 steps=1,

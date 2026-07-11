@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "collection": "pilot_v1",
+  "frozen_on": "2026-07-10",
+  "datasets": [
+    {
+      "dataset_id": "pilot-v1/uci_energy_efficiency_heating",
+      "manifest": "uci_energy_efficiency_heating.manifest.json",
+      "npz_sha256": "8a384c233e454be1561849c340587c22f5df4a72806fa30478a896628e9215ba",
+      "split_file_sha256": "31f0ccc64624cb782b36957e3e0c3dd5599a6b0ca5c47b297fa038321c6dc433"
+    },
+    {
+      "dataset_id": "pilot-v1/uci_airfoil_self_noise",
+      "manifest": "uci_airfoil_self_noise.manifest.json",
+      "npz_sha256": "d28793c6d65958982ece6110fb6d85a65fc89840b521c03e03e8796242aa886b",
+      "split_file_sha256": "892749ff4984abbd5f2d7687cccbce06e2b5c6810653fb68a94b5cd865c59ca7"
+    },
+    {
+      "dataset_id": "pilot-v1/uci_concrete_compressive_strength",
+      "manifest": "uci_concrete_compressive_strength.manifest.json",
+      "npz_sha256": "224f4a7b0643f3514118bce655233f58ba2064d0e0eb416d2841a255acbf1302",
+      "split_file_sha256": "f6957e21029f7656f0392a28de2f9927ecd2d5d1977537c6219d4e7e0f5188de"
+    }
+  ]
+}

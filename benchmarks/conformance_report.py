@@ -8,7 +8,7 @@ from typing import Any
 
 from evoforest_arch.evaluator import RidgeEvaluator
 from evoforest_arch.evolution import EvolutionLoop
-from evoforest_arch.llm import DEFAULT_ISLAND_TEMPERATURES, LLMEngineerAgent, LLMScientistAgent, PromptBuilder, StaticLLMClient
+from evoforest_arch.llm import DEFAULT_ISLAND_TEMPERATURES, LLMEngineerAgent, LLMMemorandumAgent, LLMScientistAgent, PromptBuilder, StaticLLMClient
 from evoforest_arch.maintenance import GraphMaintenance
 from evoforest_arch.mutations import MutationDocument, MutationEngine, MutationSpec
 from evoforest_arch.seed import build_structural_break_seed_graph
@@ -51,9 +51,32 @@ def build_report(output_dir: Path, seed: int = 17, quick: bool = False) -> dict[
     run_dir = output_dir / "artifacts" / "conformance_evolution"
     if run_dir.exists():
         shutil.rmtree(run_dir)
+    evolution_document = MutationDocument(
+        hypotheses=("Exercise the required LLM mutation path.",),
+        rationale="Conformance report paper-pipeline mutation.",
+        add=(MutationSpec(
+            kind="add_alternative",
+            target_node="shape_stats",
+            primitive="spectral_basic",
+            alternative_id="spectral_conformance_evolution",
+            parents=("series",),
+        ),),
+    )
+    memorandum_text = "\n".join((
+        "[OUTCOME HISTORY]", "- conformance.", "[STATE]", "- conformance.",
+        "[WHAT WORKS]", "- conformance.", "[WHAT FAILED]", "- none.",
+        "[ERROR LOG]", "- none.",
+    ))
     evolution_result = EvolutionLoop(
         build_structural_break_seed_graph(),
         evaluator=RidgeEvaluator(n_splits=3, seed=seed, max_configurations=4),
+        scientist=LLMScientistAgent(StaticLLMClient((
+            "Hypothesis: Test LLM path.\nRationale: Conformance.\nExpected Improvement: coverage.\nRisk Mode: Balanced.",
+        ))),
+        engineer=LLMEngineerAgent(StaticLLMClient((evolution_document.to_yaml(),))),
+        memorandum_agent=LLMMemorandumAgent(
+            StaticLLMClient((memorandum_text, memorandum_text, memorandum_text))
+        ),
         seed=seed,
     ).run(dataset.inputs(), dataset.y, steps=1, output_dir=run_dir)
 

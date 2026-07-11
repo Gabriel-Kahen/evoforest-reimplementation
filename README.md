@@ -39,9 +39,7 @@ The implementation focuses on the reusable system design:
   a diagnostic global Ridge fit, effective rank, and fold stability.
 - Persistent alternative-level age and quality summaries accumulated from the
   best evaluated configuration's feature/dependency diagnostics.
-- Deterministic scientist/engineer agents that convert diagnostics into YAML-style
-  mutation documents with hypotheses, removals, appended globals, and adds.
-- Optional OpenAI, Claude, or Gemini LLM scientist, engineer, and memorandum
+- Required OpenAI, Claude, or Gemini LLM scientist, engineer, and memorandum
   agents that use paper-style prompt artifacts. LLM mutation synthesis is
   lambda-first and accepts paper-style node-keyed YAML such as `add: output:
   - "lambda ctx, values: ..."`. Shorthand lambdas infer parents from
@@ -209,53 +207,41 @@ python -m benchmarks.run_all --quick --output benchmark_reports/quick
 
 See [docs/benchmarks.md](docs/benchmarks.md) for the full benchmark methodology.
 
-Live LLM mutation synthesis is opt-in. Start from the checked-in example and
-choose exactly one provider block:
+For the leakage-aware generalization study with controlled DAG discovery and
+optional frozen external regression
+manifests, see [docs/research_study.md](docs/research_study.md).
+
+Evolution always uses the paper-style LLM scientist, engineer, and memorandum
+pipeline. The repository is prepared for Gemini; copy the checked-in example:
 
 ```bash
 cp .env.example .env
 ```
 
-OpenAI:
-
-```dotenv
-EVOFOREST_LLM_PROVIDER=openai
-OPENAI_API_KEY=...
-EVOFOREST_LLM_MODEL=...
-```
-
-Claude:
-
-```dotenv
-EVOFOREST_LLM_PROVIDER=claude
-ANTHROPIC_API_KEY=...
-EVOFOREST_LLM_MODEL=...
-```
-
-Gemini:
-
 ```dotenv
 EVOFOREST_LLM_PROVIDER=gemini
 GEMINI_API_KEY=...
-EVOFOREST_LLM_MODEL=...
+EVOFOREST_LLM_MODEL=gemini-3.1-flash-lite
 ```
 
 Optional shared settings:
 
 ```dotenv
 EVOFOREST_LLM_TIMEOUT_SECONDS=120
-EVOFOREST_LLM_MAX_TOKENS=4096
+EVOFOREST_LLM_MAX_TOKENS=8192
+EVOFOREST_LLM_MAX_RETRIES=0
+EVOFOREST_LLM_TARGET_BUDGET_USD=5
+EVOFOREST_LLM_HARD_BUDGET_USD=20
+EVOFOREST_LLM_INPUT_PRICE_USD_PER_MILLION_TOKENS=0.25
+EVOFOREST_LLM_OUTPUT_PRICE_USD_PER_MILLION_TOKENS=1.50
 ```
 
-Then run with provider resolution from `.env`:
+Validate the configuration without making an API call, then run:
 
 ```bash
+evoforest-arch llm-check --env-file .env
 evoforest-arch demo --steps 4 --llm-provider env --env-file .env --output runs/llm-demo
 ```
-
-You can also select the provider explicitly with `--llm-provider openai`,
-`--llm-provider claude`, or `--llm-provider gemini`; credentials and model still
-load from `.env`.
 
 The paper-style island scientist schedule can be overridden with
 `--llm-island-temperatures 0.35,0.5,0.6,0.75`. Use
@@ -271,9 +257,8 @@ brief into LLM prompts, pass `--task-context-file path/to/context.md`.
 Ridge fit.
 
 LLM-generated mutation documents may include source-backed lambda alternatives by
-default, matching the paper's mutation representation. For deterministic
-non-LLM runs, pass `--allow-source-mutations` to enable source mutation
-documents. Source lambdas are AST-validated and evaluated in a subprocess
+default, matching the paper's mutation representation. Source lambdas are
+AST-validated and evaluated in a subprocess
 sandbox with timeout, memory limit where supported, deterministic repeated
 evaluation, and output-contract checks. Source alternatives can target
 feature-producing, callable, and fitting nodes; callable/fitting source returns a
@@ -284,7 +269,7 @@ hostile code.
 LLM mode is fail-fast. If the configured provider is missing, the HTTP request
 fails, the scientist response cannot be parsed into hypotheses, or the engineer
 response cannot be parsed and validated as a mutation document, the run raises an
-error instead of falling back to deterministic agents. Prompt artifacts written
+error without substituting another proposal mechanism. Prompt artifacts written
 before the error are kept under the run's `prompts/` directory.
 
 The production workflow can use the same `.env` wiring:
@@ -323,8 +308,8 @@ migration records from inside the island actor, so resume restores the island
 frontier instead of restarting from a seed graph. It preserves the paper's fixed
 four-temperature scientist schedule by default. The `--profile paper` preset switches promotion from the
 default held-out validation gate to the paper's CV task score frontier and records
-that contract in the manifest. The scientist/engineer loop can run
-deterministically offline or call an opt-in OpenAI, Claude, or Gemini provider.
+that contract in the manifest. The scientist/engineer/memorandum loop always uses
+the configured LLM provider.
 It does not include the authors' private model, exact prompts, full private
 code-generation backend, or cluster scheduler.
 The source-backed mutation path recreates the paper's

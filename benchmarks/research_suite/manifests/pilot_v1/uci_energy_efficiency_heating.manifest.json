@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "dataset_id": "pilot-v1/uci_energy_efficiency_heating",
+  "data": "uci_energy_efficiency_heating.npz",
+  "feature_key": "X",
+  "target_key": "y",
+  "feature_names": [
+    "x0",
+    "x1",
+    "x2",
+    "x3",
+    "x4",
+    "x5",
+    "x6",
+    "x7"
+  ],
+  "split_file": "uci_energy_efficiency_heating.splits.json",
+  "sha256": "8a384c233e454be1561849c340587c22f5df4a72806fa30478a896628e9215ba",
+  "metadata": {
+    "study_role": "external_real_regression_pilot",
+    "display_name": "Energy Efficiency \u2014 Heating Load",
+    "source_repository": "UCI Machine Learning Repository",
+    "source_dataset_id": 242,
+    "source_url": "https://archive.ics.uci.edu/dataset/242/energy+efficiency",
+    "source_data_url": "https://archive.ics.uci.edu/static/public/242/data.csv",
+    "source_doi": "10.24432/C51307",
+    "source_last_updated": "2024-02-26",
+    "source_retrieved_utc": "2026-07-10",
+    "source_csv_sha256": "db44dbe453acd464b5cf65be2fb01a28aa9c5b2630300e65fbe28cde35f5d96f",
+    "derived_npz_sha256": "8a384c233e454be1561849c340587c22f5df4a72806fa30478a896628e9215ba",
+    "split_file_sha256": "31f0ccc64624cb782b36957e3e0c3dd5599a6b0ca5c47b297fa038321c6dc433",
+    "license": "CC BY 4.0",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "license_evidence": "UCI dataset repository page license field at retrieval date",
+    "attribution": "Energy Efficiency \u2014 Heating Load, UCI Machine Learning Repository, DOI 10.24432/C51307",
+    "target": "Y1",
+    "original_feature_names": [
+      "X1",
+      "X2",
+      "X3",
+      "X4",
+      "X5",
+      "X6",
+      "X7",
+      "X8"
+    ],
+    "excluded_columns": [
+      "Y2"
+    ],
+    "agent_feature_names_blinded": true,
+    "rows": 768,
+    "features": 8,
+    "unique_feature_vectors": 768,
+    "split_counts": {
+      "train": 461,
+      "validation": 153,
+      "test": 154
+    },
+    "missing_values": false,
+    "preprocessing": "CSV numeric parse to float64 only; no scaling, imputation, filtering, or row deletion"
+  }
+}

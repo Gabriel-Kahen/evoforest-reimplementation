@@ -1,0 +1,19 @@
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10.14
+  - cmake=3.29.4
+  - gcc=15.2.0
+  - gxx=15.2.0
+  - ninja=1.13.2
+  - eigen=5.0.1
+  - numpy=2.2.6
+  - pandas=2.3.3
+  - scikit-learn=1.7.2
+  - setuptools=83.0.0
+  - shogun-cpp=6.1.4
+  - wheel=0.47.0
+  - pybind11=3.0.3
+  - pybind11_json=0.2.15
+  # FEAT's generated serialization symbols do not load with 3.12.0.
+  - nlohmann_json=3.11.2

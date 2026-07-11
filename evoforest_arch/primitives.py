@@ -12,7 +12,7 @@ from evoforest_arch.task import TaskSchema
 
 PrimitiveFactory = Callable[[str, tuple[str, ...]], NodeAlternative]
 CALLABLE_PRIMITIVES = frozenset({"identity_callable", "sigmoid_gate_callable", "clipped_linear_callable"})
-SAMPLE_WEIGHT_PRIMITIVES = frozenset({"uniform_sample_weight", "boundary_energy_weight", "late_energy_weight"})
+SAMPLE_WEIGHT_PRIMITIVES = frozenset({"uniform_sample_weight", "boundary_energy_weight", "late_energy_weight", "tabular_row_norm_weight"})
 RESIDUAL_WEIGHT_PRIMITIVES = frozenset({"identity_residual_weight", "huber_residual_weight"})
 
 
@@ -75,6 +75,13 @@ class PrimitiveRegistry:
         self.register("tabular_square", tabular_square_factory)
         self.register("tabular_summary", tabular_summary_factory)
         self.register("tabular_low_rank_interactions", tabular_low_rank_interactions_factory)
+        self.register("tabular_signed_log", tabular_signed_log_factory)
+        self.register("tabular_sine", tabular_sine_factory)
+        self.register("tabular_tanh", tabular_tanh_factory)
+        self.register("tabular_sine_interactions", tabular_sine_interactions_factory)
+        self.register("tabular_gated_log", tabular_gated_log_factory)
+        self.register("tabular_quantile_summary", tabular_quantile_summary_factory)
+        self.register("tabular_row_norm_weight", tabular_row_norm_weight_factory)
 
     def _register_common(self) -> None:
         self.register("uniform_sample_weight", uniform_sample_weight_factory)
@@ -260,6 +267,126 @@ def tabular_low_rank_interactions_factory(alternative_id: str, parents: tuple[st
         return torch.column_stack([centered[:, idx] * centered[:, idx + 1] for idx in range(k - 1)])
 
     return NodeAlternative(alternative_id, parents, fn, "Low-order generic column interaction features.", torch_fn=tfn)
+
+
+def _elementwise_tabular_factory(
+    alternative_id: str,
+    parents: tuple[str, ...],
+    *,
+    name: str,
+    numpy_fn: Callable[[np.ndarray], np.ndarray],
+    torch_fn: Callable[[object], object],
+    description: str,
+) -> NodeAlternative:
+    def fn(_ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
+        transformed = numpy_fn(_as_matrix(values[parents[0]]))
+        return FeatureBlock(transformed, _feature_names(name, transformed.shape[1]))
+
+    def tfn(_ctx: EvalContext, values: dict[str, object]) -> object:
+        value = values[parents[0]]
+        if value.ndim == 1:
+            value = value.reshape(-1, 1)
+        return torch_fn(value)
+
+    return NodeAlternative(alternative_id, parents, fn, description, torch_fn=tfn)
+
+
+def tabular_signed_log_factory(alternative_id: str, parents: tuple[str, ...]) -> NodeAlternative:
+    return _elementwise_tabular_factory(
+        alternative_id,
+        parents,
+        name="signed_log",
+        numpy_fn=lambda x: np.sign(x) * np.log1p(np.abs(x)),
+        torch_fn=lambda x: __import__("torch").sign(x) * __import__("torch").log1p(__import__("torch").abs(x)),
+        description="Signed log-magnitude transforms of generic numeric columns.",
+    )
+
+
+def tabular_sine_factory(alternative_id: str, parents: tuple[str, ...]) -> NodeAlternative:
+    return _elementwise_tabular_factory(
+        alternative_id,
+        parents,
+        name="sin",
+        numpy_fn=np.sin,
+        torch_fn=lambda x: __import__("torch").sin(x),
+        description="Elementwise sine transforms of generic numeric columns.",
+    )
+
+
+def tabular_tanh_factory(alternative_id: str, parents: tuple[str, ...]) -> NodeAlternative:
+    return _elementwise_tabular_factory(
+        alternative_id,
+        parents,
+        name="tanh",
+        numpy_fn=np.tanh,
+        torch_fn=lambda x: __import__("torch").tanh(x),
+        description="Elementwise bounded nonlinear transforms of generic numeric columns.",
+    )
+
+
+def tabular_sine_interactions_factory(alternative_id: str, parents: tuple[str, ...]) -> NodeAlternative:
+    def fn(_ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
+        x = _as_matrix(values[parents[0]])
+        k = min(4, x.shape[1])
+        pairs = [(i, j) for i in range(k) for j in range(i + 1, k)] or [(0, 0)]
+        return FeatureBlock(
+            np.column_stack([np.sin(x[:, i] * x[:, j]) for i, j in pairs]),
+            [f"sin_interaction_{i}_{j}" for i, j in pairs],
+        )
+
+    def tfn(_ctx: EvalContext, values: dict[str, object]) -> object:
+        import torch
+
+        x = values[parents[0]]
+        if x.ndim == 1:
+            x = x.reshape(-1, 1)
+        k = min(4, int(x.shape[1]))
+        pairs = [(i, j) for i in range(k) for j in range(i + 1, k)] or [(0, 0)]
+        return torch.column_stack([torch.sin(x[:, i] * x[:, j]) for i, j in pairs])
+
+    return NodeAlternative(alternative_id, parents, fn, "Sine transforms of low-order pairwise products.", torch_fn=tfn)
+
+
+def tabular_gated_log_factory(alternative_id: str, parents: tuple[str, ...]) -> NodeAlternative:
+    def fn(_ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
+        x = _as_matrix(values[parents[0]])
+        k = min(4, x.shape[1])
+        pairs = [(i, (i + 1) % k) for i in range(k)]
+        return FeatureBlock(
+            np.column_stack([(x[:, i] > 0.0) * np.log1p(np.abs(x[:, j])) for i, j in pairs]),
+            [f"positive_gate_log_{i}_{j}" for i, j in pairs],
+        )
+
+    def tfn(_ctx: EvalContext, values: dict[str, object]) -> object:
+        import torch
+
+        x = values[parents[0]]
+        if x.ndim == 1:
+            x = x.reshape(-1, 1)
+        k = min(4, int(x.shape[1]))
+        pairs = [(i, (i + 1) % k) for i in range(k)]
+        return torch.column_stack([(x[:, i] > 0.0).to(x.dtype) * torch.log1p(torch.abs(x[:, j])) for i, j in pairs])
+
+    return NodeAlternative(alternative_id, parents, fn, "Threshold-gated log-magnitude column pairs.", torch_fn=tfn)
+
+
+def tabular_quantile_summary_factory(alternative_id: str, parents: tuple[str, ...]) -> NodeAlternative:
+    def fn(_ctx: EvalContext, values: dict[str, object]) -> FeatureBlock:
+        x = _as_matrix(values[parents[0]])
+        block = np.quantile(x, [0.1, 0.25, 0.5, 0.75, 0.9], axis=1).T
+        return FeatureBlock(block, ["row_q10", "row_q25", "row_q50", "row_q75", "row_q90"])
+
+    return NodeAlternative(alternative_id, parents, fn, "Robust row-level quantile summaries.")
+
+
+def tabular_row_norm_weight_factory(alternative_id: str, parents: tuple[str, ...]) -> NodeAlternative:
+    def fn(_ctx: EvalContext, values: dict[str, object]) -> np.ndarray:
+        x = _as_matrix(values[parents[0]])
+        norm = np.sqrt(np.mean(x * x, axis=1))
+        scale = max(float(np.median(norm)), 1e-8)
+        return 1.0 / (1.0 + norm / scale)
+
+    return NodeAlternative(alternative_id, parents, fn, "Downweight rows with unusually large feature norms.")
 
 
 @lru_cache(maxsize=128)

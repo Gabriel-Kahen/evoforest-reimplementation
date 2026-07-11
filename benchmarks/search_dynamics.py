@@ -8,6 +8,7 @@ from typing import Any
 
 from evoforest_arch.evaluator import RidgeEvaluator
 from evoforest_arch.evolution import EvolutionLoop
+from evoforest_arch.paper_agents import PaperAgentBundle, build_gemini_paper_agents
 from evoforest_arch.seed import build_structural_break_seed_graph
 from evoforest_arch.synthetic import make_structural_break_data
 
@@ -25,7 +26,13 @@ from benchmarks.common import (
 )
 
 
-def build_report(output_dir: Path, seed: int = 31, quick: bool = False) -> dict[str, Any]:
+def build_report(
+    output_dir: Path,
+    *,
+    agents: PaperAgentBundle,
+    seed: int = 31,
+    quick: bool = False,
+) -> dict[str, Any]:
     steps = 3 if quick else 8
     n_series = 54 if quick else 108
     length = 64 if quick else 96
@@ -38,6 +45,9 @@ def build_report(output_dir: Path, seed: int = 31, quick: bool = False) -> dict[
     result = EvolutionLoop(
         build_structural_break_seed_graph(),
         evaluator=RidgeEvaluator(n_splits=3, seed=seed, max_configurations=max_configurations, irls_steps=2),
+        scientist=agents.scientist,
+        engineer=agents.engineer,
+        memorandum_agent=agents.memorandum,
         seed=seed,
     ).run(dataset.inputs(), dataset.y, steps=steps, output_dir=run_dir)
 
@@ -149,8 +159,14 @@ def markdown_report(payload: dict[str, Any]) -> str:
     )
 
 
-def run(output_dir: Path, seed: int = 31, quick: bool = False) -> tuple[Path, Path]:
-    payload = build_report(output_dir, seed=seed, quick=quick)
+def run(
+    output_dir: Path,
+    *,
+    agents: PaperAgentBundle,
+    seed: int = 31,
+    quick: bool = False,
+) -> tuple[Path, Path]:
+    payload = build_report(output_dir, agents=agents, seed=seed, quick=quick)
     return write_report(output_dir, "search_dynamics", payload, markdown_report(payload))
 
 
@@ -159,8 +175,11 @@ def main(argv: list[str] | None = None) -> int:
     output_argument(parser)
     seed_argument(parser, default=31)
     quick_argument(parser)
+    parser.add_argument("--env-file", type=Path, default=Path(".env"))
     args = parser.parse_args(argv)
-    print_report_paths(run(args.output, seed=args.seed, quick=args.quick))
+    print_report_paths(
+        run(args.output, agents=build_gemini_paper_agents(args.env_file), seed=args.seed, quick=args.quick)
+    )
     return 0
 
 

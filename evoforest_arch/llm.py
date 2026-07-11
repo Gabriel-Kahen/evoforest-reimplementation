@@ -10,21 +10,22 @@ import sys
 import time
 from typing import Protocol, Sequence
 import urllib.error
-import urllib.parse
 import urllib.request
 
 import numpy as np
 
-from evoforest_arch.agents import EngineerAgent, Hypothesis, ScientistAgent
 from evoforest_arch.evaluator import EvaluationResult
 from evoforest_arch.feedback import feedback_summary, toon_report
 from evoforest_arch.graph import Graph, allowed_output_contract_types, default_output_contract
+from evoforest_arch.hypotheses import Hypothesis
+from evoforest_arch.llm_budget import LLMBudget
 from evoforest_arch.mutations import MutationDocument, RemoveSpec, validate_mutation_document_architecture
 from evoforest_arch.primitives import PrimitiveRegistry
 
 
 DEFAULT_ISLAND_TEMPERATURES = (0.35, 0.5, 0.6, 0.75)
 DEFAULT_ENV_FILE = pathlib.Path(".env")
+DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite"
 SUPPORTED_LLM_PROVIDERS = ("openai", "claude", "gemini")
 RETRYABLE_LLM_HTTP_STATUSES = frozenset({408, 409, 425, 429, 500, 502, 503, 504})
 
@@ -76,7 +77,7 @@ class PromptRecord:
 
 
 class StaticLLMClient:
-    """Deterministic client for tests and prompt-pipeline dry runs."""
+    """Test-only response queue for exercising the real LLM agent pipeline."""
 
     def __init__(self, responses: Sequence[str]) -> None:
         self.responses = list(responses)
@@ -232,14 +233,20 @@ class GeminiLLMClient:
     api_key: str
     model: str
     timeout_seconds: float = 120.0
+    budget: LLMBudget | None = None
 
     @classmethod
     def from_env(cls, env_file: str | pathlib.Path | None = DEFAULT_ENV_FILE) -> "GeminiLLMClient":
         load_env_file(env_file)
         return cls(
             api_key=_required_env(("GEMINI_API_KEY", "GOOGLE_API_KEY", "EVOFOREST_GEMINI_API_KEY"), "gemini"),
-            model=_required_env(("EVOFOREST_LLM_MODEL", "EVOFOREST_GEMINI_MODEL"), "gemini"),
+            model=(
+                os.getenv("EVOFOREST_LLM_MODEL")
+                or os.getenv("EVOFOREST_GEMINI_MODEL")
+                or DEFAULT_GEMINI_MODEL
+            ),
             timeout_seconds=_env_float("EVOFOREST_LLM_TIMEOUT_SECONDS", 120.0),
+            budget=LLMBudget.from_env(),
         )
 
     def complete(self, system_prompt: str, user_prompt: str, *, temperature: float = 0.0) -> str:
@@ -249,16 +256,32 @@ class GeminiLLMClient:
             "generationConfig": {"temperature": float(temperature)},
         }
         max_tokens = _optional_env_int("EVOFOREST_LLM_MAX_TOKENS")
+        if self.budget is not None and max_tokens is None:
+            max_tokens = 8192
         if max_tokens is not None:
             payload["generationConfig"]["maxOutputTokens"] = max_tokens  # type: ignore[index]
         model_path = self.model if self.model.startswith("models/") else f"models/{self.model}"
-        quoted_model = urllib.parse.quote(model_path, safe="/")
-        query = urllib.parse.urlencode({"key": self.api_key})
-        data = _post_json(
-            f"https://generativelanguage.googleapis.com/v1beta/{quoted_model}:generateContent?{query}",
-            payload,
-            timeout_seconds=self.timeout_seconds,
-        )
+        reservation = None
+        if self.budget is not None:
+            input_upper_bound = len((system_prompt + user_prompt).encode("utf-8")) + 1024
+            reservation = self.budget.reserve(
+                input_token_upper_bound=input_upper_bound,
+                max_output_tokens=int(max_tokens),
+            )
+        try:
+            data = _post_json(
+                f"https://generativelanguage.googleapis.com/v1beta/{model_path}:generateContent",
+                payload,
+                headers={"x-goog-api-key": self.api_key},
+                timeout_seconds=self.timeout_seconds,
+            )
+        except Exception:
+            if self.budget is not None and reservation is not None:
+                self.budget.release(reservation)
+            raise
+        if self.budget is not None and reservation is not None:
+            input_tokens, output_tokens = _extract_gemini_usage(data)
+            self.budget.commit(reservation, input_tokens=input_tokens, output_tokens=output_tokens)
         return _extract_gemini_content(data)
 
 
@@ -494,7 +517,7 @@ class PromptBuilder:
         return text[: self.max_graph_chars] + "\n... [truncated]"
 
 
-class LLMScientistAgent(ScientistAgent):
+class LLMScientistAgent:
     def __init__(
         self,
         client: LLMClient,
@@ -586,7 +609,7 @@ class LLMScientistAgent(ScientistAgent):
         return records
 
 
-class LLMEngineerAgent(EngineerAgent):
+class LLMEngineerAgent:
     def __init__(
         self,
         client: LLMClient,
@@ -1145,6 +1168,25 @@ def _extract_gemini_content(data: object) -> str:
     if not parts:
         raise ValueError("Gemini response JSON did not contain text content.")
     return "\n".join(parts)
+
+
+def _extract_gemini_usage(data: object) -> tuple[int | None, int | None]:
+    if not isinstance(data, dict):
+        return None, None
+    usage = data.get("usageMetadata")
+    if not isinstance(usage, dict):
+        return None, None
+    prompt = usage.get("promptTokenCount")
+    candidates = usage.get("candidatesTokenCount", 0)
+    thoughts = usage.get("thoughtsTokenCount", 0)
+    total = usage.get("totalTokenCount")
+    if not isinstance(prompt, int):
+        return None, None
+    candidate_total = (candidates if isinstance(candidates, int) else 0) + (
+        thoughts if isinstance(thoughts, int) else 0
+    )
+    total_minus_prompt = total - prompt if isinstance(total, int) else 0
+    return prompt, max(0, candidate_total, total_minus_prompt)
 
 
 def _stringify_content(content: object) -> str:

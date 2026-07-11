@@ -11,14 +11,14 @@ import numpy as np
 import pytest
 
 from evoforest_arch import evaluator as evaluator_module, graph as graph_module, llm as llm_module
-from evoforest_arch.agents import EngineerAgent, ScientistAgent
-from evoforest_arch.cli import build_llm_agents
+from evoforest_arch.cli import build_llm_agents, main as cli_main
 from evoforest_arch.evaluator import _SCREENING_PREPARED_FOLD_CACHE_MAX_ENTRIES, PreparedFold, RidgeEvaluator, abs_feature_correlation, effective_rank, feature_correlation_summary, max_correlation_scores, most_correlated_names, safe_corr_columns
 from evoforest_arch.evaluation_cache import PersistentEvaluationCache, fingerprint_callable
 from evoforest_arch.evolution import EvolutionLoop
 from evoforest_arch.feedback import toon_report
 from evoforest_arch.graph import CallableFamily, EvalContext, EvaluationKeyFingerprints, FeatureBlock, Graph, NodeAlternative, ResidualWeightRule
 from evoforest_arch.graph_io import graph_from_dict, graph_hash
+from evoforest_arch.hypotheses import Hypothesis
 from evoforest_arch.llm import ClaudeLLMClient, GeminiLLMClient, LLMEngineerAgent, LLMMemorandumAgent, LLMScientistAgent, OpenAILLMClient, PromptBuilder, StaticLLMClient, llm_client_from_env, llm_provider_from_env
 from evoforest_arch.maintenance import GraphMaintenance
 from evoforest_arch.metrics import FoldStrategy, RMSE_SCORER, TaskScorer, safe_corr
@@ -30,9 +30,19 @@ from evoforest_arch.seed import build_seed_graph, build_structural_break_seed_gr
 from evoforest_arch.source import SourceExecutionError
 from evoforest_arch.synthetic import make_structural_break_data, make_tabular_data
 from evoforest_arch.task import InputSpec, TaskSchema
+from tests.paper_test_support import PaperTestClient, paper_test_agents
 
 
 _PERSISTENT_CACHE_CALLS: dict[str, int] = {}
+
+
+def sample_hypothesis() -> Hypothesis:
+    return Hypothesis(
+        kind="residual_feature_search",
+        target_node="output",
+        rationale="Residual structure remains unexplained.",
+        expected_improvement="complementary predictive structure",
+    )
 
 
 def test_default_seed_graph_is_task_independent_tabular() -> None:
@@ -1639,18 +1649,6 @@ def test_update_graph_persists_alternative_statistics_and_age() -> None:
     assert row["best_config_score"] == result.score
 
 
-def test_scientist_and_engineer_generate_diagnostic_mutation_documents() -> None:
-    dataset = make_structural_break_data(n_series=80, length=90, seed=15)
-    graph = build_structural_break_seed_graph()
-    result = RidgeEvaluator(n_splits=3, seed=15, max_configurations=8).evaluate(graph, dataset.inputs(), dataset.y)
-    hypotheses = ScientistAgent().generate(graph, result)
-    document = EngineerAgent().synthesize(graph, result, hypotheses, step=7, island=2, rng=np.random.default_rng(15))
-    assert hypotheses
-    assert document.add
-    assert document.add[0].alternative_id.endswith("_i2_7")
-    assert any("Expected:" in item for item in document.hypotheses)
-
-
 def test_mutation_engine_adds_alternative_without_mutating_parent_graph() -> None:
     graph = build_structural_break_seed_graph()
     before = len(graph.nodes["shape_stats"].alternatives)
@@ -2348,7 +2346,15 @@ def test_numpy_source_lambda_gets_auto_torch_path_when_expression_is_differentia
 def test_evolution_loop_writes_events_checkpoint_and_memorandum(tmp_path) -> None:
     dataset = make_structural_break_data(n_series=90, length=90, seed=21)
     graph = build_structural_break_seed_graph()
-    result = EvolutionLoop(graph, evaluator=RidgeEvaluator(n_splits=3, seed=21, max_configurations=12), seed=21).run(
+    agents = paper_test_agents()
+    result = EvolutionLoop(
+        graph,
+        evaluator=RidgeEvaluator(n_splits=3, seed=21, max_configurations=12),
+        scientist=agents.scientist,
+        engineer=agents.engineer,
+        memorandum_agent=agents.memorandum,
+        seed=21,
+    ).run(
         dataset.inputs(),
         dataset.y,
         steps=4,
@@ -2393,6 +2399,11 @@ def test_evolution_loop_writes_events_checkpoint_and_memorandum(tmp_path) -> Non
     assert "random 3-fold Ridge CV" in task_context
 
 
+def test_evolution_loop_requires_complete_llm_pipeline() -> None:
+    with pytest.raises(TypeError, match="scientist.*engineer.*memorandum_agent"):
+        EvolutionLoop(build_structural_break_seed_graph())  # type: ignore[call-arg]
+
+
 def test_llm_agents_write_prompt_artifacts_and_mutation_yaml(tmp_path) -> None:
     dataset = make_structural_break_data(n_series=50, length=70, seed=23)
     graph = build_structural_break_seed_graph()
@@ -2428,6 +2439,7 @@ def test_llm_agents_write_prompt_artifacts_and_mutation_yaml(tmp_path) -> None:
         evaluator=RidgeEvaluator(n_splits=3, seed=23, max_configurations=6),
         scientist=LLMScientistAgent(client),
         engineer=LLMEngineerAgent(client),
+        memorandum_agent=LLMMemorandumAgent(PaperTestClient()),
         seed=23,
     ).run(
         dataset.inputs(),
@@ -2479,7 +2491,7 @@ def test_llm_engineer_retries_empty_mutation_document(monkeypatch) -> None:
     dataset = make_structural_break_data(n_series=35, length=70, seed=25)
     graph = build_structural_break_seed_graph()
     result = RidgeEvaluator(n_splits=3, seed=25, max_configurations=4).evaluate(graph, dataset.inputs(), dataset.y)
-    hypotheses = (ScientistAgent().generate(graph, result, max_hypotheses=1)[0],)
+    hypotheses = (sample_hypothesis(),)
     empty_document = "rationale: \"empty\"\nhypotheses:\n  []\nnodes:\n  []\nremove:\n  []\nglobals:\n  []\nadd:\n  []\n"
     valid_document = MutationDocument(
         hypotheses=("Add a nonduplicate spectral shape alternative.",),
@@ -2522,6 +2534,7 @@ def test_llm_scientist_failure_aborts_without_deterministic_fallback(tmp_path) -
             evaluator=RidgeEvaluator(n_splits=3, seed=27, max_configurations=4),
             scientist=LLMScientistAgent(client),
             engineer=LLMEngineerAgent(client),
+            memorandum_agent=LLMMemorandumAgent(PaperTestClient()),
             seed=27,
         ).run(dataset.inputs(), dataset.y, steps=1, output_dir=tmp_path)
 
@@ -2538,9 +2551,7 @@ def test_llm_engineer_failure_aborts_without_deterministic_fallback(monkeypatch)
     dataset = make_structural_break_data(n_series=35, length=70, seed=32)
     graph = build_structural_break_seed_graph()
     result = RidgeEvaluator(n_splits=3, seed=32, max_configurations=4).evaluate(graph, dataset.inputs(), dataset.y)
-    hypotheses = (
-        ScientistAgent().generate(graph, result, max_hypotheses=1)[0],
-    )
+    hypotheses = (sample_hypothesis(),)
     client = StaticLLMClient(("rationale: \"empty\"\nhypotheses:\n  []\nnodes:\n  []\nremove:\n  []\nglobals:\n  []\nadd:\n  []\n",))
 
     with pytest.raises(ValueError, match="empty mutation document"):
@@ -2668,6 +2679,40 @@ def test_claude_and_gemini_clients_load_from_env_files(tmp_path, monkeypatch) ->
     assert gemini.model == "gemini-test"
 
 
+def test_gemini_uses_api_key_header_not_url(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_urlopen(request: object, *, timeout: float) -> object:
+        captured["request"] = request
+        captured["timeout"] = timeout
+        return _FakeHTTPResponse(b'{"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}')
+
+    monkeypatch.setattr(llm_module.urllib.request, "urlopen", fake_urlopen)
+    response = GeminiLLMClient("secret-key", "gemini-test", timeout_seconds=9.0).complete("system", "user")
+    request = captured["request"]
+
+    assert response == "ok"
+    assert captured["timeout"] == 9.0
+    assert "secret-key" not in request.full_url  # type: ignore[attr-defined]
+    assert dict(request.header_items())["X-goog-api-key"] == "secret-key"  # type: ignore[attr-defined]
+
+
+def test_llm_check_is_redacted_and_does_not_call_api(tmp_path, monkeypatch, capsys) -> None:
+    for key in ("EVOFOREST_LLM_PROVIDER", "EVOFOREST_LLM_MODEL", "GEMINI_API_KEY"):
+        monkeypatch.delenv(key, raising=False)
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "EVOFOREST_LLM_PROVIDER=gemini\nGEMINI_API_KEY=top-secret\nEVOFOREST_LLM_MODEL=gemini-test\n",
+        encoding="utf-8",
+    )
+
+    assert cli_main(["llm-check", "--env-file", str(env_file)]) == 0
+    output = capsys.readouterr().out
+    assert '"ready": true' in output
+    assert '"model": "gemini-test"' in output
+    assert "top-secret" not in output
+
+
 def test_llm_post_json_retries_transient_http_errors(monkeypatch) -> None:
     monkeypatch.setenv("EVOFOREST_LLM_MAX_RETRIES", "2")
     monkeypatch.setenv("EVOFOREST_LLM_RETRY_INITIAL_SECONDS", "0.25")
@@ -2749,7 +2794,7 @@ def test_prompt_builder_advertises_source_schema_only_when_enabled() -> None:
     dataset = make_structural_break_data(n_series=35, length=70, seed=24)
     graph = build_structural_break_seed_graph()
     result = RidgeEvaluator(n_splits=3, seed=24, max_configurations=4).evaluate(graph, dataset.inputs(), dataset.y)
-    hypothesis = ScientistAgent().generate(graph, result, max_hypotheses=1)
+    hypothesis = (sample_hypothesis(),)
     source_system, source_user = PromptBuilder(allow_source=True).engineer_prompts(graph, result, hypothesis)
     _system, primitive_user = PromptBuilder(allow_source=False).engineer_prompts(graph, result, hypothesis)
     assert '"source": "lambda ctx, values:' in source_user
@@ -2793,7 +2838,7 @@ def test_llm_agents_can_disable_source_mutation_schema(tmp_path, monkeypatch) ->
     dataset = make_structural_break_data(n_series=35, length=70, seed=25)
     graph = build_structural_break_seed_graph()
     result = RidgeEvaluator(n_splits=3, seed=25, max_configurations=4).evaluate(graph, dataset.inputs(), dataset.y)
-    hypothesis = ScientistAgent().generate(graph, result, max_hypotheses=1)
+    hypothesis = (sample_hypothesis(),)
     _system, user = engineer.prompt_builder.engineer_prompts(graph, result, hypothesis)
     assert '"source": "lambda ctx, values:' not in user
     assert "Source-backed lambda edits are disabled" in user
@@ -2845,6 +2890,7 @@ def test_failed_llm_source_mutation_is_logged_and_fed_back(tmp_path) -> None:
         mutation_engine=MutationEngine(allow_source=True),
         scientist=LLMScientistAgent(client),
         engineer=LLMEngineerAgent(client, allow_source=True),
+        memorandum_agent=LLMMemorandumAgent(PaperTestClient()),
         seed=26,
     ).run(dataset.inputs(), dataset.y, steps=1, output_dir=tmp_path)
     assert result.score > 0.6
@@ -2904,6 +2950,7 @@ def test_llm_island_mode_uses_scientist_temperature_schedule(tmp_path) -> None:
         evaluator=RidgeEvaluator(n_splits=3, seed=30, max_configurations=4),
         scientist=LLMScientistAgent(client, island_temperatures=(0.35, 0.5)),
         engineer=LLMEngineerAgent(client, temperature=0.0),
+        memorandum_agent=LLMMemorandumAgent(PaperTestClient()),
         seed=30,
     ).run_islands(
         dataset.inputs(),
@@ -2918,7 +2965,7 @@ def test_llm_island_mode_uses_scientist_temperature_schedule(tmp_path) -> None:
 
 
 def test_async_islands_record_failed_candidates_without_crashing(tmp_path) -> None:
-    class BadSourceEngineer(EngineerAgent):
+    class BadSourceEngineer:
         def synthesize(self, graph, result, hypotheses, step, island, rng):  # type: ignore[no-untyped-def]
             del graph, result, hypotheses, rng
             return MutationDocument(
@@ -2939,11 +2986,14 @@ def test_async_islands_record_failed_candidates_without_crashing(tmp_path) -> No
 
     dataset = make_structural_break_data(n_series=42, length=70, seed=28)
     graph = build_structural_break_seed_graph()
+    agents = paper_test_agents()
     result = EvolutionLoop(
         graph,
         evaluator=RidgeEvaluator(n_splits=3, seed=28, max_configurations=4),
         mutation_engine=MutationEngine(allow_source=True),
-        engineer=BadSourceEngineer(),
+        scientist=agents.scientist,
+        engineer=BadSourceEngineer(),  # type: ignore[arg-type]
+        memorandum_agent=agents.memorandum,
         seed=28,
     ).run_async_islands(
         dataset.inputs(),
@@ -2965,7 +3015,15 @@ def test_async_islands_record_failed_candidates_without_crashing(tmp_path) -> No
 def test_island_evolution_writes_global_and_island_artifacts(tmp_path) -> None:
     dataset = make_structural_break_data(n_series=60, length=80, seed=25)
     graph = build_structural_break_seed_graph()
-    result = EvolutionLoop(graph, evaluator=RidgeEvaluator(n_splits=3, seed=25, max_configurations=8), seed=25).run_islands(
+    agents = paper_test_agents()
+    result = EvolutionLoop(
+        graph,
+        evaluator=RidgeEvaluator(n_splits=3, seed=25, max_configurations=8),
+        scientist=agents.scientist,
+        engineer=agents.engineer,
+        memorandum_agent=agents.memorandum,
+        seed=25,
+    ).run_islands(
         dataset.inputs(),
         dataset.y,
         islands=2,
@@ -2994,7 +3052,15 @@ def test_island_evolution_writes_global_and_island_artifacts(tmp_path) -> None:
 def test_async_island_evolution_writes_concurrent_artifacts(tmp_path) -> None:
     dataset = make_structural_break_data(n_series=50, length=70, seed=27)
     graph = build_structural_break_seed_graph()
-    result = EvolutionLoop(graph, evaluator=RidgeEvaluator(n_splits=3, seed=27, max_configurations=6), seed=27).run_async_islands(
+    agents = paper_test_agents()
+    result = EvolutionLoop(
+        graph,
+        evaluator=RidgeEvaluator(n_splits=3, seed=27, max_configurations=6),
+        scientist=agents.scientist,
+        engineer=agents.engineer,
+        memorandum_agent=agents.memorandum,
+        seed=27,
+    ).run_async_islands(
         dataset.inputs(),
         dataset.y,
         islands=2,

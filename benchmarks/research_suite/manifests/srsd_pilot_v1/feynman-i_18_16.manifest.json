@@ -1,0 +1,25 @@
+{
+  "data": "feynman-i_18_16.npz",
+  "dataset_id": "srsd-easy/feynman-i.18.16",
+  "feature_key": "X",
+  "feature_names": [
+    "x0",
+    "x1",
+    "x2",
+    "x3"
+  ],
+  "metadata": {
+    "difficulty": "easy",
+    "family": "srsd_feynman_easy",
+    "license": "CC BY 4.0",
+    "original_split_preserved": true,
+    "paper": "https://arxiv.org/abs/2206.10540",
+    "selection_rule": "predeclared coverage of one through five variables plus a rational three-variable task",
+    "source": "https://huggingface.co/datasets/yoshitomo-matsubara/srsd-feynman_easy",
+    "true_equation": "x0*x1*x2*sin(x3)"
+  },
+  "sha256": "4f757ef26446b534e7646e1baafd90cad4919f6d0da91cde02325984da4459a2",
+  "split_file": "feynman-i_18_16.splits.json",
+  "target_key": "y",
+  "version": 1
+}

@@ -19,6 +19,13 @@ dev = [
 torch = [
   "torch>=2.3",
 ]
+research = [
+  "scikit-learn==1.6.1",
+  "autofeat==2.1.3",
+]
+research-symbolic = [
+  "pysr==1.5.10",
+]
 
 [project.scripts]
 evoforest-arch = "evoforest_arch.cli:main"

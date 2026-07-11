@@ -1,6 +1,6 @@
 """Clean-room EvoForest architecture package."""
 
-from evoforest_arch.agents import EngineerAgent, Hypothesis, ScientistAgent
+from evoforest_arch.hypotheses import Hypothesis
 from evoforest_arch.datasets import DatasetLoaderRegistry, LoadedDataset, default_dataset_loader_registry, load_dataset_bundle
 from evoforest_arch.evaluator import EvaluationResult, RidgeEvaluator
 from evoforest_arch.evolution import EvolutionLoop
@@ -16,12 +16,12 @@ from evoforest_arch.llm import (
     PromptBuilder,
     PromptRecord,
     SUPPORTED_LLM_PROVIDERS,
-    StaticLLMClient,
     llm_client_from_env,
     llm_provider_from_env,
     load_env_file,
 )
 from evoforest_arch.maintenance import GraphMaintenance, MaintenanceReport
+from evoforest_arch.paper_agents import PaperAgentBundle, build_gemini_paper_agents, build_paper_agents
 from evoforest_arch.metrics import DEFAULT_SCORER, MAE_SCORER, RMSE_SCORER, FoldStrategy, TaskScorer, scorer_from_name
 from evoforest_arch.mutations import GlobalSpec, MutationDocument, MutationEngine, MutationSpec, NodeSpec, RemoveSpec
 from evoforest_arch.production import ProductionConfig, ProductionEvolutionRunner, export_best_graph, inspect_run, recheck_run
@@ -36,7 +36,6 @@ __all__ = [
     "ClaudeLLMClient",
     "EvalContext",
     "EvaluationResult",
-    "EngineerAgent",
     "EvolutionLoop",
     "FeatureBlock",
     "Graph",
@@ -63,6 +62,7 @@ __all__ = [
     "NodeAlternative",
     "NodeSpec",
     "OpenAILLMClient",
+    "PaperAgentBundle",
     "PromptBuilder",
     "PromptRecord",
     "ProductionConfig",
@@ -72,18 +72,18 @@ __all__ = [
     "ResidualWeightRule",
     "RidgeEvaluator",
     "RMSE_SCORER",
-    "ScientistAgent",
     "SourceExecutionError",
     "SourceSandboxPolicy",
     "SourceTimeoutError",
     "SUPPORTED_LLM_PROVIDERS",
-    "StaticLLMClient",
     "TaskContextSummary",
     "TaskScorer",
     "TaskSchema",
     "TensorSummary",
     "TorchLBFGSRefiner",
     "build_task_context",
+    "build_gemini_paper_agents",
+    "build_paper_agents",
     "build_seed_graph",
     "build_source_alternative",
     "build_structural_break_seed_graph",

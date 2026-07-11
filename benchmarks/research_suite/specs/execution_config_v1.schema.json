@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://evoforest.local/schemas/execution-config-v1.json",
+  "title": "EvoForest confirmatory execution configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "version", "schema_version", "llm", "aide"],
+  "properties": {
+    "name": {"type": "string", "minLength": 1},
+    "version": {"type": "integer", "minimum": 1},
+    "schema_version": {"const": 1},
+    "fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "llm": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "model_identifier", "temperature", "call_budget", "token_budget", "input_price_usd_per_million_tokens", "output_price_usd_per_million_tokens", "credential_env_names"],
+      "properties": {
+        "provider": {"type": "string", "minLength": 1},
+        "model_identifier": {"type": "string", "minLength": 1},
+        "temperature": {"type": "number", "minimum": 0, "maximum": 2},
+        "call_budget": {"type": "integer", "minimum": 1},
+        "token_budget": {"type": "integer", "minimum": 1},
+        "input_price_usd_per_million_tokens": {"type": "number", "minimum": 0},
+        "output_price_usd_per_million_tokens": {"type": "number", "minimum": 0},
+        "credential_env_names": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"}}
+      }
+    },
+    "aide": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fit_command", "predict_command", "timeout_seconds", "credential_env_names"],
+      "properties": {
+        "fit_command": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        "predict_command": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        "timeout_seconds": {"type": "number", "exclusiveMinimum": 0},
+        "credential_env_names": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"}}
+      }
+    }
+  }
+}

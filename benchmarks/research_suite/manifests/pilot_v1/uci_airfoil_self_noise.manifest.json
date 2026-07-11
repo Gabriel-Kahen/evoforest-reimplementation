@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "dataset_id": "pilot-v1/uci_airfoil_self_noise",
+  "data": "uci_airfoil_self_noise.npz",
+  "feature_key": "X",
+  "target_key": "y",
+  "feature_names": [
+    "x0",
+    "x1",
+    "x2",
+    "x3",
+    "x4"
+  ],
+  "split_file": "uci_airfoil_self_noise.splits.json",
+  "sha256": "d28793c6d65958982ece6110fb6d85a65fc89840b521c03e03e8796242aa886b",
+  "metadata": {
+    "study_role": "external_real_regression_pilot",
+    "display_name": "Airfoil Self-Noise",
+    "source_repository": "UCI Machine Learning Repository",
+    "source_dataset_id": 291,
+    "source_url": "https://archive.ics.uci.edu/dataset/291/airfoil+self+noise",
+    "source_data_url": "https://archive.ics.uci.edu/static/public/291/data.csv",
+    "source_doi": "10.24432/C5VW2C",
+    "source_last_updated": "2024-03-29",
+    "source_retrieved_utc": "2026-07-10",
+    "source_csv_sha256": "0beffa51c5b1493960d046c7d512a67d06a7884df6db599408087ee2fc2fc18a",
+    "derived_npz_sha256": "d28793c6d65958982ece6110fb6d85a65fc89840b521c03e03e8796242aa886b",
+    "split_file_sha256": "892749ff4984abbd5f2d7687cccbce06e2b5c6810653fb68a94b5cd865c59ca7",
+    "license": "CC BY 4.0",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "license_evidence": "UCI dataset repository page license field at retrieval date",
+    "attribution": "Airfoil Self-Noise, UCI Machine Learning Repository, DOI 10.24432/C5VW2C",
+    "target": "scaled-sound-pressure",
+    "original_feature_names": [
+      "frequency",
+      "attack-angle",
+      "chord-length",
+      "free-stream-velocity",
+      "suction-side-displacement-thickness"
+    ],
+    "excluded_columns": [],
+    "agent_feature_names_blinded": true,
+    "rows": 1503,
+    "features": 5,
+    "unique_feature_vectors": 1503,
+    "split_counts": {
+      "train": 902,
+      "validation": 300,
+      "test": 301
+    },
+    "missing_values": false,
+    "preprocessing": "CSV numeric parse to float64 only; no scaling, imputation, filtering, or row deletion"
+  }
+}

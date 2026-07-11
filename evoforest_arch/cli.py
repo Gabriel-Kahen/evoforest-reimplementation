@@ -11,6 +11,7 @@ from evoforest_arch.evaluator import RidgeEvaluator
 from evoforest_arch.evolution import EvolutionLoop
 from evoforest_arch.llm import (
     DEFAULT_ISLAND_TEMPERATURES,
+    GeminiLLMClient,
     LLMEngineerAgent,
     LLMMemorandumAgent,
     LLMScientistAgent,
@@ -140,8 +141,8 @@ def main(argv: list[str] | None = None) -> int:
     demo.add_argument("--islands", type=int, default=1)
     demo.add_argument("--async-islands", action="store_true")
     demo.add_argument("--island-workers", type=int, default=None)
-    llm_provider_choices = ("none", "env", *SUPPORTED_LLM_PROVIDERS)
-    demo.add_argument("--llm-provider", choices=llm_provider_choices, default="none")
+    llm_provider_choices = ("env", *SUPPORTED_LLM_PROVIDERS)
+    demo.add_argument("--llm-provider", choices=llm_provider_choices, default="env")
     demo.add_argument("--env-file", type=pathlib.Path, default=pathlib.Path(".env"))
     demo.add_argument("--llm-scientist-temperature", type=float, default=0.35)
     demo.add_argument(
@@ -229,7 +230,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Comma-separated dedicated device slots for production islands, default cuda:0,cuda:1,cuda:2,cuda:3.",
     )
     evolve.add_argument("--migration-interval", type=int, default=None)
-    evolve.add_argument("--llm-provider", choices=llm_provider_choices, default="none")
+    evolve.add_argument("--llm-provider", choices=llm_provider_choices, default="env")
     evolve.add_argument("--env-file", type=pathlib.Path, default=pathlib.Path(".env"))
     evolve.add_argument("--llm-scientist-temperature", type=float, default=None)
     evolve.add_argument(
@@ -276,6 +277,10 @@ def main(argv: list[str] | None = None) -> int:
     recheck_parser.add_argument("--include-test", action="store_true", help="Explicitly consume and report the held-out test split.")
     recheck_parser.add_argument("--allow-source", action="store_true")
     recheck_parser.set_defaults(func=run_recheck)
+
+    llm_check = sub.add_parser("llm-check", help="Validate paper-style Gemini configuration without making an API call.")
+    llm_check.add_argument("--env-file", type=pathlib.Path, default=pathlib.Path(".env"))
+    llm_check.set_defaults(func=run_llm_check)
 
     args = parser.parse_args(argv)
     try:
@@ -423,12 +428,10 @@ def build_llm_agents(
     *,
     task_context: str = "",
     registry: PrimitiveRegistry | None = None,
-) -> tuple[LLMScientistAgent | None, LLMEngineerAgent | None, LLMMemorandumAgent | None]:
+) -> tuple[LLMScientistAgent, LLMEngineerAgent, LLMMemorandumAgent]:
     provider = resolve_llm_provider(args.llm_provider, args.env_file)
-    if provider is None:
-        return None, None, None
     client = llm_client_from_env(args.env_file)
-    source_allowed = _llm_source_allowed(args, provider is not None)
+    source_allowed = _llm_source_allowed(args, True)
     prompt_builder = PromptBuilder(task_context=task_context or PromptBuilder().task_context, registry=registry, allow_source=source_allowed)
     return (
         LLMScientistAgent(
@@ -464,14 +467,38 @@ def read_task_sources(paths: list[pathlib.Path]) -> tuple[tuple[str, str], ...]:
     return tuple((str(path), path.read_text(encoding="utf-8")) for path in paths)
 
 
-def resolve_llm_provider(provider: str, env_file: pathlib.Path) -> str | None:
-    if provider == "none":
-        return None
+def resolve_llm_provider(provider: str, env_file: pathlib.Path) -> str:
     if provider == "env":
         return llm_provider_from_env(env_file, required=True)
     load_env_file(env_file)
     os.environ["EVOFOREST_LLM_PROVIDER"] = provider
     return provider
+
+
+def run_llm_check(args: argparse.Namespace) -> int:
+    provider = llm_provider_from_env(args.env_file, required=True)
+    if provider != "gemini":
+        raise ValueError("The prepared paper-style setup expects EVOFOREST_LLM_PROVIDER=gemini.")
+    client = llm_client_from_env(args.env_file)
+    if not isinstance(client, GeminiLLMClient):
+        raise ValueError("Gemini configuration did not construct a Gemini client.")
+    budget = client.budget.status() if client.budget is not None else {"enabled": False}
+    print(
+        json.dumps(
+            {
+                "ready": True,
+                "provider": "gemini",
+                "model": client.model,
+                "credential": "present (redacted)",
+                "pipeline": ["LLM scientist", "LLM engineer", "LLM memorandum"],
+                "budget": budget,
+                "api_called": False,
+            },
+            indent=2,
+        ),
+        flush=True,
+    )
+    return 0
 
 
 def run_inspect(args: argparse.Namespace) -> int:

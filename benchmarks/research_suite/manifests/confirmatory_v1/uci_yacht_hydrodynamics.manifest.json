@@ -1,0 +1,73 @@
+{
+  "version": 1,
+  "dataset_id": "confirmatory-v1/uci_yacht_hydrodynamics",
+  "data": "uci_yacht_hydrodynamics.npz",
+  "feature_key": "X",
+  "target_key": "y",
+  "feature_names": [
+    "x0",
+    "x1",
+    "x2",
+    "x3",
+    "x4",
+    "x5"
+  ],
+  "split_file": "uci_yacht_hydrodynamics.splits.json",
+  "sha256": "fef80eb2541c793a972a56b2e1e809e21f2c680dbd14392fca699d89622646a7",
+  "metadata": {
+    "study_role": "external_real_regression_confirmatory",
+    "display_name": "Yacht Hydrodynamics",
+    "source_repository": "UCI Machine Learning Repository",
+    "source_dataset_id": 243,
+    "source_url": "https://archive.ics.uci.edu/dataset/243/yacht+hydrodynamics",
+    "source_download_url": "https://archive.ics.uci.edu/static/public/243/yacht+hydrodynamics.zip",
+    "source_doi": "10.24432/C5XG7R",
+    "source_retrieved_utc": "2026-07-10",
+    "source_download_sha256": "aa52b68f88c4bb552187a53ef4c5753fa178f6a36035a3771c5bc04e078487ac",
+    "source_archive_member_sha256": "00dfecc0fc01ddd4c90b558a3ac11b246df8ebcfea130724223475a9a67f0ea1",
+    "derived_npz_sha256": "fef80eb2541c793a972a56b2e1e809e21f2c680dbd14392fca699d89622646a7",
+    "split_file_sha256": "1f4fd4920d86e7596babe6030d4cd9a8f115bdb085618525d87d1a1dd1539940",
+    "license": "CC BY 4.0",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "license_evidence": "UCI dataset repository page license field at retrieval date",
+    "attribution": "Yacht Hydrodynamics, UCI Machine Learning Repository, DOI 10.24432/C5XG7R",
+    "target": "residuary_resistance",
+    "original_feature_names": [
+      "longitudinal_position",
+      "prismatic_coefficient",
+      "length_displacement_ratio",
+      "beam_draught_ratio",
+      "length_beam_ratio",
+      "froude_number"
+    ],
+    "encoded_feature_names": [
+      "longitudinal_position",
+      "prismatic_coefficient",
+      "length_displacement_ratio",
+      "beam_draught_ratio",
+      "length_beam_ratio",
+      "froude_number"
+    ],
+    "excluded_columns": [],
+    "categorical_encoding_fit_on_training_only": false,
+    "encoding_details": {
+      "categorical_encoding": {}
+    },
+    "agent_feature_names_blinded": true,
+    "rows": 308,
+    "features": 6,
+    "raw_feature_count": 6,
+    "split_counts": {
+      "train": 185,
+      "validation": 61,
+      "test": 62
+    },
+    "group_count": 308,
+    "split_method": "seeded exact-feature-group random 60/20/20",
+    "missing_values_after_derivation": false,
+    "source_filter": null,
+    "date_range": null,
+    "preprocessing": "documented column exclusion/filtering and training-only categorical one-hot encoding; no scaling, imputation, target transformation, outlier filtering, or row deletion beyond the preregistered white-wine filter",
+    "source_last_updated": "Thu Jan 03 2013"
+  }
+}

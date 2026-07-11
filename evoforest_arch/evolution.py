@@ -10,11 +10,11 @@ import pathlib
 
 import numpy as np
 
-from evoforest_arch.agents import EngineerAgent, ScientistAgent
 from evoforest_arch.evaluator import EvaluationResult, RidgeEvaluator
 from evoforest_arch.feedback import feedback_summary, toon_report
 from evoforest_arch.graph import Graph
-from evoforest_arch.mutations import MutationDocument, MutationEngine, MutationSpec
+from evoforest_arch.llm import LLMEngineerAgent, LLMMemorandumAgent, LLMScientistAgent
+from evoforest_arch.mutations import MutationDocument, MutationEngine
 from evoforest_arch.task_context import build_task_context
 
 
@@ -91,11 +91,12 @@ class EvolutionLoop:
     def __init__(
         self,
         graph: Graph,
+        *,
         evaluator: RidgeEvaluator | None = None,
         mutation_engine: MutationEngine | None = None,
-        scientist: ScientistAgent | None = None,
-        engineer: EngineerAgent | None = None,
-        memorandum_agent: object | None = None,
+        scientist: LLMScientistAgent,
+        engineer: LLMEngineerAgent,
+        memorandum_agent: LLMMemorandumAgent,
         task_context: str = "",
         task_sources: tuple[tuple[str, str], ...] = (),
         seed: int = 0,
@@ -104,8 +105,12 @@ class EvolutionLoop:
         self.graph = graph
         self.evaluator = evaluator or RidgeEvaluator(seed=seed)
         self.mutation_engine = mutation_engine or MutationEngine()
-        self.scientist = scientist or ScientistAgent()
-        self.engineer = engineer or EngineerAgent()
+        if scientist is None or engineer is None or memorandum_agent is None:
+            raise ValueError(
+                "Paper-style evolution requires an LLM scientist, LLM engineer, and LLM memorandum agent."
+            )
+        self.scientist = scientist
+        self.engineer = engineer
         self.memorandum_agent = memorandum_agent
         self.task_context = task_context
         self.task_sources = task_sources
@@ -645,17 +650,6 @@ class EvolutionLoop:
         self._write_memorandum(output_dir, global_best_result, global_history, global_errors)
         return global_best_result
 
-    def _propose(self, step: int) -> MutationSpec:
-        template = self.engineer.templates[0]
-        return MutationSpec(
-            kind=template.kind,
-            target_node=template.target_node,
-            primitive=template.primitive,
-            alternative_id=f"{template.alternative_id}_{step}",
-            parents=template.parents,
-            description=template.description,
-        )
-
     def _propose_document(
         self,
         graph: Graph,
@@ -951,133 +945,18 @@ class EvolutionLoop:
         step: int = 0,
         island: int | None = None,
     ) -> None:
-        if self.memorandum_agent is not None:
-            update = getattr(self.memorandum_agent, "update", None)
-            if not callable(update):
-                raise TypeError("memorandum_agent must provide an update(...) method.")
-            previous = self._read_memorandum(output_dir)
-            text = update(
-                result,
-                previous_memorandum=previous,
-                history=history or [],
-                error_log=error_log or [],
-                step=step,
-                island=island,
-            )
-            output_dir.mkdir(parents=True, exist_ok=True)
-            (output_dir / "memorandum.md").write_text(text if text.endswith("\n") else text + "\n", encoding="utf-8")
-            self._write_prompt_records(output_dir, step, island)
-            return
-        text = self._deterministic_memorandum_text(result, history, error_log)
+        previous = self._read_memorandum(output_dir)
+        text = self.memorandum_agent.update(
+            result,
+            previous_memorandum=previous,
+            history=history or [],
+            error_log=error_log or [],
+            step=step,
+            island=island,
+        )
         output_dir.mkdir(parents=True, exist_ok=True)
-        (output_dir / "memorandum.md").write_text(text, encoding="utf-8")
-
-    @staticmethod
-    def _deterministic_memorandum_text(
-        result: EvaluationResult,
-        history: list[str] | None = None,
-        error_log: list[str] | None = None,
-    ) -> str:
-        feedback = feedback_summary(result)
-        lines = [
-            "# Evolution Memorandum",
-            "",
-            "[OUTCOME HISTORY]",
-        ]
-        lines.extend((history or [])[-8:] or ["- No mutation outcomes recorded yet."])
-        lines.extend(["", "[STATE]"])
-        lines.extend(EvolutionLoop._memorandum_state_lines(result, feedback))
-        lines.extend(["", "[WHAT WORKS]"])
-        lines.extend(EvolutionLoop._memorandum_works(history or [], feedback))
-        lines.extend(["", "[WHAT FAILED]"])
-        lines.extend(EvolutionLoop._memorandum_failed(history or [], feedback))
-        lines.extend(["", "[ERROR LOG]"])
-        lines.extend((error_log or [])[-8:] or ["- No runtime errors recorded."])
-        return "\n".join(lines) + "\n"
-
-    @staticmethod
-    def _memorandum_state_lines(result: EvaluationResult, feedback: dict[str, object]) -> list[str]:
-        scoring = feedback.get("scoring_context", {})
-        search = feedback.get("configuration_search", {})
-        cache = search.get("cache", {}) if isinstance(search, dict) else {}
-        features = feedback.get("top_features", [])
-        subnodes = feedback.get("top_subnodes", [])
-        alternatives = feedback.get("top_alternatives", [])
-        lines = [
-            f"- Best score: {result.score:.6f}; config={result.config}.",
-        ]
-        if isinstance(search, dict):
-            lines.append(
-                "- Configuration search: "
-                f"{int(search.get('evaluated', 1))}/{int(search.get('total', 1))} evaluated, "
-                f"capped={bool(search.get('capped', False))}."
-            )
-        if isinstance(scoring, dict):
-            lines.append(
-                "- Representation: "
-                f"effective_rank={float(scoring.get('effective_rank', 0.0)):.4f}, "
-                f"mean_max_corr={float(scoring.get('mean_max_corr', 0.0)):.4f}, "
-                f"global_ridge_score={float(scoring.get('global_ridge_score', 0.0)):.6f}."
-            )
-        if isinstance(cache, dict):
-            lines.append(
-                "- Cache: "
-                f"hits={int(cache.get('hits', 0))}, entries={int(cache.get('entries', 0))}, "
-                f"key={cache.get('key', 'unknown')}."
-            )
-        if isinstance(features, list) and features:
-            top = features[0]
-            if isinstance(top, dict):
-                lines.append(
-                    "- Dominant feature: "
-                    f"{top.get('name', '')} imp={float(top.get('importance', 0.0)):.4f}, "
-                    f"target_align={float(top.get('target_alignment', 0.0)):.4f}, "
-                    f"resid={float(top.get('residual_corr', 0.0)):.4f}."
-                )
-        if isinstance(subnodes, list) and subnodes:
-            top = subnodes[0]
-            if isinstance(top, dict):
-                lines.append(
-                    "- Dominant subnode: "
-                    f"{top.get('name', '')} imp={float(top.get('importance', 0.0)):.4f}, "
-                    f"features={int(top.get('feature_count', 0))}."
-                )
-        if isinstance(alternatives, list) and alternatives:
-            top = alternatives[0]
-            if isinstance(top, dict):
-                lines.append(
-                    "- Dominant alternative: "
-                    f"{top.get('name', '')} age={int(top.get('age', 0))}, "
-                    f"participations={int(top.get('participation_count', 0))}."
-                )
-        return lines
-
-    @staticmethod
-    def _memorandum_works(history: list[str], feedback: dict[str, object]) -> list[str]:
-        lines = [line for line in history if "ACCEPTED" in line or "SALVAGED" in line][-4:]
-        subnodes = feedback.get("top_subnodes", [])
-        subnode_rows = subnodes[:3] if isinstance(subnodes, list) else []
-        for row in subnode_rows:
-            if isinstance(row, dict) and float(row.get("importance", 0.0)) > 0.0:
-                lines.append(
-                    f"- Productive substructure: {row.get('name', '')} "
-                    f"aggregates imp={float(row.get('importance', 0.0)):.4f}."
-                )
-        return lines or ["- No accepted or salvaged mutation patterns recorded yet."]
-
-    @staticmethod
-    def _memorandum_failed(history: list[str], feedback: dict[str, object]) -> list[str]:
-        lines = [line for line in history if "REJECTED" in line or "FAILED" in line][-4:]
-        risky = feedback.get("risky_features", [])
-        risky_rows = risky[:4] if isinstance(risky, list) else []
-        for row in risky_rows:
-            if isinstance(row, dict):
-                lines.append(
-                    f"- Risky feature: {row.get('name', '')} "
-                    f"redundancy={float(row.get('redundancy', 0.0)):.4f}, "
-                    f"stability={float(row.get('weight_stability', 0.0)):.4f}."
-                )
-        return lines or ["- No rejected, failed, redundant, or unstable patterns recorded yet."]
+        (output_dir / "memorandum.md").write_text(text if text.endswith("\n") else text + "\n", encoding="utf-8")
+        self._write_prompt_records(output_dir, step, island)
 
     @staticmethod
     def _write_mutation_document(

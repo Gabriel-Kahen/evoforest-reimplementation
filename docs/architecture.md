@@ -43,12 +43,11 @@ the following modules.
   - Search feedback summaries and compact TOON-like diagnostic tables with
     scoring context, feature redundancy, residual signals, subnode aggregates,
     linear contribution summaries, and alternative-level history.
-- `evoforest_arch.agents`
-  - Deterministic scientist and engineer roles that turn diagnostics into
-    structured mutation documents.
+- `evoforest_arch.hypotheses`
+  - Structured hypothesis records emitted by the LLM scientist.
 - `evoforest_arch.llm`
   - Paper-style global rules, scientist and engineer prompt builders, prompt
-    records, deterministic test clients, and opt-in OpenAI, Claude, and Gemini
+    records, test clients, and OpenAI, Claude, and Gemini
     clients.
 - `evoforest_arch.task_context`
   - Deterministic cached task-context summaries with tensor inventory, target
@@ -152,12 +151,11 @@ the following modules.
   automatically. Callable and fitting source alternatives cross the subprocess
   boundary as declarative specs and are materialized into safe runtime objects in
   the parent process. LLM-backed engineer prompts are lambda-first and also
-  accept the paper's node-keyed YAML form. The default agents are deterministic,
-  while optional LLM-backed agents use the same document contract and persist
-  their prompts and responses.
-  LLM-backed agents are fail-fast: request failures, unparseable hypotheses, invalid
+  accept the paper's node-keyed YAML form. Required LLM-backed agents use the same
+  document contract and persist their prompts and responses.
+  The agents are fail-fast: request failures, unparseable hypotheses, invalid
   mutation documents, malformed memorandum updates, and missing provider
-  configuration raise errors instead of falling back to deterministic agents.
+  configuration raise errors without substituting another proposal mechanism.
   In island mode, LLM scientist calls default to the paper's fixed schedule
   `(0.35, 0.5, 0.6, 0.75)` by island index, and LLM engineer calls default to
   zero temperature for mutation synthesis.
@@ -230,9 +228,8 @@ Known approximations:
   alternatives are rerun for deterministic validation inside the sandbox, but this
   is still a local execution boundary rather than a hardened container for hostile
   code.
-- The LLM scientist/engineer/memorandum loop is represented by deterministic local
-  agents by default, plus optional OpenAI, Claude, or Gemini LLM-backed agents
-  configured from environment variables or a `.env` file. Source-backed
+- The scientist/engineer/memorandum loop requires configured OpenAI, Claude, or
+  Gemini LLM-backed agents from environment variables or a `.env` file. Source-backed
   alternatives recreate the paper's lambda-style graph edits with subprocess
   timeout/resource validation, but this does not include the authors' private
   model stack, exact prompt corpus, production sandbox, or distributed GPU

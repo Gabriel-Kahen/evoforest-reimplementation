@@ -14,7 +14,6 @@ from typing import Any
 
 import numpy as np
 
-from evoforest_arch.agents import EngineerAgent, ScientistAgent
 from evoforest_arch.datasets import LoadedDataset, load_dataset_bundle
 from evoforest_arch.evaluator import EvaluationResult, RidgeEvaluator
 from evoforest_arch.evolution import CandidateOutcome, EvolutionLoop
@@ -524,8 +523,8 @@ class ProductionIslandWorker:
         device: str,
         evaluator_config: dict[str, Any],
         allow_source_mutations: bool,
-        scientist: ScientistAgent | None,
-        engineer: EngineerAgent | None,
+        scientist: LLMScientistAgent | None,
+        engineer: LLMEngineerAgent | None,
         memorandum_agent: object | None,
         task_context: str,
         task_sources: tuple[tuple[str, str], ...],
@@ -1185,8 +1184,8 @@ def _initialize_process_island_worker(
     device: str,
     evaluator_config: dict[str, Any],
     allow_source_mutations: bool,
-    scientist: ScientistAgent | None,
-    engineer: EngineerAgent | None,
+    scientist: LLMScientistAgent | None,
+    engineer: LLMEngineerAgent | None,
     memorandum_agent: object | None,
     task_context: str,
     task_sources: tuple[tuple[str, str], ...],
@@ -1334,8 +1333,8 @@ class ProductionIslandProcessActor:
         device: str,
         evaluator_config: dict[str, Any],
         allow_source_mutations: bool,
-        scientist: ScientistAgent | None,
-        engineer: EngineerAgent | None,
+        scientist: LLMScientistAgent | None,
+        engineer: LLMEngineerAgent | None,
         memorandum_agent: object | None,
         task_context: str,
         task_sources: tuple[tuple[str, str], ...],
@@ -1456,9 +1455,9 @@ class ProductionEvolutionRunner:
         config: ProductionConfig,
         graph: Graph | None = None,
         *,
-        scientist: ScientistAgent | None = None,
-        engineer: EngineerAgent | None = None,
-        memorandum_agent: object | None = None,
+        scientist: LLMScientistAgent | None = None,
+        engineer: LLMEngineerAgent | None = None,
+        memorandum_agent: LLMMemorandumAgent | None = None,
         task_context: str = "",
         task_sources: tuple[tuple[str, str], ...] = (),
     ) -> None:
@@ -1476,6 +1475,10 @@ class ProductionEvolutionRunner:
             registry=PrimitiveRegistry.for_task(self.task_schema),
             allow_source=config.allow_source_mutations,
         )
+        if scientist is None or engineer is None or memorandum_agent is None:
+            raise ValueError(
+                "Paper-style production evolution requires an LLM scientist, LLM engineer, and LLM memorandum agent."
+            )
         self.scientist = scientist
         self.engineer = engineer
         self.memorandum_agent = memorandum_agent

@@ -72,23 +72,26 @@ evoforest-arch evolve --dataset synthetic-tabular --steps 4 --seed 17 --n-sample
 These are enough to test the workflow. They are not enough to claim a strong
 evolved model on a real benchmark.
 
-LLM-backed production evolution is opt-in and can be configured through `.env`:
+Production evolution requires the paper-style LLM pipeline. The prepared Gemini
+configuration is:
 
 ```dotenv
-EVOFOREST_LLM_PROVIDER=openai
-OPENAI_API_KEY=...
-EVOFOREST_LLM_MODEL=...
+EVOFOREST_LLM_PROVIDER=gemini
+GEMINI_API_KEY=...
+EVOFOREST_LLM_MODEL=gemini-3.1-flash-lite
+EVOFOREST_LLM_MAX_RETRIES=0
+EVOFOREST_LLM_TARGET_BUDGET_USD=5
+EVOFOREST_LLM_HARD_BUDGET_USD=20
+EVOFOREST_LLM_INPUT_PRICE_USD_PER_MILLION_TOKENS=0.25
+EVOFOREST_LLM_OUTPUT_PRICE_USD_PER_MILLION_TOKENS=1.50
 ```
 
-Use `EVOFOREST_LLM_PROVIDER=claude` with `ANTHROPIC_API_KEY`, or
-`EVOFOREST_LLM_PROVIDER=gemini` with `GEMINI_API_KEY`, to switch providers.
-
 ```bash
+evoforest-arch llm-check --env-file .env
 evoforest-arch evolve --steps 4 --llm-provider env --env-file .env --output runs/production-llm
 ```
 
-When LLM mode is enabled, provider configuration and LLM outputs are fail-fast.
-The runner does not fall back to deterministic mutation agents if the provider is
+Provider configuration and LLM outputs are fail-fast. The runner stops if the provider is
 missing, the HTTP request fails, or the returned mutation document is invalid.
 
 Production four-island mode is the default:

@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from typing import Callable
 
-from benchmarks import ablation_suite, conformance_report, runtime_scaling, search_dynamics, synthetic_suite
+from benchmarks import ablation_suite, conformance_report, runtime_scaling, synthetic_suite
 from benchmarks.common import markdown_table, output_argument, print_report_paths, quick_argument, report_scope, seed_argument, write_report
 
 
@@ -17,7 +17,6 @@ def build_report(output_dir: Path, seed: int = 17, quick: bool = False) -> dict[
         ("conformance_report", conformance_report.run, seed),
         ("synthetic_suite", synthetic_suite.run, seed + 6),
         ("ablation_suite", ablation_suite.run, seed + 12),
-        ("search_dynamics", search_dynamics.run, seed + 14),
         ("runtime_scaling", runtime_scaling.run, seed + 20),
     ]
     rows = []

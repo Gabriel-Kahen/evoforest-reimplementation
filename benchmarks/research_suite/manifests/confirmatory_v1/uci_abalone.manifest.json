@@ -1,0 +1,94 @@
+{
+  "version": 1,
+  "dataset_id": "confirmatory-v1/uci_abalone",
+  "data": "uci_abalone.npz",
+  "feature_key": "X",
+  "target_key": "y",
+  "feature_names": [
+    "x0",
+    "x1",
+    "x2",
+    "x3",
+    "x4",
+    "x5",
+    "x6",
+    "x7",
+    "x8",
+    "x9",
+    "x10"
+  ],
+  "split_file": "uci_abalone.splits.json",
+  "sha256": "9abce31adcab31984ff840116362fb2a82dd732eddfb41810e0beb1991ac28e2",
+  "metadata": {
+    "study_role": "external_real_regression_confirmatory",
+    "display_name": "Abalone",
+    "source_repository": "UCI Machine Learning Repository",
+    "source_dataset_id": 1,
+    "source_url": "https://archive.ics.uci.edu/dataset/1/abalone",
+    "source_download_url": "https://archive.ics.uci.edu/static/public/1/data.csv",
+    "source_doi": "10.24432/C55C7W",
+    "source_retrieved_utc": "2026-07-10",
+    "source_download_sha256": "25f3dc964447fcb3d68cf1048c04ed69d1474771c4fb34318e10778800a4342f",
+    "source_archive_member_sha256": null,
+    "derived_npz_sha256": "9abce31adcab31984ff840116362fb2a82dd732eddfb41810e0beb1991ac28e2",
+    "split_file_sha256": "826545e379c1093b8dad98f7dd0e12928c9f41a59a1413d9aebd6ef518948366",
+    "license": "CC BY 4.0",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "license_evidence": "UCI dataset repository page license field at retrieval date",
+    "attribution": "Abalone, UCI Machine Learning Repository, DOI 10.24432/C55C7W",
+    "target": "Rings",
+    "original_feature_names": [
+      "Sex",
+      "Length",
+      "Diameter",
+      "Height",
+      "Whole_weight",
+      "Shucked_weight",
+      "Viscera_weight",
+      "Shell_weight"
+    ],
+    "encoded_feature_names": [
+      "Sex=F",
+      "Sex=I",
+      "Sex=M",
+      "Sex=__UNKNOWN__",
+      "Length",
+      "Diameter",
+      "Height",
+      "Whole_weight",
+      "Shucked_weight",
+      "Viscera_weight",
+      "Shell_weight"
+    ],
+    "excluded_columns": [],
+    "categorical_encoding_fit_on_training_only": true,
+    "encoding_details": {
+      "categorical_encoding": {
+        "Sex": {
+          "training_categories": [
+            "F",
+            "I",
+            "M"
+          ],
+          "unknown_column": "Sex=__UNKNOWN__"
+        }
+      }
+    },
+    "agent_feature_names_blinded": true,
+    "rows": 4177,
+    "features": 11,
+    "raw_feature_count": 8,
+    "split_counts": {
+      "train": 2506,
+      "validation": 836,
+      "test": 835
+    },
+    "group_count": 4177,
+    "split_method": "seeded exact-feature-group random 60/20/20",
+    "missing_values_after_derivation": false,
+    "source_filter": null,
+    "date_range": null,
+    "preprocessing": "documented column exclusion/filtering and training-only categorical one-hot encoding; no scaling, imputation, target transformation, outlier filtering, or row deletion beyond the preregistered white-wine filter",
+    "source_last_updated": "Mon Aug 28 2023"
+  }
+}

@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "dataset_id": "pilot-v1/uci_concrete_compressive_strength",
+  "data": "uci_concrete_compressive_strength.npz",
+  "feature_key": "X",
+  "target_key": "y",
+  "feature_names": [
+    "x0",
+    "x1",
+    "x2",
+    "x3",
+    "x4",
+    "x5",
+    "x6",
+    "x7"
+  ],
+  "split_file": "uci_concrete_compressive_strength.splits.json",
+  "sha256": "224f4a7b0643f3514118bce655233f58ba2064d0e0eb416d2841a255acbf1302",
+  "metadata": {
+    "study_role": "external_real_regression_pilot",
+    "display_name": "Concrete Compressive Strength",
+    "source_repository": "UCI Machine Learning Repository",
+    "source_dataset_id": 165,
+    "source_url": "https://archive.ics.uci.edu/dataset/165/concrete+compressive+strength",
+    "source_data_url": "https://archive.ics.uci.edu/static/public/165/data.csv",
+    "source_doi": "10.24432/C5PK67",
+    "source_last_updated": "2024-02-11",
+    "source_retrieved_utc": "2026-07-10",
+    "source_csv_sha256": "8d4b15b6fc68cd932d745cbd663d5ceae66dd54422e99c1e4865f2936ab7e2af",
+    "derived_npz_sha256": "224f4a7b0643f3514118bce655233f58ba2064d0e0eb416d2841a255acbf1302",
+    "split_file_sha256": "f6957e21029f7656f0392a28de2f9927ecd2d5d1977537c6219d4e7e0f5188de",
+    "license": "CC BY 4.0",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "license_evidence": "UCI dataset repository page license field at retrieval date",
+    "attribution": "Concrete Compressive Strength, UCI Machine Learning Repository, DOI 10.24432/C5PK67",
+    "target": "Concrete compressive strength",
+    "original_feature_names": [
+      "Cement",
+      "Blast Furnace Slag",
+      "Fly Ash",
+      "Water",
+      "Superplasticizer",
+      "Coarse Aggregate",
+      "Fine Aggregate",
+      "Age"
+    ],
+    "excluded_columns": [],
+    "agent_feature_names_blinded": true,
+    "rows": 1030,
+    "features": 8,
+    "unique_feature_vectors": 992,
+    "split_counts": {
+      "train": 618,
+      "validation": 206,
+      "test": 206
+    },
+    "missing_values": false,
+    "preprocessing": "CSV numeric parse to float64 only; no scaling, imputation, filtering, or row deletion"
+  }
+}

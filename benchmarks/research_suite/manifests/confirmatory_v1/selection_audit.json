@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "registry": "../confirmatory_registry_v1.json",
+  "audited_on": "2026-07-10",
+  "selected_priorities": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12
+  ],
+  "ineligible_candidates": [],
+  "replacements": [],
+  "result": "The first four eligible candidates in each preregistered size stratum passed license and schema checks; no replacements were used.",
+  "source_notes": [
+    "UCI Wine Quality data.csv currently combines red and white records; the registry explicitly names the white task, so color == 'white' was frozen.",
+    "UCI legacy Yacht, QSAR Fish Toxicity, and Protein Structure datasets were read from their official static ZIP archives because no data.csv endpoint is advertised.",
+    "Bike Sharing and Appliances Energy use chronological splits; Parkinsons uses subject-group splits; all other tasks use exact-feature-group random splits."
+  ]
+}

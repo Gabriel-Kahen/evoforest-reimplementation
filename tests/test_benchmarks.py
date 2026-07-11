@@ -16,7 +16,6 @@ def test_benchmark_bundle_quick_reports(tmp_path) -> None:
         "conformance_report",
         "synthetic_suite",
         "ablation_suite",
-        "search_dynamics",
         "runtime_scaling",
     }
 

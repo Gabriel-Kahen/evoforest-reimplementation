@@ -1,0 +1,67 @@
+{
+  "version": 1,
+  "dataset_id": "confirmatory-v1/uci_combined_cycle_power_plant",
+  "data": "uci_combined_cycle_power_plant.npz",
+  "feature_key": "X",
+  "target_key": "y",
+  "feature_names": [
+    "x0",
+    "x1",
+    "x2",
+    "x3"
+  ],
+  "split_file": "uci_combined_cycle_power_plant.splits.json",
+  "sha256": "9e2b1c9699b46f8089888365fbb77a15fed5fd3c6a458db8f033e3932d00e7b6",
+  "metadata": {
+    "study_role": "external_real_regression_confirmatory",
+    "display_name": "Combined Cycle Power Plant",
+    "source_repository": "UCI Machine Learning Repository",
+    "source_dataset_id": 294,
+    "source_url": "https://archive.ics.uci.edu/dataset/294/combined+cycle+power+plant",
+    "source_download_url": "https://archive.ics.uci.edu/static/public/294/data.csv",
+    "source_doi": "10.24432/C5002N",
+    "source_retrieved_utc": "2026-07-10",
+    "source_download_sha256": "3c1fc11025f8424f8d95802d8b7086dffd3f73a552c6dcab3d973620986194b2",
+    "source_archive_member_sha256": null,
+    "derived_npz_sha256": "9e2b1c9699b46f8089888365fbb77a15fed5fd3c6a458db8f033e3932d00e7b6",
+    "split_file_sha256": "fd0841539bd9cddf40726953e0403abfdb71df2c0bab96dd9e85984e1d2b9a0d",
+    "license": "CC BY 4.0",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "license_evidence": "UCI dataset repository page license field at retrieval date",
+    "attribution": "Combined Cycle Power Plant, UCI Machine Learning Repository, DOI 10.24432/C5002N",
+    "target": "PE",
+    "original_feature_names": [
+      "AT",
+      "V",
+      "AP",
+      "RH"
+    ],
+    "encoded_feature_names": [
+      "AT",
+      "V",
+      "AP",
+      "RH"
+    ],
+    "excluded_columns": [],
+    "categorical_encoding_fit_on_training_only": false,
+    "encoding_details": {
+      "categorical_encoding": {}
+    },
+    "agent_feature_names_blinded": true,
+    "rows": 9568,
+    "features": 4,
+    "raw_feature_count": 4,
+    "split_counts": {
+      "train": 5741,
+      "validation": 1913,
+      "test": 1914
+    },
+    "group_count": 9527,
+    "split_method": "seeded exact-feature-group random 60/20/20",
+    "missing_values_after_derivation": false,
+    "source_filter": null,
+    "date_range": null,
+    "preprocessing": "documented column exclusion/filtering and training-only categorical one-hot encoding; no scaling, imputation, target transformation, outlier filtering, or row deletion beyond the preregistered white-wine filter",
+    "source_last_updated": "Mon Mar 04 2024"
+  }
+}

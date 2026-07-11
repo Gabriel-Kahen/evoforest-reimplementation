@@ -1,0 +1,82 @@
+{
+  "fingerprint": "924a56ffccc3a5ebeaa2f5e575897c8aed5c164c6a396a6c9b38486416551232",
+  "spec": {
+    "data_seeds": [
+      1001,
+      1002,
+      1003,
+      1004,
+      1005,
+      1006,
+      1007,
+      1008
+    ],
+    "evolution_steps": 24,
+    "exclusion_rules": [
+      "task and seed inclusion is fixed before confirmatory results are inspected",
+      "exclude only corrupt data, protocol violations, or predeclared numerical failure",
+      "failed and budget-exhausted runs remain in reliability summaries",
+      "no method-specific task removal",
+      "test evaluation occurs once after graph and readout selection"
+    ],
+    "hypotheses": [
+      "paper-style LLM-guided EvoForest has lower validation AULC NRMSE than fixed and random feature baselines",
+      "EvoForest gains increase with shared motifs, gates, and distractor variables",
+      "EvoForest improves extrapolation relative to random features more than ordinary interpolation",
+      "related module transfer improves early AULC relative to scratch and unrelated transfer"
+    ],
+    "max_configurations": 64,
+    "methods": [
+      "raw_ridge",
+      "random_features_ridge",
+      "hist_gradient_boosting",
+      "extra_trees",
+      "feat",
+      "pysr",
+      "autofeat",
+      "llm_one_shot",
+      "llm_scalar_iterative",
+      "evoforest_paper_llm"
+    ],
+    "n_test": 512,
+    "n_train": 512,
+    "n_validation": 256,
+    "name": "evoforest-generalization-confirmatory",
+    "primary_metrics": [
+      "interpolation_nrmse",
+      "extrapolation_nrmse",
+      "validation_aulc_nrmse"
+    ],
+    "screening_finalists": 16,
+    "search_seeds": [
+      2001,
+      2002,
+      2003,
+      2004,
+      2005,
+      2006,
+      2007,
+      2008,
+      2009,
+      2010
+    ],
+    "secondary_metrics": [
+      "r2",
+      "active_variable_f1",
+      "motif_recall",
+      "wall_time_seconds",
+      "exact_evaluations",
+      "screening_evaluations",
+      "llm_tokens",
+      "failure_rate"
+    ],
+    "status": "confirmatory_locked",
+    "task_families": [
+      "shared_wave_gate",
+      "piecewise_rational",
+      "heteroscedastic_reuse",
+      "missing_sensor_composition"
+    ],
+    "version": 2
+  }
+}
